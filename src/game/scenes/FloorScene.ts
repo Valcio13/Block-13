@@ -15,12 +15,15 @@ export class FloorScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: { w: Phaser.Input.Keyboard.Key; a: Phaser.Input.Keyboard.Key; s: Phaser.Input.Keyboard.Key; d: Phaser.Input.Keyboard.Key };
+  private flashlightKey!: Phaser.Input.Keyboard.Key;
   private walls!: Phaser.Physics.Arcade.StaticGroup;
   private keySprite!: Phaser.GameObjects.Sprite;
   private stairsSprite!: Phaser.GameObjects.Sprite;
   private hasKey = false;
   private stairsUnlocked = false;
   private statusText!: Phaser.GameObjects.Text;
+  private flashlightOn = false;
+  private darkness!: Phaser.GameObjects.Graphics;
 
   constructor() {
     super({ key: 'FloorScene' });
@@ -34,6 +37,7 @@ export class FloorScene extends Phaser.Scene {
     // Reset per-floor state
     this.hasKey = false;
     this.stairsUnlocked = false;
+    this.flashlightOn = false;
   }
 
   create() {
@@ -85,6 +89,10 @@ export class FloorScene extends Phaser.Scene {
       s: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S),
       d: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
+    this.flashlightKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+
+    // Create darkness/lighting system
+    this.setupLighting();
 
     // Floor info with run state
     const dangerLevel = this.runState.curse;
@@ -113,26 +121,157 @@ export class FloorScene extends Phaser.Scene {
     }
 
     // Controls hint
-    this.add.text(16, this.cameras.main.height - 40, 'WASD / ARROW KEYS TO MOVE', {
+    this.add.text(16, this.cameras.main.height - 60, 'WASD / ARROWS - MOVE\nF - FLASHLIGHT', {
       fontFamily: 'monospace',
       fontSize: '12px',
       color: '#a5b6b5',
       backgroundColor: '#07090d',
       padding: { x: 8, y: 4 },
+      lineSpacing: 2,
     }).setScrollFactor(0).setDepth(100);
   }
 
+  update(time: number, delta: number) {
+    this.handlePlayerMovement();
+    this.handleFlashlight();
+    this.updateLighting();
+    this.drainBattery(delta);
+  }
+
+  private setupLighting() {
+    // Create darkness overlay
+    this.darkness = this.add.graphics();
+    this.darkness.setDepth(49);
+  }
+
+  private updateLighting() {
+    this.darkness.clear();
+
+    const playerX = this.player.x;
+    const playerY = this.player.y;
+
+    if (this.flashlightOn && this.runState.battery > 0) {
+      // Draw full darkness
+      this.darkness.fillStyle(0x000000, 0.90);
+      this.darkness.fillRect(0, 0, this.floorData.width * this.tileSize, this.floorData.height * this.tileSize);
+
+      // Create flashlight beam (layered circles for gradient effect)
+      const beamRadius = 140;
+      
+      // Outer glow
+      this.darkness.fillStyle(0x000000, -0.2); // Subtract blend
+      this.darkness.fillCircle(playerX, playerY, beamRadius);
+      
+      // Middle
+      this.darkness.fillStyle(0x000000, -0.3);
+      this.darkness.fillCircle(playerX, playerY, beamRadius * 0.7);
+      
+      // Core light
+      this.darkness.fillStyle(0x000000, -0.5);
+      this.darkness.fillCircle(playerX, playerY, beamRadius * 0.4);
+      
+    } else {
+      // Ambient darkness (no flashlight)
+      this.darkness.fillStyle(0x000000, 0.75);
+      this.darkness.fillRect(0, 0, this.floorData.width * this.tileSize, this.floorData.height * this.tileSize);
+
+      // Small ambient light around player
+      const ambientRadius = 60;
+      this.darkness.fillStyle(0x000000, -0.25);
+      this.darkness.fillCircle(playerX, playerY, ambientRadius);
+    }
+  }
+
+  private createCircleTexture(size: number, fillStyle: any): Phaser.GameObjects.Graphics {
+    const graphics = this.add.graphics();
+    graphics.fillStyle(0xffffff, 1);
+    graphics.fillCircle(size / 2, size / 2, size / 2);
+    return graphics;
+  }
+
+  private handleFlashlight() {
+    if (Phaser.Input.Keyboard.JustDown(this.flashlightKey)) {
+      if (this.runState.battery > 0) {
+        this.flashlightOn = !this.flashlightOn;
+        
+        // Play sound effect (placeholder)
+        if (this.flashlightOn) {
+          // Click sound
+        } else {
+          // Click sound
+        }
+      } else {
+        // Show no battery message
+        if (!this.time.now || this.time.now % 2000 < 100) {
+          this.showTemporaryMessage('NO BATTERY!', '#ff4444');
+        }
+      }
+    }
+  }
+
+  private drainBattery(delta: number) {
+    if (this.flashlightOn && this.runState.battery > 0) {
+      // Drain battery: ~1% per second (adjust based on delta)
+      const drainRate = 0.6 + (this.runState.curse * 0.02); // Faster drain with higher curse
+      this.runState.battery -= (drainRate * delta) / 1000;
+      
+      if (this.runState.battery <= 0) {
+        this.runState.battery = 0;
+        this.flashlightOn = false;
+        this.showTemporaryMessage('BATTERY DEPLETED!', '#ff4444');
+      }
+      
+      this.updateStatusText();
+    }
+  }
+
+  private showTemporaryMessage(text: string, color: string) {
+    const msg = this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 + 80,
+      text,
+      {
+        fontFamily: 'monospace',
+        fontSize: '14px',
+        color: color,
+        backgroundColor: '#000000',
+        padding: { x: 8, y: 6 },
+      }
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(200).setAlpha(0);
+
+    this.tweens.add({
+      targets: msg,
+      alpha: 1,
+      duration: 150,
+      onComplete: () => {
+        this.time.delayedCall(1200, () => {
+          this.tweens.add({
+            targets: msg,
+            alpha: 0,
+            duration: 200,
+            onComplete: () => msg.destroy(),
+          });
+        });
+      }
+    });
+  }
+
   private updateStatusText() {
+    const batteryColor = this.runState.battery > 50 ? '#70d4c6' : this.runState.battery > 20 ? '#ffd700' : '#ff4444';
+    const flashStatus = this.flashlightOn ? '■' : '□';
+    
     const lines = [
       `FLOOR ${this.runState.floor}/3`,
       `SCORE: ${this.runState.score}`,
-      `BATTERY: ${this.runState.battery}%`,
+      `BATTERY: ${Math.floor(this.runState.battery)}%`,
+      `LIGHT: ${flashStatus}`,
     ];
     this.statusText.setText(lines.join('\n'));
-  }
-
-  update() {
-    this.handlePlayerMovement();
+    
+    // Update color based on battery
+    if (this.runState.battery <= 20) {
+      this.statusText.setColor(batteryColor);
+    }
   }
 
   private drawFloor(tiles: boolean[][]) {
@@ -184,27 +323,6 @@ export class FloorScene extends Phaser.Scene {
       graphics.lineStyle(2, 0x4a5568, 1);
       graphics.strokeRect(posX + 6, posY + 4, this.tileSize - 12, this.tileSize - 8);
     }
-  }
-
-  private drawMarker(x: number, y: number, color: number, label: string) {
-    const posX = x * this.tileSize + this.tileSize / 2;
-    const posY = y * this.tileSize + this.tileSize / 2;
-
-    // Marker circle
-    const graphics = this.add.graphics();
-    graphics.fillStyle(color, 0.6);
-    graphics.fillCircle(posX, posY, 12);
-    graphics.lineStyle(2, color, 1);
-    graphics.strokeCircle(posX, posY, 12);
-
-    // Label
-    this.add.text(posX, posY - 24, label, {
-      fontFamily: 'monospace',
-      fontSize: '10px',
-      color: '#ffffff',
-      backgroundColor: '#000000',
-      padding: { x: 4, y: 2 },
-    }).setOrigin(0.5);
   }
 
   private createKey(x: number, y: number): Phaser.GameObjects.Sprite {
@@ -319,6 +437,65 @@ export class FloorScene extends Phaser.Scene {
     return stairsSprite;
   }
 
+  private createPlayer(x: number, y: number): Phaser.Physics.Arcade.Sprite {
+    const posX = x * this.tileSize + this.tileSize / 2;
+    const posY = y * this.tileSize + this.tileSize / 2;
+
+    // Create player sprite (simple rectangle placeholder)
+    const graphics = this.add.graphics();
+    graphics.fillStyle(0xd9f3ea, 1);
+    graphics.fillRect(-8, -12, 16, 24); // Rectangular body
+    graphics.fillStyle(0xe9f5f1, 1);
+    graphics.fillCircle(0, -8, 6); // Head
+    graphics.generateTexture('player', 20, 28);
+    graphics.destroy();
+
+    const player = this.physics.add.sprite(posX, posY, 'player');
+    player.setCollideWorldBounds(true);
+    player.setDepth(10);
+    
+    // Set smaller collision body
+    player.setSize(14, 14);
+    player.setOffset(3, 14);
+
+    return player;
+  }
+
+  private handlePlayerMovement() {
+    const speed = 160;
+    
+    // Reset velocity
+    this.player.setVelocity(0);
+
+    // Check WASD and Arrow keys
+    const left = this.cursors.left.isDown || this.wasd.a.isDown;
+    const right = this.cursors.right.isDown || this.wasd.d.isDown;
+    const up = this.cursors.up.isDown || this.wasd.w.isDown;
+    const down = this.cursors.down.isDown || this.wasd.s.isDown;
+
+    // Horizontal movement
+    if (left) {
+      this.player.setVelocityX(-speed);
+    } else if (right) {
+      this.player.setVelocityX(speed);
+    }
+
+    // Vertical movement
+    if (up) {
+      this.player.setVelocityY(-speed);
+    } else if (down) {
+      this.player.setVelocityY(speed);
+    }
+
+    // Normalize diagonal movement
+    if ((left || right) && (up || down)) {
+      this.player.setVelocity(
+        this.player.body!.velocity.x * 0.707,
+        this.player.body!.velocity.y * 0.707
+      );
+    }
+  }
+
   private collectKey(
     player: Phaser.Physics.Arcade.Body | Phaser.Physics.Arcade.StaticBody | Phaser.Tilemaps.Tile | Phaser.Types.Physics.Arcade.GameObjectWithBody,
     key: Phaser.Physics.Arcade.Body | Phaser.Physics.Arcade.StaticBody | Phaser.Tilemaps.Tile | Phaser.Types.Physics.Arcade.GameObjectWithBody
@@ -398,35 +575,7 @@ export class FloorScene extends Phaser.Scene {
     if (!this.stairsUnlocked) {
       // Show locked message (throttled to avoid spam)
       if (!this.time.now || this.time.now % 1000 < 100) {
-        const lockedText = this.add.text(
-          this.cameras.main.width / 2,
-          this.cameras.main.height / 2,
-          'STAIRS LOCKED\nFIND THE KEY',
-          {
-            fontFamily: 'monospace',
-            fontSize: '14px',
-            color: '#ff4444',
-            backgroundColor: '#000000',
-            padding: { x: 8, y: 6 },
-            align: 'center',
-          }
-        ).setOrigin(0.5).setScrollFactor(0).setDepth(200).setAlpha(0);
-
-        this.tweens.add({
-          targets: lockedText,
-          alpha: 1,
-          duration: 150,
-          onComplete: () => {
-            this.time.delayedCall(1000, () => {
-              this.tweens.add({
-                targets: lockedText,
-                alpha: 0,
-                duration: 200,
-                onComplete: () => lockedText.destroy(),
-              });
-            });
-          }
-        });
+        this.showTemporaryMessage('STAIRS LOCKED - FIND THE KEY', '#ff4444');
       }
       return;
     }
@@ -531,64 +680,5 @@ export class FloorScene extends Phaser.Scene {
       align: 'center',
       lineSpacing: 6,
     }).setOrigin(0.5);
-  }
-
-  private createPlayer(x: number, y: number): Phaser.Physics.Arcade.Sprite {
-    const posX = x * this.tileSize + this.tileSize / 2;
-    const posY = y * this.tileSize + this.tileSize / 2;
-
-    // Create player sprite (simple rectangle placeholder)
-    const graphics = this.add.graphics();
-    graphics.fillStyle(0xd9f3ea, 1);
-    graphics.fillRect(-8, -12, 16, 24); // Rectangular body
-    graphics.fillStyle(0xe9f5f1, 1);
-    graphics.fillCircle(0, -8, 6); // Head
-    graphics.generateTexture('player', 20, 28);
-    graphics.destroy();
-
-    const player = this.physics.add.sprite(posX, posY, 'player');
-    player.setCollideWorldBounds(true);
-    player.setDepth(10);
-    
-    // Set smaller collision body
-    player.setSize(14, 14);
-    player.setOffset(3, 14);
-
-    return player;
-  }
-
-  private handlePlayerMovement() {
-    const speed = 160;
-    
-    // Reset velocity
-    this.player.setVelocity(0);
-
-    // Check WASD and Arrow keys
-    const left = this.cursors.left.isDown || this.wasd.a.isDown;
-    const right = this.cursors.right.isDown || this.wasd.d.isDown;
-    const up = this.cursors.up.isDown || this.wasd.w.isDown;
-    const down = this.cursors.down.isDown || this.wasd.s.isDown;
-
-    // Horizontal movement
-    if (left) {
-      this.player.setVelocityX(-speed);
-    } else if (right) {
-      this.player.setVelocityX(speed);
-    }
-
-    // Vertical movement
-    if (up) {
-      this.player.setVelocityY(-speed);
-    } else if (down) {
-      this.player.setVelocityY(speed);
-    }
-
-    // Normalize diagonal movement
-    if ((left || right) && (up || down)) {
-      this.player.setVelocity(
-        this.player.body!.velocity.x * 0.707,
-        this.player.body!.velocity.y * 0.707
-      );
-    }
   }
 }
