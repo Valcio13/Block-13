@@ -13,6 +13,10 @@ No transactions occur during a gameplay session.
 ## Project layout
 
 - `src/` — React shell and Phaser game client
+  - `game/` — Phaser game engine integration
+    - `scenes/` — Game scenes (Boot, Floor)
+    - `config.ts` — Phaser configuration
+  - `core/` — Game logic modules (RNG, floor generation, run state)
 - `contracts/` — Solidity run registry and Hemi integration adapters
 - `docs/` — game and technical design notes
 
@@ -25,4 +29,12 @@ npm run dev
 
 ## Current scope
 
-The initial vertical slice is a playable first floor with seeded room generation, a key-and-exit objective, flashlight pressure, one stalker, and deterministic jump-scare triggers.
+The game now features:
+- ✅ Phaser game engine integration with React
+- ✅ BootScene with loading progression
+- ✅ FloorScene with procedural floor generation
+- ✅ Player movement with arrow keys
+- ✅ Seeded floor layouts with walls/walkable tiles
+- ✅ Key and exit markers on the map
+
+Next steps: flashlight mechanics, battery system, stalker AI, and scare triggers.

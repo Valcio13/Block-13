@@ -30,3 +30,25 @@ button { cursor: pointer; padding: 1rem 1.3rem; border: 1px solid #70d4c6; backg
 button:hover:not(:disabled) { background: #1d4945; }
 button:disabled { cursor: wait; opacity: .7; }
 .run-rule { margin-top: 1.4rem; color: #71817c; }
+
+.game-active {
+  padding: 0;
+  background: #07090d;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#game-container {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#game-container canvas {
+  display: block;
+  margin: 0 auto;
+}
