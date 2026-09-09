@@ -1,0 +1,32 @@
+:root {
+  color: #e9e5d8;
+  background: #07090d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+
+button { font: inherit; }
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(37, 76, 83, 0.26), transparent 30rem),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 4px),
+    #07090d;
+}
+
+.title-card { max-width: 44rem; text-align: center; }
+.eyebrow, .run-rule { color: #70d4c6; font-size: .72rem; letter-spacing: .14em; }
+h1 { margin: .6rem 0 0; color: #d9f3ea; font-size: clamp(3rem, 11vw, 6.5rem); line-height: .86; letter-spacing: -.08em; }
+.subtitle { margin: .65rem 0 2rem; color: #a5b6b5; letter-spacing: .36em; font-size: clamp(.7rem, 2vw, 1rem); }
+.premise { max-width: 37rem; margin: 0 auto 2rem; color: #c2c7c3; line-height: 1.75; }
+button { cursor: pointer; padding: 1rem 1.3rem; border: 1px solid #70d4c6; background: #102322; color: #d9f3ea; letter-spacing: .12em; }
+button:hover:not(:disabled) { background: #1d4945; }
+button:disabled { cursor: wait; opacity: .7; }
+.run-rule { margin-top: 1.4rem; color: #71817c; }
