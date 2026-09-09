@@ -10,11 +10,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.102.8",
     "@vitejs/plugin-react": "^5.1.1",
     "phaser": "^3.90.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "viem": "^2.0.0"
+    "viem": "^2.21.4",
+    "wagmi": "^2.12.27"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
