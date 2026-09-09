@@ -29,12 +29,34 @@ npm run dev
 
 ## Current scope
 
-The game now features:
-- ✅ Phaser game engine integration with React
-- ✅ BootScene with loading progression
-- ✅ FloorScene with procedural floor generation
-- ✅ Player movement with arrow keys
-- ✅ Seeded floor layouts with walls/walkable tiles
-- ✅ Key and exit markers on the map
+The game now features a complete playable MVP:
 
-Next steps: flashlight mechanics, battery system, stalker AI, and scare triggers.
+### ✅ Core Systems
+- **Phaser game engine** integrated with React
+- **Procedural dungeon generation** with rooms and corridors
+- **Deterministic seeding** for reproducible runs
+- **Player movement** with WASD/arrow keys and wall collision
+- **Key collection** and locked stairwell mechanics
+- **Floor progression** (3 → 2 → 1) with persistent run state
+- **Scoring system** with escalating danger levels
+
+### ✅ Floor Generation
+- Room-based layouts (5-12 rooms per floor)
+- L-shaped corridors connecting all rooms
+- Door placement at room transitions
+- Guaranteed reachability of all objectives
+- Larger floors on deeper levels
+
+### ✅ Gameplay Loop
+1. Find the key (spawns in middle room)
+2. Collect key to unlock stairs
+3. Reach stairs to complete floor
+4. Descend to next floor with new layout
+5. Complete all 3 floors to win
+
+### 🚧 Next Steps
+- Flashlight mechanics with battery drain
+- Stalker entity with AI behavior
+- Jump-scare trigger system
+- Sound effects and atmosphere
+- Web3 integration (start run & submit score transactions)
