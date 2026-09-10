@@ -51,9 +51,21 @@ function GameApp() {
     }
   };
 
+  const beginLocalRun = () => {
+    setStatus('playing');
+    setError(null);
+    
+    // Generate local-only run with random seed
+    const localSeed = Math.floor(Math.random() * 0xFFFFFFFF);
+    const localRun = createRun(localSeed, undefined, undefined);
+    setRunState(localRun);
+  };
+
   const handleGameComplete = async (finalState: RunState) => {
-    if (!finalState.nonce || !address) {
-      setError('No blockchain run ID found');
+    // Check if this is a blockchain run
+    if (finalState.nonce === undefined || !address) {
+      // Local-only run completed
+      setStatus('complete');
       return;
     }
 
@@ -122,11 +134,17 @@ function GameApp() {
   }
 
   if (status === 'complete' || submitSuccess) {
+    const isBlockchainRun = runState?.nonce !== undefined;
+    
     return (
       <main className="app-shell">
         <section className="title-card">
           <h1>RUN COMPLETE!</h1>
-          <p className="premise">Score submitted to Hemi blockchain</p>
+          {isBlockchainRun ? (
+            <p className="premise">Score submitted to Hemi blockchain</p>
+          ) : (
+            <p className="premise">Local run completed (not recorded on-chain)</p>
+          )}
           {runState && (
             <div style={{ marginTop: '2rem', color: '#a5b6b5' }}>
               <p>Final Score: {runState.score}</p>
@@ -150,9 +168,26 @@ function GameApp() {
         </p>
 
         {!isConnected ? (
-          <button type="button" onClick={connectWallet} disabled={status === 'connecting'}>
-            {status === 'connecting' ? 'CONNECTING...' : 'CONNECT WALLET'}
-          </button>
+          <>
+            <button type="button" onClick={connectWallet} disabled={status === 'connecting'}>
+              {status === 'connecting' ? 'CONNECTING...' : 'CONNECT WALLET'}
+            </button>
+            <button 
+              type="button" 
+              onClick={beginLocalRun} 
+              style={{ 
+                marginTop: '1rem',
+                background: 'transparent',
+                border: '1px solid #4a5568',
+                color: '#a5b6b5'
+              }}
+            >
+              PLAY WITHOUT WALLET
+            </button>
+            <p className="run-rule" style={{ marginTop: '1rem', fontSize: '0.8rem', color: '#6b7280' }}>
+              Local mode: score will not be recorded on-chain
+            </p>
+          </>
         ) : !isCorrectNetwork ? (
           <button type="button" onClick={switchToHemi}>
             SWITCH TO HEMI TESTNET

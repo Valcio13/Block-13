@@ -3,6 +3,7 @@ export type RunState = {
   floor: number;
   battery: number;
   curse: number;
+  hp: number; // New health system
   score: number;
   status: 'playing' | 'won' | 'lost';
   floorsCompleted: number;
@@ -16,6 +17,7 @@ export const createRun = (seed: number, nonce?: number, address?: string): RunSt
   floor: 3,
   battery: 100,
   curse: 0,
+  hp: 100, // Start with full health
   score: 0,
   status: 'playing',
   floorsCompleted: 0,

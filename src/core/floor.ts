@@ -9,6 +9,7 @@ export type Floor = {
   exit: [number, number];
   rooms: Room[];
   doors: [number, number][];
+  searchables: Searchable[];
 };
 
 export type Room = {
@@ -18,24 +19,42 @@ export type Room = {
   height: number;
 };
 
+export type SearchableType = 'cabinet' | 'locker' | 'box' | 'drawer' | 'mimic';
+
+export type SearchResult = 
+  | { type: 'battery'; amount: number }
+  | { type: 'health'; amount: number }
+  | { type: 'collectible'; item: 'eth' | 'btc' | 'hemi'; score: number }
+  | { type: 'clue'; id: string }
+  | { type: 'nothing' }
+  | { type: 'mimic_reveal' }; // Special result for mimics
+
+export type Searchable = {
+  x: number;
+  y: number;
+  objectType: SearchableType;
+  result: SearchResult;
+  isMimic: boolean; // Track if this is a mimic
+};
+
 export function generateFloor(seed: number, floor: number): Floor {
   const rng = new SeededRng(seed ^ ((floor + 1) * 0x9e3779b9));
-  const width = 41;
-  const height = 31;
+  const width = 51; // Increased from 41
+  const height = 41; // Increased from 31
   
   // Initialize all tiles as walls
   const tiles = Array.from({ length: height }, () => 
     Array.from({ length: width }, () => false)
   );
 
-  // Generate rooms
+  // Generate more rooms with varied sizes
   const rooms: Room[] = [];
-  const numRooms = 6 + floor * 2; // More rooms on deeper floors (8, 10, 12...)
-  const attempts = numRooms * 10;
+  const numRooms = 12 + floor * 3; // More rooms: 15, 18, 21
+  const attempts = numRooms * 15;
 
   for (let i = 0; i < attempts && rooms.length < numRooms; i++) {
-    const roomWidth = 5 + rng.int(6); // 5-10
-    const roomHeight = 4 + rng.int(5); // 4-8
+    const roomWidth = 4 + rng.int(8); // 4-11 (more variety)
+    const roomHeight = 3 + rng.int(7); // 3-9 (more variety)
     const x = 2 + rng.int(width - roomWidth - 4);
     const y = 2 + rng.int(height - roomHeight - 4);
 
@@ -55,8 +74,10 @@ export function generateFloor(seed: number, floor: number): Floor {
     }
   }
 
-  // Connect rooms with corridors
+  // Connect rooms with more complex corridors
   const doors: [number, number][] = [];
+  
+  // Connect each room to next (main path)
   for (let i = 1; i < rooms.length; i++) {
     const roomA = rooms[i - 1];
     const roomB = rooms[i];
@@ -64,23 +85,218 @@ export function generateFloor(seed: number, floor: number): Floor {
     doors.push(...newDoors);
   }
 
-  // Ensure first and last rooms are connected with an extra corridor
-  if (rooms.length > 2) {
-    const extraDoors = connectRooms(tiles, rooms[0], rooms[rooms.length - 1], rng);
-    doors.push(...extraDoors);
+  // Add branching connections (creates loops and alternate routes)
+  const extraConnections = Math.floor(rooms.length / 3);
+  for (let i = 0; i < extraConnections; i++) {
+    const roomA = rooms[rng.int(rooms.length)];
+    const roomB = rooms[rng.int(rooms.length)];
+    if (roomA !== roomB) {
+      const newDoors = connectRooms(tiles, roomA, roomB, rng);
+      doors.push(...newDoors);
+    }
   }
 
-  // Place key, exit, and start in separate rooms
+  // Add some dead-end branches for exploration
+  const deadEnds = 3 + rng.int(3); // 3-5 dead ends
+  for (let i = 0; i < deadEnds; i++) {
+    const room = rooms[rng.int(rooms.length)];
+    createDeadEnd(tiles, room, rng, width, height);
+  }
+
+  // Place key, exit, and start with maximum distance
   const start = getCenterOfRoom(rooms[0]);
-  const key = getCenterOfRoom(rooms[Math.floor(rooms.length / 2)]);
+  
+  // Place stairs in last room (far from start)
   const exit = getCenterOfRoom(rooms[rooms.length - 1]);
+  
+  // Place key in a distant room (not start, not exit)
+  let keyRoomIndex = Math.floor(rooms.length * 0.6) + rng.int(Math.floor(rooms.length * 0.3));
+  if (keyRoomIndex >= rooms.length) keyRoomIndex = rooms.length - 2;
+  if (keyRoomIndex === 0) keyRoomIndex = Math.floor(rooms.length / 2);
+  
+  const key = getCenterOfRoom(rooms[keyRoomIndex]);
 
   // Ensure important positions are walkable
   for (const [x, y] of [start, key, exit]) {
     tiles[y][x] = true;
   }
 
-  return { width, height, tiles, start, key, exit, rooms, doors };
+  // Generate searchable objects (more side rooms to explore)
+  const searchables = generateSearchables(rooms, rng, start, keyRoomIndex, floor);
+
+  return { width, height, tiles, start, key, exit, rooms, doors, searchables };
+}
+
+function generateSearchables(
+  rooms: Room[], 
+  rng: SeededRng, 
+  start: [number, number],
+  keyRoomIndex: number,
+  floor: number
+): Searchable[] {
+  const searchables: Searchable[] = [];
+  const objectTypes: SearchableType[] = ['cabinet', 'locker', 'box', 'drawer'];
+  
+  // Determine number of mimics for this floor
+  let numMimics = 0;
+  switch (floor) {
+    case 3: numMimics = rng.next() < 0.5 ? 0 : 1; break;
+    case 2: numMimics = 1; break;
+    case 1: numMimics = 1 + (rng.next() < 0.5 ? 1 : 0); break; // 1-2
+  }
+  
+  // Place 1-2 searchables per room (except start room)
+  rooms.forEach((room, roomIndex) => {
+    // Skip start room only
+    if (roomIndex === 0) return;
+
+    const searchablesInRoom = 1 + rng.int(2); // 1-2 searchables per room
+    
+    for (let i = 0; i < searchablesInRoom; i++) {
+      // Random wall position in room
+      const side = rng.int(4); // 0=top, 1=right, 2=bottom, 3=left
+      let x: number, y: number;
+
+      switch (side) {
+        case 0: // top wall
+          x = room.x + 1 + rng.int(Math.max(1, room.width - 2));
+          y = room.y;
+          break;
+        case 1: // right wall
+          x = room.x + room.width - 1;
+          y = room.y + 1 + rng.int(Math.max(1, room.height - 2));
+          break;
+        case 2: // bottom wall
+          x = room.x + 1 + rng.int(Math.max(1, room.width - 2));
+          y = room.y + room.height - 1;
+          break;
+        case 3: // left wall
+        default:
+          x = room.x;
+          y = room.y + 1 + rng.int(Math.max(1, room.height - 2));
+          break;
+      }
+
+      // Determine if this is a mimic
+      const isMimic = numMimics > 0 && rng.next() < 0.08; // 8% chance per container
+      if (isMimic) numMimics--;
+
+      // Generate result with rebalanced loot table
+      const roll = rng.next();
+      let result: SearchResult;
+      let objectType: SearchableType;
+      
+      if (isMimic) {
+        // Mimic always looks like a box
+        objectType = 'mimic';
+        result = { type: 'mimic_reveal' };
+      } else {
+        objectType = objectTypes[rng.int(objectTypes.length)];
+        
+        // Rebalanced loot table:
+        // 20% battery (was 25%)
+        // 12% health (new)
+        // 25% collectibles (15% eth, 7% btc, 3% hemi)
+        // 8% clue
+        // 35% nothing (was 65%)
+        
+        if (roll < 0.20) {
+          // Battery
+          result = { type: 'battery', amount: 8 + rng.int(12) }; // 8-19%
+        } else if (roll < 0.32) {
+          // Health
+          result = { type: 'health', amount: 10 + rng.int(16) }; // 10-25 HP
+        } else if (roll < 0.57) {
+          // Collectibles
+          const collectRoll = rng.next();
+          if (collectRoll < 0.60) {
+            result = { type: 'collectible', item: 'eth', score: 50 };
+          } else if (collectRoll < 0.88) {
+            result = { type: 'collectible', item: 'btc', score: 100 };
+          } else {
+            result = { type: 'collectible', item: 'hemi', score: 250 };
+          }
+        } else if (roll < 0.65) {
+          // Clue
+          result = { type: 'clue', id: `clue_${floor}_${roomIndex}_${i}` };
+        } else {
+          // Nothing
+          result = { type: 'nothing' };
+        }
+      }
+
+      searchables.push({
+        x,
+        y,
+        objectType,
+        result,
+        isMimic,
+      });
+    }
+  });
+
+  return searchables;
+}
+
+function createDeadEnd(
+  tiles: boolean[][], 
+  fromRoom: Room, 
+  rng: SeededRng,
+  worldWidth: number,
+  worldHeight: number
+) {
+  // Pick a random edge of the room
+  const side = rng.int(4);
+  let startX: number, startY: number;
+  let dirX: number, dirY: number;
+  
+  switch (side) {
+    case 0: // top
+      startX = fromRoom.x + 1 + rng.int(Math.max(1, fromRoom.width - 2));
+      startY = fromRoom.y;
+      dirX = 0;
+      dirY = -1;
+      break;
+    case 1: // right
+      startX = fromRoom.x + fromRoom.width - 1;
+      startY = fromRoom.y + 1 + rng.int(Math.max(1, fromRoom.height - 2));
+      dirX = 1;
+      dirY = 0;
+      break;
+    case 2: // bottom
+      startX = fromRoom.x + 1 + rng.int(Math.max(1, fromRoom.width - 2));
+      startY = fromRoom.y + fromRoom.height - 1;
+      dirX = 0;
+      dirY = 1;
+      break;
+    case 3: // left
+    default:
+      startX = fromRoom.x;
+      startY = fromRoom.y + 1 + rng.int(Math.max(1, fromRoom.height - 2));
+      dirX = -1;
+      dirY = 0;
+      break;
+  }
+  
+  // Extend corridor for 3-7 tiles
+  const length = 3 + rng.int(5);
+  let x = startX;
+  let y = startY;
+  
+  for (let i = 0; i < length; i++) {
+    x += dirX;
+    y += dirY;
+    
+    if (x < 1 || x >= worldWidth - 1 || y < 1 || y >= worldHeight - 1) break;
+    
+    tiles[y][x] = true;
+    // Make it 2 tiles wide
+    if (dirX !== 0 && y + 1 < worldHeight) {
+      tiles[y + 1][x] = true;
+    } else if (dirY !== 0 && x + 1 < worldWidth) {
+      tiles[y][x + 1] = true;
+    }
+  }
 }
 
 function carveRoom(tiles: boolean[][], room: Room) {
