@@ -8,6 +8,7 @@ export type RunState = {
   status: 'playing' | 'won' | 'lost';
   floorsCompleted: number;
   timeStarted: number;
+  seenStoryIds: string[]; // Track which stories have been shown this run
   nonce?: number; // Blockchain run ID
   address?: string; // Player wallet address
 };
@@ -22,6 +23,7 @@ export const createRun = (seed: number, nonce?: number, address?: string): RunSt
   status: 'playing',
   floorsCompleted: 0,
   timeStarted: Date.now(),
+  seenStoryIds: [], // Empty at start of run
   nonce,
   address,
 });
@@ -34,6 +36,7 @@ export const completeFloor = (state: RunState): RunState => ({
   curse: state.curse + 10, // Danger increases
   battery: Math.min(100, state.battery + 20), // Small battery restoration
   status: state.floor <= 1 ? 'won' : 'playing', // Win after completing Floor 1 (floor becomes 0)
+  // seenStoryIds persists across floors (don't reset)
 });
 
 // Convert blockchain seed (bytes32) to number seed

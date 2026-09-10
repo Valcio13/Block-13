@@ -6,7 +6,7 @@ export interface Clue {
   content: string;
 }
 
-// 10 authored horror story fragments for Block 13
+// 18 authored horror story fragments for Block 13 (mix of complete and fragmented)
 const ALL_CLUES: Clue[] = [
   {
     id: 'missing_tenants',
@@ -58,18 +58,58 @@ const ALL_CLUES: Clue[] = [
     title: 'LAST TRANSMISSION',
     content: 'Made it to ground floor. Door says "EXIT." Opened it. Saw Floor 1 again. Tried windows. Same thing. Every window, every door - leads back inside. I think I understand now. There is no outside. There never was.',
   },
+  // NEW FRAGMENTED/CORRUPTED ENTRIES
+  {
+    id: 'wall_observation',
+    title: 'TORN DIARY PAGE',
+    content: 'Day 3: I heard the wall move again. This time it was closer. The sound is different when they\'re hunting. Sarah says I\'m imagining it but I saw the corridor bend. I SAW IT—',
+  },
+  {
+    id: 'box_instructions',
+    title: 'FADED NOTE',
+    content: 'Do not open the box if the hinges are facing\n\n[rest of text illegible]\n\n...already too late. It knows you\'re',
+  },
+  {
+    id: 'floor_thirteen',
+    title: 'MAINTENANCE REQUEST',
+    content: 'Floor 13 isn\'t on the panel.\n\nIt appeared after midnight.\n\nI pressed it and',
+  },
+  {
+    id: 'resident_408',
+    title: 'APARTMENT 408 - FINAL ENTRY',
+    content: 'The flashlight died. I can hear it breathing in the dark. Not the stalker - something else. Something that was always here. The darkness isn\'t empty. The darkness is',
+  },
+  {
+    id: 'corrupted_log',
+    title: '█████ PERSONNEL FILE',
+    content: '██/██/20██: Subject exhibited [REDACTED] after 72 hours below Floor 1. Psychological eval: ███████. Recommendation: ████████ ██ ███████ ███. Note: "Block 13" was not part of original design.',
+  },
+  {
+    id: 'research_fragment',
+    title: 'RESEARCH NOTE',
+    content: 'The building doesn\'t have tenants. It has prisoners. Every floor you descend, you get closer to understanding what this place really is. Block 13 is where',
+  },
+  {
+    id: 'janitor_recording',
+    title: 'VOICE MEMO TRANSCRIPT',
+    content: '[00:14] "Found another body in the utility closet. Same as the others. Drained. Empty."\n[00:31] "Management says don\'t report it. Says it\'s—"\n[00:42] [sounds of footsteps]\n[00:44] [recording ends]',
+  },
+  {
+    id: 'warning_scrawl',
+    title: 'SCRIBBLED IN BLOOD',
+    content: 'DONT USE YOUR LIGHT\n\nIT CAN SEE THE LIGHT\n\nIT FOLLOWS THE',
+  },
 ];
 
 export class ClueManager {
   private rng: SeededRng;
   private availableClues: Clue[];
-  private shownClues: Set<string> = new Set();
   
   constructor(seed: number) {
     this.rng = new SeededRng(seed ^ 0xC10E5);
     
-    // Select 5-7 clues for this run (deterministic)
-    const numClues = 5 + this.rng.int(3); // 5-7 clues
+    // Select 6-9 clues for this run (expanded pool)
+    const numClues = 6 + this.rng.int(4); // 6-9 clues
     this.availableClues = [];
     
     const indices = Array.from({ length: ALL_CLUES.length }, (_, i) => i);
@@ -81,20 +121,17 @@ export class ClueManager {
     }
   }
   
-  public getRandomClue(): Clue | null {
-    // Filter out already shown clues
-    const unseenClues = this.availableClues.filter(clue => !this.shownClues.has(clue.id));
+  public getRandomClue(seenStoryIds: string[]): Clue | null {
+    // Filter out already seen clues
+    const unseenClues = this.availableClues.filter(clue => !seenStoryIds.includes(clue.id));
     
     if (unseenClues.length === 0) {
-      // All clues shown, allow repeats but prefer variety
-      if (this.rng.next() < 0.3) {
-        return this.availableClues[this.rng.int(this.availableClues.length)];
-      }
+      // All clues have been seen - return null to show fallback message
       return null;
     }
     
+    // Deterministically select from unseen clues
     const selectedClue = unseenClues[this.rng.int(unseenClues.length)];
-    this.shownClues.add(selectedClue.id);
     return selectedClue;
   }
 }

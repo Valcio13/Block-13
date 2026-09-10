@@ -42,7 +42,7 @@ export class FloorScene extends Phaser.Scene {
   private controlsHint!: Phaser.GameObjects.Text;
   private dangerIndicator?: Phaser.GameObjects.Text;
   private healthBarBg!: Phaser.GameObjects.Rectangle;
-  private healthBarFill!: Phaser.GameObjects.Rectangle;
+  private healthBarFill!: Phaser.GameObjects.Graphics;
   private healthBarText!: Phaser.GameObjects.Text;
   private uiCamera!: Phaser.Cameras.Scene2D.Camera; // Dedicated UI camera
   private flashlightOn = false;
@@ -246,7 +246,7 @@ export class FloorScene extends Phaser.Scene {
     const healthBarX = this.cameras.main.width / 2;
     const healthBarY = 20;
     
-    // Background (dark)
+    // Background (dark) - using Graphics for better control
     this.healthBarBg = this.add.rectangle(
       healthBarX,
       healthBarY,
@@ -256,15 +256,10 @@ export class FloorScene extends Phaser.Scene {
       1
     ).setScrollFactor(0).setDepth(100);
     
-    // Health fill (dynamic width based on HP)
-    this.healthBarFill = this.add.rectangle(
-      healthBarX - healthBarWidth / 2,
-      healthBarY,
-      healthBarWidth,
-      healthBarHeight - 4,
-      0x70d4c6,
-      1
-    ).setOrigin(0, 0.5).setScrollFactor(0).setDepth(101);
+    // Health fill - using Graphics object instead of Rectangle
+    const fillGraphics = this.add.graphics();
+    fillGraphics.setScrollFactor(0).setDepth(101);
+    this.healthBarFill = fillGraphics as any; // Store as graphics
     
     // HP text overlay
     this.healthBarText = this.add.text(
@@ -481,20 +476,34 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private showCluePopup(clue: Clue) {
-    // Pause/slow gameplay significantly
+    // Pause gameplay
     this.physics.pause();
     
-    // Dark overlay
-    const overlay = this.add.rectangle(
+    // Create a snapshot of the current game view for blur effect
+    const snapshotTexture = this.add.renderTexture(
+      0, 0,
+      this.cameras.main.width,
+      this.cameras.main.height
+    ).setScrollFactor(0).setDepth(249);
+    
+    // Draw the current camera view to the texture
+    snapshotTexture.draw(this.children.list, this.cameras.main.scrollX, this.cameras.main.scrollY);
+    
+    // Apply a simple "blur" via scaling and darkening overlay
+    snapshotTexture.setAlpha(0.7); // Dim the background
+    snapshotTexture.setTint(0x808080); // Desaturate slightly
+    
+    // Heavy dark overlay for blur simulation
+    const blurOverlay = this.add.rectangle(
       this.cameras.main.width / 2,
       this.cameras.main.height / 2,
       this.cameras.main.width,
       this.cameras.main.height,
       0x000000,
-      0.85
+      0.6
     ).setScrollFactor(0).setDepth(250).setInteractive();
     
-    // Clue card background
+    // Clue card background (sharp and clear)
     const cardWidth = 500;
     const cardHeight = 250;
     const card = this.add.rectangle(
@@ -506,7 +515,7 @@ export class FloorScene extends Phaser.Scene {
       1
     ).setScrollFactor(0).setDepth(251);
     
-    // Card border
+    // Card border (sharp)
     const border = this.add.rectangle(
       this.cameras.main.width / 2,
       this.cameras.main.height / 2,
@@ -514,7 +523,7 @@ export class FloorScene extends Phaser.Scene {
       cardHeight
     ).setScrollFactor(0).setDepth(251).setStrokeStyle(2, 0xff4444, 1);
     
-    // Title
+    // Title (sharp)
     const title = this.add.text(
       this.cameras.main.width / 2,
       this.cameras.main.height / 2 - 90,
@@ -527,7 +536,7 @@ export class FloorScene extends Phaser.Scene {
       }
     ).setOrigin(0.5).setScrollFactor(0).setDepth(252);
     
-    // Content
+    // Content (sharp)
     const content = this.add.text(
       this.cameras.main.width / 2,
       this.cameras.main.height / 2 - 20,
@@ -542,7 +551,7 @@ export class FloorScene extends Phaser.Scene {
       }
     ).setOrigin(0.5).setScrollFactor(0).setDepth(252);
     
-    // Close instruction
+    // Close instruction (sharp)
     const closeText = this.add.text(
       this.cameras.main.width / 2,
       this.cameras.main.height / 2 + 95,
@@ -554,16 +563,16 @@ export class FloorScene extends Phaser.Scene {
       }
     ).setOrigin(0.5).setScrollFactor(0).setDepth(252);
     
-    // Make main camera ignore all popup elements
-    this.cameras.main.ignore([overlay, card, border, title, content, closeText]);
+    // Make main camera ignore all popup elements (but show snapshot)
+    this.cameras.main.ignore([blurOverlay, card, border, title, content, closeText]);
     
     // Fade in
-    const popupElements = [overlay, card, border, title, content, closeText];
+    const popupElements = [snapshotTexture, blurOverlay, card, border, title, content, closeText];
     popupElements.forEach(el => el.setAlpha(0));
     
     this.tweens.add({
       targets: popupElements,
-      alpha: 1,
+      alpha: { from: 0, to: 1 },
       duration: 300,
     });
     
@@ -629,14 +638,23 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private updateHealthBar() {
+    // Safety check - health bar might not be created yet
+    if (!this.healthBarFill || !this.healthBarText) {
+      return;
+    }
+    
     const maxWidth = 300;
+    const healthBarHeight = 16; // Slightly smaller than background
+    const healthBarX = this.cameras.main.width / 2;
+    const healthBarY = 20;
+    
     const hpPercent = Math.max(0, Math.min(1, this.runState.hp / 100));
     const currentWidth = maxWidth * hpPercent;
     
-    // Update fill width
-    this.healthBarFill.width = currentWidth;
+    // Clear and redraw the health bar fill
+    (this.healthBarFill as Phaser.GameObjects.Graphics).clear();
     
-    // Update color based on HP
+    // Determine color based on HP
     let fillColor: number;
     if (this.runState.hp > 50) {
       fillColor = 0x70d4c6; // Cyan (healthy)
@@ -645,7 +663,15 @@ export class FloorScene extends Phaser.Scene {
     } else {
       fillColor = 0xff4444; // Red (critical)
     }
-    this.healthBarFill.setFillStyle(fillColor, 1);
+    
+    // Draw the health bar (from left edge)
+    (this.healthBarFill as Phaser.GameObjects.Graphics).fillStyle(fillColor, 1);
+    (this.healthBarFill as Phaser.GameObjects.Graphics).fillRect(
+      healthBarX - maxWidth / 2,
+      healthBarY - healthBarHeight / 2,
+      currentWidth,
+      healthBarHeight
+    );
     
     // Update text
     this.healthBarText.setText(`${Math.floor(this.runState.hp)} / 100 HP`);
@@ -962,23 +988,23 @@ export class FloorScene extends Phaser.Scene {
     
     const { width, height } = this.cameras.main;
     
-    this.add.text(width / 2, height / 2 - 80, 'ESCAPE COMPLETE!', {
+    const title = this.add.text(width / 2, height / 2 - 80, 'ESCAPE COMPLETE!', {
       fontFamily: 'monospace',
       fontSize: '32px',
       color: '#70d4c6',
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(300);
 
-    this.add.text(width / 2, height / 2 - 20, 'YOU SURVIVED BLOCK 13', {
+    const subtitle = this.add.text(width / 2, height / 2 - 20, 'YOU SURVIVED BLOCK 13', {
       fontFamily: 'monospace',
       fontSize: '16px',
       color: '#d9f3ea',
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(300);
 
     const elapsed = Math.floor((Date.now() - finalState.timeStarted) / 1000);
     const minutes = Math.floor(elapsed / 60);
     const seconds = elapsed % 60;
 
-    this.add.text(width / 2, height / 2 + 40, [
+    const stats = this.add.text(width / 2, height / 2 + 40, [
       `FINAL SCORE: ${finalState.score}`,
       `TIME: ${minutes}:${seconds.toString().padStart(2, '0')}`,
       `FLOORS CLEARED: ${finalState.floorsCompleted}`,
@@ -988,7 +1014,42 @@ export class FloorScene extends Phaser.Scene {
       color: '#a5b6b5',
       align: 'center',
       lineSpacing: 6,
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(300);
+    
+    // Retry button
+    const retryButton = this.add.text(width / 2 - 80, height / 2 + 120, '[ RETRY ]', {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#70d4c6',
+      backgroundColor: '#1a1a1a',
+      padding: { x: 16, y: 8 },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(300).setInteractive({ useHandCursor: true });
+    
+    retryButton.on('pointerover', () => retryButton.setColor('#ffd700'));
+    retryButton.on('pointerout', () => retryButton.setColor('#70d4c6'));
+    retryButton.on('pointerdown', () => {
+      // Reload the page to go back to React main menu
+      window.location.reload();
+    });
+    
+    // Main menu button
+    const menuButton = this.add.text(width / 2 + 80, height / 2 + 120, '[ MAIN MENU ]', {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#70d4c6',
+      backgroundColor: '#1a1a1a',
+      padding: { x: 16, y: 8 },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(300).setInteractive({ useHandCursor: true });
+    
+    menuButton.on('pointerover', () => menuButton.setColor('#ffd700'));
+    menuButton.on('pointerout', () => menuButton.setColor('#70d4c6'));
+    menuButton.on('pointerdown', () => {
+      // Reload the page to go back to React main menu
+      window.location.reload();
+    });
+    
+    // Make main camera ignore these UI elements
+    this.cameras.main.ignore([title, subtitle, stats, retryButton, menuButton]);
   }
 
   // ====== SEARCHABLE OBJECTS ======
@@ -1326,11 +1387,14 @@ export class FloorScene extends Phaser.Scene {
         break;
         
       case 'clue':
-        const clue = this.clueManager.getRandomClue();
+        const clue = this.clueManager.getRandomClue(this.runState.seenStoryIds);
         if (clue) {
+          // Mark story as seen
+          this.runState.seenStoryIds.push(clue.id);
+          this.registry.set('runState', this.runState);
           this.showCluePopup(clue);
         } else {
-          this.showTemporaryMessage('FOUND A CLUE\n(Already read)', '#6b7280');
+          this.showTemporaryMessage('FOUND A NOTE\n(Nothing new)', '#6b7280');
         }
         break;
         
@@ -2183,23 +2247,23 @@ export class FloorScene extends Phaser.Scene {
     
     const { width, height } = this.cameras.main;
     
-    this.add.text(width / 2, height / 2 - 80, 'THE STALKER GOT YOU', {
+    const title = this.add.text(width / 2, height / 2 - 80, 'YOU DIED', {
       fontFamily: 'monospace',
       fontSize: '32px',
-      color: '#ff0000',
-    }).setOrigin(0.5);
+      color: '#ff4444',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(300);
 
-    this.add.text(width / 2, height / 2 - 20, 'YOU FAILED TO ESCAPE', {
+    const subtitle = this.add.text(width / 2, height / 2 - 20, 'CONSUMED BY THE DARKNESS', {
       fontFamily: 'monospace',
       fontSize: '16px',
       color: '#d9f3ea',
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(300);
 
     const elapsed = Math.floor((Date.now() - this.runState.timeStarted) / 1000);
     const minutes = Math.floor(elapsed / 60);
     const seconds = elapsed % 60;
 
-    this.add.text(width / 2, height / 2 + 40, [
+    const stats = this.add.text(width / 2, height / 2 + 40, [
       `FINAL SCORE: ${this.runState.score}`,
       `TIME: ${minutes}:${seconds.toString().padStart(2, '0')}`,
       `FLOORS CLEARED: ${this.runState.floorsCompleted}`,
@@ -2209,6 +2273,41 @@ export class FloorScene extends Phaser.Scene {
       color: '#a5b6b5',
       align: 'center',
       lineSpacing: 6,
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(300);
+    
+    // Retry button
+    const retryButton = this.add.text(width / 2 - 80, height / 2 + 120, '[ RETRY ]', {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#ff4444',
+      backgroundColor: '#1a1a1a',
+      padding: { x: 16, y: 8 },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(300).setInteractive({ useHandCursor: true });
+    
+    retryButton.on('pointerover', () => retryButton.setColor('#ffd700'));
+    retryButton.on('pointerout', () => retryButton.setColor('#ff4444'));
+    retryButton.on('pointerdown', () => {
+      // Reload the page to go back to React main menu
+      window.location.reload();
+    });
+    
+    // Main menu button
+    const menuButton = this.add.text(width / 2 + 80, height / 2 + 120, '[ MAIN MENU ]', {
+      fontFamily: 'monospace',
+      fontSize: '16px',
+      color: '#ff4444',
+      backgroundColor: '#1a1a1a',
+      padding: { x: 16, y: 8 },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(300).setInteractive({ useHandCursor: true });
+    
+    menuButton.on('pointerover', () => menuButton.setColor('#ffd700'));
+    menuButton.on('pointerout', () => menuButton.setColor('#ff4444'));
+    menuButton.on('pointerdown', () => {
+      // Reload the page to go back to React main menu
+      window.location.reload();
+    });
+    
+    // Make main camera ignore these UI elements
+    this.cameras.main.ignore([title, subtitle, stats, retryButton, menuButton]);
   }
 }

@@ -6,8 +6,8 @@ import type { RunState } from '../core/run';
 export function createGameConfig(parent: string, runState: RunState): Phaser.Types.Core.GameConfig {
   return {
     type: Phaser.AUTO,
-    width: 800,
-    height: 600,
+    width: 1280,
+    height: 720,
     parent,
     backgroundColor: '#07090d',
     physics: {
@@ -21,6 +21,11 @@ export function createGameConfig(parent: string, runState: RunState): Phaser.Typ
     scale: {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
+    },
+    render: {
+      pixelArt: false, // Keep false for smooth text/UI rendering
+      antialias: true,
+      roundPixels: true, // Helps with crisp camera positioning
     },
     // Pass run state through game registry
     callbacks: {
