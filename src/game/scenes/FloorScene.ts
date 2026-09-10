@@ -63,6 +63,8 @@ export class FloorScene extends Phaser.Scene {
   private movingWallSprites: Map<string, Phaser.GameObjects.Rectangle> = new Map();
   private currentRoom: number = -1; // Track which room player is in
   private keyCollectedAt: number = 0; // Time when key was collected
+  private isPaused = false; // Track pause state
+  private pauseKey!: Phaser.Input.Keyboard.Key;
 
   constructor() {
     super({ key: 'FloorScene' });
@@ -184,6 +186,14 @@ export class FloorScene extends Phaser.Scene {
     };
     this.flashlightKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.F);
     this.interactKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    this.pauseKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    
+    // Setup pause key handler
+    this.pauseKey.on('down', () => {
+      if (!this.isPaused) {
+        this.showPauseMenu();
+      }
+    });
     
     // Ensure keyboard is enabled
     if (this.input.keyboard) {
@@ -231,7 +241,7 @@ export class FloorScene extends Phaser.Scene {
     ).setOrigin(0.5).setScrollFactor(0).setDepth(100).setVisible(false);
 
     // Controls hint
-    this.controlsHint = this.add.text(16, this.cameras.main.height - 80, 'WASD / ARROWS - MOVE\nF - FLASHLIGHT\nE - INTERACT', {
+    this.controlsHint = this.add.text(16, this.cameras.main.height - 100, 'WASD / ARROWS - MOVE\nF - FLASHLIGHT\nE - INTERACT\nESC - PAUSE', {
       fontFamily: 'monospace',
       fontSize: '12px',
       color: '#a5b6b5',
@@ -604,6 +614,137 @@ export class FloorScene extends Phaser.Scene {
     
     this.interactKey.once('down', eKeyHandler);
     escKey.once('down', escKeyHandler);
+  }
+
+  private showPauseMenu() {
+    this.isPaused = true;
+    
+    // Pause physics and game logic
+    this.physics.pause();
+    
+    // Dark overlay
+    const overlay = this.add.rectangle(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2,
+      this.cameras.main.width,
+      this.cameras.main.height,
+      0x000000,
+      0.8
+    ).setScrollFactor(0).setDepth(300).setInteractive();
+    
+    // Pause menu background
+    const menuWidth = 400;
+    const menuHeight = 300;
+    const menu = this.add.rectangle(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2,
+      menuWidth,
+      menuHeight,
+      0x1a1a1a,
+      1
+    ).setScrollFactor(0).setDepth(301);
+    
+    // Menu border
+    const border = this.add.rectangle(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2,
+      menuWidth,
+      menuHeight
+    ).setScrollFactor(0).setDepth(301).setStrokeStyle(2, 0x70d4c6, 1);
+    
+    // Pause title
+    const title = this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 - 100,
+      'PAUSED',
+      {
+        fontFamily: 'monospace',
+        fontSize: '24px',
+        color: '#70d4c6',
+        fontStyle: 'bold',
+      }
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(302);
+    
+    // Resume button
+    const resumeButton = this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 - 20,
+      'RESUME',
+      {
+        fontFamily: 'monospace',
+        fontSize: '18px',
+        color: '#d9f3ea',
+        backgroundColor: '#2a2a2a',
+        padding: { x: 20, y: 10 },
+      }
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(302).setInteractive();
+    
+    // Main menu button
+    const mainMenuButton = this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 + 40,
+      'MAIN MENU',
+      {
+        fontFamily: 'monospace',
+        fontSize: '18px',
+        color: '#d9f3ea',
+        backgroundColor: '#2a2a2a',
+        padding: { x: 20, y: 10 },
+      }
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(302).setInteractive();
+    
+    // Instructions
+    const instructions = this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 + 110,
+      'Press [ESC] to resume',
+      {
+        fontFamily: 'monospace',
+        fontSize: '12px',
+        color: '#6b7280',
+      }
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(302);
+    
+    const pauseElements = [overlay, menu, border, title, resumeButton, mainMenuButton, instructions];
+    
+    // Button hover effects
+    resumeButton.on('pointerover', () => {
+      resumeButton.setStyle({ color: '#ffd700' });
+    });
+    resumeButton.on('pointerout', () => {
+      resumeButton.setStyle({ color: '#d9f3ea' });
+    });
+    
+    mainMenuButton.on('pointerover', () => {
+      mainMenuButton.setStyle({ color: '#ffd700' });
+    });
+    mainMenuButton.on('pointerout', () => {
+      mainMenuButton.setStyle({ color: '#d9f3ea' });
+    });
+    
+    // Close pause menu handler
+    const closePauseMenu = () => {
+      this.isPaused = false;
+      pauseElements.forEach(el => el.destroy());
+      this.physics.resume();
+      this.pauseKey.off('down', escHandler);
+    };
+    
+    // Resume button click
+    resumeButton.on('pointerdown', () => {
+      closePauseMenu();
+    });
+    
+    // Main menu button click
+    mainMenuButton.on('pointerdown', () => {
+      window.location.reload(); // Return to React shell
+    });
+    
+    // ESC to resume
+    const escHandler = () => {
+      closePauseMenu();
+    };
+    this.pauseKey.once('down', escHandler);
   }
 
   private updateStatusText() {
