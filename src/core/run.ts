@@ -14,7 +14,7 @@ export type RunState = {
 
 export const createRun = (seed: number, nonce?: number, address?: string): RunState => ({
   seed,
-  floor: 3,
+  floor: 4, // Now starting on Floor 4
   battery: 100,
   curse: 0,
   hp: 100, // Start with full health
@@ -33,7 +33,7 @@ export const completeFloor = (state: RunState): RunState => ({
   score: state.score + 100 * state.floor, // Higher floors worth more points
   curse: state.curse + 10, // Danger increases
   battery: Math.min(100, state.battery + 20), // Small battery restoration
-  status: state.floor <= 1 ? 'won' : 'playing',
+  status: state.floor <= 1 ? 'won' : 'playing', // Win after completing Floor 1 (floor becomes 0)
 });
 
 // Convert blockchain seed (bytes32) to number seed

@@ -240,6 +240,10 @@ export function spawnSecondaryEnemies(
   let numWatchers = 0;
   
   switch (floor) {
+    case 4:
+      numCrawlers = 0;
+      numWatchers = 0;
+      break;
     case 3:
       numCrawlers = rng.next() < 0.5 ? 0 : 1;
       numWatchers = rng.next() < 0.5 ? 0 : 1;
@@ -251,6 +255,10 @@ export function spawnSecondaryEnemies(
     case 1:
       numCrawlers = 2 + rng.int(2); // 2-3
       numWatchers = 1 + rng.int(2); // 1-2
+      break;
+    case 0: // Block 13
+      numCrawlers = 3 + rng.int(2); // 3-4
+      numWatchers = 2 + rng.int(2); // 2-3
       break;
   }
   

@@ -44,6 +44,13 @@ export class Stalker {
     
     // Floor-based escalation
     switch (this.floor) {
+      case 4: // Floor 4: Tutorial floor - very passive
+        this.dormantChance = 0.95;
+        this.roamSpeed = 40;
+        this.huntSpeed = 120;
+        this.detectionRange = 120;
+        this.investigationDuration = 2000;
+        break;
       case 3: // Floor 3: Mostly dormant, rare appearances
         this.dormantChance = 0.85;
         this.roamSpeed = 50;
@@ -64,6 +71,13 @@ export class Stalker {
         this.huntSpeed = 180;
         this.detectionRange = 250;
         this.investigationDuration = 5000;
+        break;
+      case 0: // Block 13: Maximum aggression
+        this.dormantChance = 0.1;
+        this.roamSpeed = 100;
+        this.huntSpeed = 200;
+        this.detectionRange = 300;
+        this.investigationDuration = 6000;
         break;
       default:
         this.dormantChance = 0.9;

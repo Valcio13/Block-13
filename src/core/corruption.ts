@@ -34,8 +34,17 @@ export class CorruptionManager {
   ): CorruptionEffect | null {
     const timeSinceLast = now - this.lastCorruptionTime;
     
-    // Floor-based cooldown
-    const cooldown = this.baseCorruptionCooldown / this.floor; // Shorter on lower floors
+    // Floor-based cooldown (higher floors = less corruption)
+    let cooldownMultiplier = 1.0;
+    switch (this.floor) {
+      case 4: cooldownMultiplier = 2.0; break; // Double cooldown (half frequency)
+      case 3: cooldownMultiplier = 1.5; break;
+      case 2: cooldownMultiplier = 1.0; break;
+      case 1: cooldownMultiplier = 0.7; break;
+      case 0: cooldownMultiplier = 0.5; break; // Block 13: Very frequent
+    }
+    
+    const cooldown = this.baseCorruptionCooldown * cooldownMultiplier;
     
     if (timeSinceLast < cooldown) return null;
     
@@ -52,8 +61,9 @@ export class CorruptionManager {
     // Has key
     if (hasKey) chance += 0.05;
     
-    // Floor escalation
-    chance *= this.floor === 1 ? 1.5 : this.floor === 2 ? 1.2 : 1.0;
+    // Floor escalation (lower floor = more corruption)
+    const floorEscalation = Math.max(0.5, 1.5 - (this.floor * 0.25));
+    chance *= floorEscalation;
     
     if (this.rng.next() < chance) {
       this.lastCorruptionTime = now;

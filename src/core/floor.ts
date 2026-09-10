@@ -39,8 +39,19 @@ export type Searchable = {
 
 export function generateFloor(seed: number, floor: number): Floor {
   const rng = new SeededRng(seed ^ ((floor + 1) * 0x9e3779b9));
-  const width = 51; // Increased from 41
-  const height = 41; // Increased from 31
+  
+  // Floor 4 is slightly smaller/easier; others scale up
+  let width: number, height: number, numRooms: number;
+  
+  if (floor === 4) {
+    width = 45;
+    height = 37;
+    numRooms = 10 + rng.int(3); // 10-12 rooms
+  } else {
+    width = 51;
+    height = 41;
+    numRooms = 12 + (4 - floor) * 3; // Floor 3: 15, Floor 2: 18, Floor 1: 21
+  }
   
   // Initialize all tiles as walls
   const tiles = Array.from({ length: height }, () => 
@@ -49,7 +60,6 @@ export function generateFloor(seed: number, floor: number): Floor {
 
   // Generate more rooms with varied sizes
   const rooms: Room[] = [];
-  const numRooms = 12 + floor * 3; // More rooms: 15, 18, 21
   const attempts = numRooms * 15;
 
   for (let i = 0; i < attempts && rooms.length < numRooms; i++) {
@@ -96,8 +106,8 @@ export function generateFloor(seed: number, floor: number): Floor {
     }
   }
 
-  // Add some dead-end branches for exploration
-  const deadEnds = 3 + rng.int(3); // 3-5 dead ends
+  // Add some dead-end branches for exploration (fewer on Floor 4)
+  const deadEnds = floor === 4 ? 2 + rng.int(2) : 3 + rng.int(3); // Floor 4: 2-3, others: 3-5
   for (let i = 0; i < deadEnds; i++) {
     const room = rooms[rng.int(rooms.length)];
     createDeadEnd(tiles, room, rng, width, height);
@@ -140,9 +150,11 @@ function generateSearchables(
   // Determine number of mimics for this floor
   let numMimics = 0;
   switch (floor) {
+    case 4: numMimics = 0; break; // No mimics on tutorial floor
     case 3: numMimics = rng.next() < 0.5 ? 0 : 1; break;
     case 2: numMimics = 1; break;
     case 1: numMimics = 1 + (rng.next() < 0.5 ? 1 : 0); break; // 1-2
+    case 0: numMimics = 2 + rng.int(2); break; // Block 13: 2-3
   }
   
   // Place 1-2 searchables per room (except start room)

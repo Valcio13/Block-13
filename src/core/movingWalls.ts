@@ -98,13 +98,33 @@ export class MovingWallSystem {
   ): WallMoveEvent | null {
     const timeSinceLast = now - this.lastMoveTime;
     
-    // Floor-based cooldown (more frequent on lower floors)
-    const cooldown = this.moveCooldown / (4 - this.floor); // Floor 3: 30s, Floor 2: 15s, Floor 1: 10s
+    // Floor-based cooldown and trigger chance
+    let cooldown = this.moveCooldown;
+    let chance = hasKey ? 0.15 : 0.08;
+    
+    switch (this.floor) {
+      case 4:
+        cooldown = this.moveCooldown * 2; // 60s - very rare
+        chance *= 0.3; // Much less likely
+        break;
+      case 3:
+        cooldown = this.moveCooldown; // 30s
+        break;
+      case 2:
+        cooldown = this.moveCooldown * 0.7; // 21s
+        chance *= 1.2;
+        break;
+      case 1:
+        cooldown = this.moveCooldown * 0.5; // 15s
+        chance *= 1.5;
+        break;
+      case 0: // Block 13
+        cooldown = this.moveCooldown * 0.3; // 9s
+        chance *= 2.0;
+        break;
+    }
     
     if (timeSinceLast < cooldown) return null;
-    
-    // Chance to trigger
-    const chance = hasKey ? 0.15 : 0.08;
     
     if (this.rng.next() > chance) return null;
     

@@ -6,6 +6,7 @@ import { JumpscareDirector, JumpscareEvent } from '../../core/jumpscares';
 import { CorruptionManager, CorruptionEffect } from '../../core/corruption';
 import { MovingWallSystem, Wall, WallMoveEvent } from '../../core/movingWalls';
 import { Crawler, Watcher, spawnSecondaryEnemies } from '../../core/secondaryEnemies';
+import { ClueManager, Clue } from '../../core/clues';
 import type { Floor, Searchable, SearchResult } from '../../core/floor';
 import type { RunState } from '../../core/run';
 
@@ -40,6 +41,9 @@ export class FloorScene extends Phaser.Scene {
   private interactPrompt!: Phaser.GameObjects.Text;
   private controlsHint!: Phaser.GameObjects.Text;
   private dangerIndicator?: Phaser.GameObjects.Text;
+  private healthBarBg!: Phaser.GameObjects.Rectangle;
+  private healthBarFill!: Phaser.GameObjects.Rectangle;
+  private healthBarText!: Phaser.GameObjects.Text;
   private uiCamera!: Phaser.Cameras.Scene2D.Camera; // Dedicated UI camera
   private flashlightOn = false;
   private lightmapTexture!: Phaser.GameObjects.RenderTexture;
@@ -51,6 +55,7 @@ export class FloorScene extends Phaser.Scene {
   private jumpscareDirector!: JumpscareDirector;
   private corruptionManager!: CorruptionManager;
   private movingWallSystem!: MovingWallSystem;
+  private clueManager!: ClueManager;
   private crawlers: Crawler[] = [];
   private crawlerSprites: Phaser.GameObjects.Sprite[] = [];
   private watchers: Watcher[] = [];
@@ -64,7 +69,11 @@ export class FloorScene extends Phaser.Scene {
   }
 
   init(data: FloorSceneData) {
-    this.runState = data.runState;
+    // CRITICAL: Always use registry as single source of truth
+    // scene.restart() data params are unreliable in Phaser
+    const registryState = this.registry.get('runState') as RunState | undefined;
+    this.runState = registryState || data.runState;
+    
     // Generate floor layout with seed and current floor number
     this.floorData = generateFloor(this.runState.seed, this.runState.floor);
     
@@ -122,6 +131,9 @@ export class FloorScene extends Phaser.Scene {
     
     // Create corruption manager
     this.corruptionManager = new CorruptionManager(this.runState.seed, this.runState.floor);
+    
+    // Create clue manager
+    this.clueManager = new ClueManager(this.runState.seed);
     
     // Create moving wall system
     this.movingWallSystem = new MovingWallSystem(
@@ -228,8 +240,55 @@ export class FloorScene extends Phaser.Scene {
       lineSpacing: 2,
     }).setScrollFactor(0).setDepth(100);
     
+    // Create horizontal health bar at top center
+    const healthBarWidth = 300;
+    const healthBarHeight = 20;
+    const healthBarX = this.cameras.main.width / 2;
+    const healthBarY = 20;
+    
+    // Background (dark)
+    this.healthBarBg = this.add.rectangle(
+      healthBarX,
+      healthBarY,
+      healthBarWidth,
+      healthBarHeight,
+      0x1a1a1a,
+      1
+    ).setScrollFactor(0).setDepth(100);
+    
+    // Health fill (dynamic width based on HP)
+    this.healthBarFill = this.add.rectangle(
+      healthBarX - healthBarWidth / 2,
+      healthBarY,
+      healthBarWidth,
+      healthBarHeight - 4,
+      0x70d4c6,
+      1
+    ).setOrigin(0, 0.5).setScrollFactor(0).setDepth(101);
+    
+    // HP text overlay
+    this.healthBarText = this.add.text(
+      healthBarX,
+      healthBarY,
+      `${Math.floor(this.runState.hp)} / 100 HP`,
+      {
+        fontFamily: 'monospace',
+        fontSize: '12px',
+        color: '#ffffff',
+      }
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(102);
+    
+    this.updateHealthBar();
+    
     // Make UI camera only render HUD elements
-    this.cameras.main.ignore([this.statusText, this.interactPrompt, this.controlsHint]);
+    this.cameras.main.ignore([
+      this.statusText, 
+      this.interactPrompt, 
+      this.controlsHint,
+      this.healthBarBg,
+      this.healthBarFill,
+      this.healthBarText
+    ]);
     if (this.dangerIndicator) {
       this.cameras.main.ignore(this.dangerIndicator);
     }
@@ -321,7 +380,18 @@ export class FloorScene extends Phaser.Scene {
   private handleFlashlight() {
     if (Phaser.Input.Keyboard.JustDown(this.flashlightKey)) {
       if (this.runState.battery > 0) {
+        const wasOn = this.flashlightOn;
         this.flashlightOn = !this.flashlightOn;
+        
+        // Small activation cost when turning ON (2% battery)
+        if (!wasOn && this.flashlightOn) {
+          this.runState.battery = Math.max(0, this.runState.battery - 2);
+          if (this.runState.battery === 0) {
+            this.flashlightOn = false;
+            this.showTemporaryMessage('INSUFFICIENT BATTERY!', '#ff4444');
+            return;
+          }
+        }
         
         // Notify stalker of flashlight toggle
         if (this.stalker) {
@@ -345,9 +415,25 @@ export class FloorScene extends Phaser.Scene {
 
   private drainBattery(delta: number) {
     if (this.flashlightOn && this.runState.battery > 0) {
-      // Drain battery: ~1% per second (adjust based on delta)
-      const drainRate = 0.6 + (this.runState.curse * 0.02); // Faster drain with higher curse
-      this.runState.battery -= (drainRate * delta) / 1000;
+      // Base drain rate by floor (% per second)
+      let baseDrain: number;
+      switch (this.runState.floor) {
+        case 4: baseDrain = 0.8; break;  // Floor 4: ~0.8%/sec
+        case 3: baseDrain = 1.0; break;  // Floor 3: ~1.0%/sec
+        case 2: baseDrain = 1.2; break;  // Floor 2: ~1.2%/sec
+        case 1: baseDrain = 1.4; break;  // Floor 1: ~1.4%/sec
+        case 0: baseDrain = 1.7; break;  // Block 13: ~1.7%/sec
+        default: baseDrain = 1.0; break;
+      }
+      
+      // Curse adds additional drain
+      const curseDrain = this.runState.curse * 0.015; // +1.5% drain at 100 curse
+      
+      // Stalker hunting adds drain
+      const stalkerDrain = (this.stalker.state === 'hunting') ? 0.2 : 0;
+      
+      const totalDrainRate = baseDrain + curseDrain + stalkerDrain;
+      this.runState.battery -= (totalDrainRate * delta) / 1000;
       
       if (this.runState.battery <= 0) {
         this.runState.battery = 0;
@@ -394,13 +480,133 @@ export class FloorScene extends Phaser.Scene {
     });
   }
 
+  private showCluePopup(clue: Clue) {
+    // Pause/slow gameplay significantly
+    this.physics.pause();
+    
+    // Dark overlay
+    const overlay = this.add.rectangle(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2,
+      this.cameras.main.width,
+      this.cameras.main.height,
+      0x000000,
+      0.85
+    ).setScrollFactor(0).setDepth(250).setInteractive();
+    
+    // Clue card background
+    const cardWidth = 500;
+    const cardHeight = 250;
+    const card = this.add.rectangle(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2,
+      cardWidth,
+      cardHeight,
+      0x1a1a1a,
+      1
+    ).setScrollFactor(0).setDepth(251);
+    
+    // Card border
+    const border = this.add.rectangle(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2,
+      cardWidth,
+      cardHeight
+    ).setScrollFactor(0).setDepth(251).setStrokeStyle(2, 0xff4444, 1);
+    
+    // Title
+    const title = this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 - 90,
+      clue.title,
+      {
+        fontFamily: 'monospace',
+        fontSize: '16px',
+        color: '#ff4444',
+        fontStyle: 'bold',
+      }
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(252);
+    
+    // Content
+    const content = this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 - 20,
+      clue.content,
+      {
+        fontFamily: 'monospace',
+        fontSize: '13px',
+        color: '#d9f3ea',
+        align: 'center',
+        wordWrap: { width: cardWidth - 60 },
+        lineSpacing: 4,
+      }
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(252);
+    
+    // Close instruction
+    const closeText = this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 + 95,
+      'Press [E] or [ESC] to close',
+      {
+        fontFamily: 'monospace',
+        fontSize: '12px',
+        color: '#6b7280',
+      }
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(252);
+    
+    // Make main camera ignore all popup elements
+    this.cameras.main.ignore([overlay, card, border, title, content, closeText]);
+    
+    // Fade in
+    const popupElements = [overlay, card, border, title, content, closeText];
+    popupElements.forEach(el => el.setAlpha(0));
+    
+    this.tweens.add({
+      targets: popupElements,
+      alpha: 1,
+      duration: 300,
+    });
+    
+    // Handle close
+    const closeClue = () => {
+      this.tweens.add({
+        targets: popupElements,
+        alpha: 0,
+        duration: 200,
+        onComplete: () => {
+          popupElements.forEach(el => el.destroy());
+          this.physics.resume();
+        }
+      });
+    };
+    
+    // Listen for E or Escape
+    const escKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    const eKeyHandler = () => {
+      closeClue();
+      this.interactKey.off('down', eKeyHandler);
+      escKey.off('down', escKeyHandler);
+    };
+    const escKeyHandler = () => {
+      closeClue();
+      this.interactKey.off('down', eKeyHandler);
+      escKey.off('down', escKeyHandler);
+    };
+    
+    this.interactKey.once('down', eKeyHandler);
+    escKey.once('down', escKeyHandler);
+  }
+
   private updateStatusText() {
     const batteryColor = this.runState.battery > 50 ? '#70d4c6' : this.runState.battery > 20 ? '#ffd700' : '#ff4444';
     const hpColor = this.runState.hp > 50 ? '#70d4c6' : this.runState.hp > 25 ? '#ffd700' : '#ff4444';
     const flashStatus = this.flashlightOn ? '■' : '□';
     
+    // Display floor name
+    const floorDisplay = this.runState.floor === 0 ? 'BLOCK 13' : `FLOOR ${this.runState.floor}/4`;
+    
     const lines = [
-      `FLOOR ${this.runState.floor}/3`,
+      floorDisplay,
       `HP: ${Math.floor(this.runState.hp)}/100`,
       `CURSE: ${Math.floor(this.runState.curse)}%`,
       `BATTERY: ${Math.floor(this.runState.battery)}%`,
@@ -417,6 +623,32 @@ export class FloorScene extends Phaser.Scene {
     } else {
       this.statusText.setColor('#70d4c6');
     }
+    
+    // Update health bar
+    this.updateHealthBar();
+  }
+
+  private updateHealthBar() {
+    const maxWidth = 300;
+    const hpPercent = Math.max(0, Math.min(1, this.runState.hp / 100));
+    const currentWidth = maxWidth * hpPercent;
+    
+    // Update fill width
+    this.healthBarFill.width = currentWidth;
+    
+    // Update color based on HP
+    let fillColor: number;
+    if (this.runState.hp > 50) {
+      fillColor = 0x70d4c6; // Cyan (healthy)
+    } else if (this.runState.hp > 25) {
+      fillColor = 0xffd700; // Gold (warning)
+    } else {
+      fillColor = 0xff4444; // Red (critical)
+    }
+    this.healthBarFill.setFillStyle(fillColor, 1);
+    
+    // Update text
+    this.healthBarText.setText(`${Math.floor(this.runState.hp)} / 100 HP`);
   }
 
   private drawFloor(tiles: boolean[][]) {
@@ -440,13 +672,16 @@ export class FloorScene extends Phaser.Scene {
           graphics.lineStyle(1, 0x14181f, 0.8);
           graphics.strokeRect(posX, posY, this.tileSize, this.tileSize);
 
-          // Add invisible physics body for collision
+          // Add physics body for solid collision
           const wall = this.add.rectangle(
             posX + this.tileSize / 2,
             posY + this.tileSize / 2,
             this.tileSize,
-            this.tileSize
+            this.tileSize,
+            0x000000, // Make walls invisible (just physics)
+            0 // Fully transparent
           );
+          this.physics.add.existing(wall, true); // Static body
           this.walls.add(wall);
         }
       }
@@ -659,9 +894,10 @@ export class FloorScene extends Phaser.Scene {
     this.registry.set('runState', updatedRunState);
 
     // Show completion message with stats
+    const floorName = this.runState.floor === 0 ? 'BLOCK 13' : `FLOOR ${this.runState.floor}`;
     const message = updatedRunState.status === 'won' 
-      ? `FLOOR ${this.runState.floor} COMPLETE!\nESCAPE SUCCESSFUL!`
-      : `FLOOR ${this.runState.floor} COMPLETE!`;
+      ? `${floorName} COMPLETE!\nESCAPE SUCCESSFUL!`
+      : `${floorName} COMPLETE!`;
 
     const completionText = this.add.text(
       this.cameras.main.width / 2,
@@ -1090,7 +1326,12 @@ export class FloorScene extends Phaser.Scene {
         break;
         
       case 'clue':
-        this.showTemporaryMessage('FOUND A CLUE\n[Placeholder]', '#a5b6b5');
+        const clue = this.clueManager.getRandomClue();
+        if (clue) {
+          this.showCluePopup(clue);
+        } else {
+          this.showTemporaryMessage('FOUND A CLUE\n(Already read)', '#6b7280');
+        }
         break;
         
       case 'nothing':

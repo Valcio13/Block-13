@@ -159,9 +159,11 @@ export class JumpscareDirector {
   public getScareTriggerChance(): number {
     // Floor-based scare frequency
     switch (this.floor) {
+      case 4: return 0.3; // Very rare on tutorial floor
       case 3: return 0.6; // Less frequent
       case 2: return 0.8;
-      case 1: return 1.0; // Most frequent
+      case 1: return 1.0; // Frequent
+      case 0: return 1.2; // Block 13: Very frequent
       default: return 0.5;
     }
   }
