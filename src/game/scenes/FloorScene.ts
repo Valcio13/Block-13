@@ -520,101 +520,155 @@ export class FloorScene extends Phaser.Scene {
     // Pause gameplay
     this.physics.pause();
     
-    // Create a snapshot of the current game view for blur effect
-    const snapshotTexture = this.add.renderTexture(
-      0, 0,
-      this.cameras.main.width,
-      this.cameras.main.height
-    ).setScrollFactor(0).setDepth(249);
-    
-    // Draw the current camera view to the texture
-    snapshotTexture.draw(this.children.list, this.cameras.main.scrollX, this.cameras.main.scrollY);
-    
-    // Apply a simple "blur" via scaling and darkening overlay
-    snapshotTexture.setAlpha(0.7); // Dim the background
-    snapshotTexture.setTint(0x808080); // Desaturate slightly
-    
-    // Heavy dark overlay for blur simulation
+    // Heavy dark overlay with blur simulation
     const blurOverlay = this.add.rectangle(
       this.cameras.main.width / 2,
       this.cameras.main.height / 2,
       this.cameras.main.width,
       this.cameras.main.height,
       0x000000,
-      0.6
+      0.75
     ).setScrollFactor(0).setDepth(250).setInteractive();
     
-    // Clue card background (sharp and clear)
-    const cardWidth = 500;
-    const cardHeight = 250;
+    // Clue card dimensions
+    const cardWidth = 540;
+    const cardHeight = 300;
+    
+    // Card shadow (offset)
+    const cardShadow = this.add.rectangle(
+      this.cameras.main.width / 2 + 6,
+      this.cameras.main.height / 2 + 6,
+      cardWidth,
+      cardHeight,
+      0x000000,
+      0.6
+    ).setScrollFactor(0).setDepth(251);
+    
+    // Card background (aged paper effect)
     const card = this.add.rectangle(
       this.cameras.main.width / 2,
       this.cameras.main.height / 2,
       cardWidth,
       cardHeight,
-      0x1a1a1a,
+      0x1f1f1a,
       1
-    ).setScrollFactor(0).setDepth(251);
+    ).setScrollFactor(0).setDepth(252);
     
-    // Card border (sharp)
-    const border = this.add.rectangle(
+    // Card border (double line for depth)
+    const borderOuter = this.add.rectangle(
       this.cameras.main.width / 2,
       this.cameras.main.height / 2,
       cardWidth,
       cardHeight
-    ).setScrollFactor(0).setDepth(251).setStrokeStyle(2, 0xff4444, 1);
+    ).setScrollFactor(0).setDepth(252).setStrokeStyle(3, 0xff4444, 1);
     
-    // Title (sharp)
-    const title = this.add.text(
+    const borderInner = this.add.rectangle(
       this.cameras.main.width / 2,
-      this.cameras.main.height / 2 - 90,
+      this.cameras.main.height / 2,
+      cardWidth - 12,
+      cardHeight - 12
+    ).setScrollFactor(0).setDepth(252).setStrokeStyle(1, 0x664444, 0.7);
+    
+    // Header bar
+    const headerBar = this.add.rectangle(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 - cardHeight / 2 + 30,
+      cardWidth - 6,
+      44,
+      0x0d0d0a,
+      1
+    ).setScrollFactor(0).setDepth(253);
+    
+    // Title with shadow
+    const titleShadow = this.add.text(
+      this.cameras.main.width / 2 + 2,
+      this.cameras.main.height / 2 - cardHeight / 2 + 30 + 2,
       clue.title,
       {
         fontFamily: 'monospace',
-        fontSize: '16px',
+        fontSize: '18px',
+        color: '#000000',
+      }
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(253);
+    
+    const title = this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 - cardHeight / 2 + 30,
+      clue.title,
+      {
+        fontFamily: 'monospace',
+        fontSize: '18px',
         color: '#ff4444',
         fontStyle: 'bold',
+        letterSpacing: 1,
       }
-    ).setOrigin(0.5).setScrollFactor(0).setDepth(252);
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(254);
     
-    // Content (sharp)
+    // Divider line below header
+    const divider = this.add.rectangle(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 - cardHeight / 2 + 58,
+      cardWidth - 80,
+      1,
+      0x664444,
+      0.8
+    ).setScrollFactor(0).setDepth(254);
+    
+    // Content text
     const content = this.add.text(
       this.cameras.main.width / 2,
-      this.cameras.main.height / 2 - 20,
+      this.cameras.main.height / 2 - 5,
       clue.content,
       {
         fontFamily: 'monospace',
-        fontSize: '13px',
-        color: '#d9f3ea',
+        fontSize: '14px',
+        color: '#d9d3ca',
         align: 'center',
-        wordWrap: { width: cardWidth - 60 },
-        lineSpacing: 4,
+        wordWrap: { width: cardWidth - 80 },
+        lineSpacing: 6,
       }
-    ).setOrigin(0.5).setScrollFactor(0).setDepth(252);
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(254);
     
-    // Close instruction (sharp)
+    // Close instruction with background
+    const closeBg = this.add.rectangle(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 + cardHeight / 2 - 20,
+      cardWidth - 40,
+      28,
+      0x0a0a08,
+      1
+    ).setScrollFactor(0).setDepth(253);
+    
     const closeText = this.add.text(
       this.cameras.main.width / 2,
-      this.cameras.main.height / 2 + 95,
+      this.cameras.main.height / 2 + cardHeight / 2 - 20,
       'Press [E] or [ESC] to close',
       {
         fontFamily: 'monospace',
         fontSize: '12px',
-        color: '#6b7280',
+        color: '#888877',
+        letterSpacing: 1,
       }
-    ).setOrigin(0.5).setScrollFactor(0).setDepth(252);
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(254);
     
-    // Make main camera ignore all popup elements (but show snapshot)
-    this.cameras.main.ignore([blurOverlay, card, border, title, content, closeText]);
+    // Make main camera ignore all popup elements
+    this.cameras.main.ignore([
+      blurOverlay, cardShadow, card, borderOuter, borderInner,
+      headerBar, titleShadow, title, divider, content, closeBg, closeText
+    ]);
     
-    // Fade in
-    const popupElements = [snapshotTexture, blurOverlay, card, border, title, content, closeText];
+    // Fade in animation
+    const popupElements = [
+      blurOverlay, cardShadow, card, borderOuter, borderInner,
+      headerBar, titleShadow, title, divider, content, closeBg, closeText
+    ];
     popupElements.forEach(el => el.setAlpha(0));
     
     this.tweens.add({
       targets: popupElements,
       alpha: { from: 0, to: 1 },
-      duration: 300,
+      duration: 250,
+      ease: 'Power2',
     });
     
     // Handle close
@@ -1212,68 +1266,199 @@ export class FloorScene extends Phaser.Scene {
     
     const { width, height } = this.cameras.main;
     
-    const title = this.add.text(width / 2, height / 2 - 80, 'ESCAPE COMPLETE!', {
+    // Dark overlay with vignette
+    const overlay = this.add.rectangle(
+      width / 2,
+      height / 2,
+      width,
+      height,
+      0x000000,
+      0.85
+    ).setScrollFactor(0).setDepth(295);
+    
+    // Modal background panel
+    const panelWidth = 450;
+    const panelHeight = 340;
+    
+    // Shadow
+    const shadow = this.add.rectangle(
+      width / 2 + 4,
+      height / 2 + 4,
+      panelWidth,
+      panelHeight,
+      0x000000,
+      0.5
+    ).setScrollFactor(0).setDepth(296);
+    
+    // Main panel
+    const panel = this.add.rectangle(
+      width / 2,
+      height / 2,
+      panelWidth,
+      panelHeight,
+      0x0f1f1d,
+      1
+    ).setScrollFactor(0).setDepth(297);
+    
+    // Cyan accent border (double line)
+    const borderOuter = this.add.rectangle(
+      width / 2,
+      height / 2,
+      panelWidth,
+      panelHeight
+    ).setScrollFactor(0).setDepth(297).setStrokeStyle(2, 0x70d4c6, 1);
+    
+    const borderInner = this.add.rectangle(
+      width / 2,
+      height / 2,
+      panelWidth - 8,
+      panelHeight - 8
+    ).setScrollFactor(0).setDepth(297).setStrokeStyle(1, 0x3a6a62, 0.5);
+    
+    // Header bar
+    const headerBar = this.add.rectangle(
+      width / 2,
+      height / 2 - panelHeight / 2 + 35,
+      panelWidth - 4,
+      50,
+      0x0a1a18,
+      1
+    ).setScrollFactor(0).setDepth(298);
+    
+    // Title with text shadow
+    const titleShadow = this.add.text(width / 2 + 2, height / 2 - 140 + 2, 'ESCAPE COMPLETE!', {
+      fontFamily: 'monospace',
+      fontSize: '32px',
+      color: '#000000',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(298);
+    
+    const title = this.add.text(width / 2, height / 2 - 140, 'ESCAPE COMPLETE!', {
       fontFamily: 'monospace',
       fontSize: '32px',
       color: '#70d4c6',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(300);
+      fontStyle: 'bold',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(299);
 
-    const subtitle = this.add.text(width / 2, height / 2 - 20, 'YOU SURVIVED BLOCK 13', {
+    const subtitle = this.add.text(width / 2, height / 2 - 95, 'YOU SURVIVED BLOCK 13', {
       fontFamily: 'monospace',
-      fontSize: '16px',
-      color: '#d9f3ea',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(300);
+      fontSize: '14px',
+      color: '#a5d4c8',
+      letterSpacing: 2,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(299);
+    
+    // Divider line
+    const divider = this.add.rectangle(
+      width / 2,
+      height / 2 - 60,
+      panelWidth - 80,
+      1,
+      0x3a6a62,
+      1
+    ).setScrollFactor(0).setDepth(299);
 
     const elapsed = Math.floor((Date.now() - finalState.timeStarted) / 1000);
     const minutes = Math.floor(elapsed / 60);
     const seconds = elapsed % 60;
 
-    const stats = this.add.text(width / 2, height / 2 + 40, [
+    const stats = this.add.text(width / 2, height / 2 - 15, [
       `FINAL SCORE: ${finalState.score}`,
       `TIME: ${minutes}:${seconds.toString().padStart(2, '0')}`,
       `FLOORS CLEARED: ${finalState.floorsCompleted}`,
     ].join('\n'), {
       fontFamily: 'monospace',
-      fontSize: '14px',
-      color: '#a5b6b5',
+      fontSize: '15px',
+      color: '#d9f3ea',
       align: 'center',
-      lineSpacing: 6,
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(300);
+      lineSpacing: 10,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(299);
+    
+    // Button containers
+    const retryBg = this.add.rectangle(
+      width / 2 - 90,
+      height / 2 + 95,
+      140,
+      42,
+      0x0a2a28,
+      1
+    ).setScrollFactor(0).setDepth(298);
+    
+    const retryBorder = this.add.rectangle(
+      width / 2 - 90,
+      height / 2 + 95,
+      140,
+      42
+    ).setScrollFactor(0).setDepth(298).setStrokeStyle(2, 0x70d4c6, 1);
     
     // Retry button
-    const retryButton = this.add.text(width / 2 - 80, height / 2 + 120, '[ RETRY ]', {
+    const retryButton = this.add.text(width / 2 - 90, height / 2 + 95, '[ RETRY ]', {
       fontFamily: 'monospace',
       fontSize: '16px',
       color: '#70d4c6',
-      backgroundColor: '#1a1a1a',
       padding: { x: 16, y: 8 },
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(300).setInteractive({ useHandCursor: true });
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(299).setInteractive({ useHandCursor: true });
     
-    retryButton.on('pointerover', () => retryButton.setColor('#ffd700'));
-    retryButton.on('pointerout', () => retryButton.setColor('#70d4c6'));
+    retryButton.on('pointerover', () => {
+      retryButton.setColor('#ffd700');
+      retryBorder.setStrokeStyle(2, 0xffd700, 1);
+      retryBg.setFillStyle(0x3a3a0a, 1);
+    });
+    retryButton.on('pointerout', () => {
+      retryButton.setColor('#70d4c6');
+      retryBorder.setStrokeStyle(2, 0x70d4c6, 1);
+      retryBg.setFillStyle(0x0a2a28, 1);
+    });
     retryButton.on('pointerdown', () => {
       // Reload the page to go back to React main menu
       window.location.reload();
     });
     
+    // Menu button container
+    const menuBg = this.add.rectangle(
+      width / 2 + 90,
+      height / 2 + 95,
+      140,
+      42,
+      0x0a0a0a,
+      1
+    ).setScrollFactor(0).setDepth(298);
+    
+    const menuBorder = this.add.rectangle(
+      width / 2 + 90,
+      height / 2 + 95,
+      140,
+      42
+    ).setScrollFactor(0).setDepth(298).setStrokeStyle(2, 0x666666, 1);
+    
     // Main menu button
-    const menuButton = this.add.text(width / 2 + 80, height / 2 + 120, '[ MAIN MENU ]', {
+    const menuButton = this.add.text(width / 2 + 90, height / 2 + 95, '[ MAIN MENU ]', {
       fontFamily: 'monospace',
       fontSize: '16px',
-      color: '#70d4c6',
-      backgroundColor: '#1a1a1a',
+      color: '#999999',
       padding: { x: 16, y: 8 },
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(300).setInteractive({ useHandCursor: true });
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(299).setInteractive({ useHandCursor: true });
     
-    menuButton.on('pointerover', () => menuButton.setColor('#ffd700'));
-    menuButton.on('pointerout', () => menuButton.setColor('#70d4c6'));
+    menuButton.on('pointerover', () => {
+      menuButton.setColor('#ffffff');
+      menuBorder.setStrokeStyle(2, 0xaaaaaa, 1);
+      menuBg.setFillStyle(0x1a1a1a, 1);
+    });
+    menuButton.on('pointerout', () => {
+      menuButton.setColor('#999999');
+      menuBorder.setStrokeStyle(2, 0x666666, 1);
+      menuBg.setFillStyle(0x0a0a0a, 1);
+    });
     menuButton.on('pointerdown', () => {
       // Reload the page to go back to React main menu
       window.location.reload();
     });
     
     // Make main camera ignore these UI elements
-    this.cameras.main.ignore([title, subtitle, stats, retryButton, menuButton]);
+    this.cameras.main.ignore([
+      overlay, shadow, panel, borderOuter, borderInner, headerBar,
+      titleShadow, title, subtitle, divider, stats,
+      retryBg, retryBorder, retryButton,
+      menuBg, menuBorder, menuButton
+    ]);
   }
 
   // ====== SEARCHABLE OBJECTS ======
@@ -2814,68 +2999,199 @@ export class FloorScene extends Phaser.Scene {
     
     const { width, height } = this.cameras.main;
     
-    const title = this.add.text(width / 2, height / 2 - 80, 'YOU DIED', {
+    // Dark overlay with vignette effect
+    const overlay = this.add.rectangle(
+      width / 2,
+      height / 2,
+      width,
+      height,
+      0x000000,
+      0.85
+    ).setScrollFactor(0).setDepth(295);
+    
+    // Modal background panel
+    const panelWidth = 450;
+    const panelHeight = 340;
+    
+    // Shadow (offset slightly)
+    const shadow = this.add.rectangle(
+      width / 2 + 4,
+      height / 2 + 4,
+      panelWidth,
+      panelHeight,
+      0x000000,
+      0.5
+    ).setScrollFactor(0).setDepth(296);
+    
+    // Main panel background
+    const panel = this.add.rectangle(
+      width / 2,
+      height / 2,
+      panelWidth,
+      panelHeight,
+      0x1a1a1a,
+      1
+    ).setScrollFactor(0).setDepth(297);
+    
+    // Red accent border (double line)
+    const borderOuter = this.add.rectangle(
+      width / 2,
+      height / 2,
+      panelWidth,
+      panelHeight
+    ).setScrollFactor(0).setDepth(297).setStrokeStyle(2, 0xff4444, 1);
+    
+    const borderInner = this.add.rectangle(
+      width / 2,
+      height / 2,
+      panelWidth - 8,
+      panelHeight - 8
+    ).setScrollFactor(0).setDepth(297).setStrokeStyle(1, 0x663333, 0.5);
+    
+    // Header bar
+    const headerBar = this.add.rectangle(
+      width / 2,
+      height / 2 - panelHeight / 2 + 35,
+      panelWidth - 4,
+      50,
+      0x0d0d0d,
+      1
+    ).setScrollFactor(0).setDepth(298);
+    
+    // Title with text shadow effect
+    const titleShadow = this.add.text(width / 2 + 2, height / 2 - 140 + 2, 'YOU DIED', {
       fontFamily: 'monospace',
-      fontSize: '32px',
+      fontSize: '36px',
+      color: '#000000',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(298);
+    
+    const title = this.add.text(width / 2, height / 2 - 140, 'YOU DIED', {
+      fontFamily: 'monospace',
+      fontSize: '36px',
       color: '#ff4444',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(300);
+      fontStyle: 'bold',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(299);
 
-    const subtitle = this.add.text(width / 2, height / 2 - 20, 'CONSUMED BY THE DARKNESS', {
+    const subtitle = this.add.text(width / 2, height / 2 - 95, 'CONSUMED BY THE DARKNESS', {
       fontFamily: 'monospace',
-      fontSize: '16px',
-      color: '#d9f3ea',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(300);
+      fontSize: '14px',
+      color: '#999999',
+      letterSpacing: 2,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(299);
+    
+    // Divider line
+    const divider = this.add.rectangle(
+      width / 2,
+      height / 2 - 60,
+      panelWidth - 80,
+      1,
+      0x333333,
+      1
+    ).setScrollFactor(0).setDepth(299);
 
     const elapsed = Math.floor((Date.now() - this.runState.timeStarted) / 1000);
     const minutes = Math.floor(elapsed / 60);
     const seconds = elapsed % 60;
 
-    const stats = this.add.text(width / 2, height / 2 + 40, [
+    const stats = this.add.text(width / 2, height / 2 - 15, [
       `FINAL SCORE: ${this.runState.score}`,
       `TIME: ${minutes}:${seconds.toString().padStart(2, '0')}`,
       `FLOORS CLEARED: ${this.runState.floorsCompleted}`,
     ].join('\n'), {
       fontFamily: 'monospace',
-      fontSize: '14px',
-      color: '#a5b6b5',
+      fontSize: '15px',
+      color: '#cccccc',
       align: 'center',
-      lineSpacing: 6,
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(300);
+      lineSpacing: 10,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(299);
+    
+    // Button container backgrounds
+    const retryBg = this.add.rectangle(
+      width / 2 - 90,
+      height / 2 + 95,
+      140,
+      42,
+      0x2a0a0a,
+      1
+    ).setScrollFactor(0).setDepth(298);
+    
+    const retryBorder = this.add.rectangle(
+      width / 2 - 90,
+      height / 2 + 95,
+      140,
+      42
+    ).setScrollFactor(0).setDepth(298).setStrokeStyle(2, 0xff4444, 1);
     
     // Retry button
-    const retryButton = this.add.text(width / 2 - 80, height / 2 + 120, '[ RETRY ]', {
+    const retryButton = this.add.text(width / 2 - 90, height / 2 + 95, '[ RETRY ]', {
       fontFamily: 'monospace',
       fontSize: '16px',
       color: '#ff4444',
-      backgroundColor: '#1a1a1a',
       padding: { x: 16, y: 8 },
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(300).setInteractive({ useHandCursor: true });
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(299).setInteractive({ useHandCursor: true });
     
-    retryButton.on('pointerover', () => retryButton.setColor('#ffd700'));
-    retryButton.on('pointerout', () => retryButton.setColor('#ff4444'));
+    retryButton.on('pointerover', () => {
+      retryButton.setColor('#ffd700');
+      retryBorder.setStrokeStyle(2, 0xffd700, 1);
+      retryBg.setFillStyle(0x3a2a0a, 1);
+    });
+    retryButton.on('pointerout', () => {
+      retryButton.setColor('#ff4444');
+      retryBorder.setStrokeStyle(2, 0xff4444, 1);
+      retryBg.setFillStyle(0x2a0a0a, 1);
+    });
     retryButton.on('pointerdown', () => {
       // Reload the page to go back to React main menu
       window.location.reload();
     });
     
+    // Menu button container
+    const menuBg = this.add.rectangle(
+      width / 2 + 90,
+      height / 2 + 95,
+      140,
+      42,
+      0x0a0a0a,
+      1
+    ).setScrollFactor(0).setDepth(298);
+    
+    const menuBorder = this.add.rectangle(
+      width / 2 + 90,
+      height / 2 + 95,
+      140,
+      42
+    ).setScrollFactor(0).setDepth(298).setStrokeStyle(2, 0x666666, 1);
+    
     // Main menu button
-    const menuButton = this.add.text(width / 2 + 80, height / 2 + 120, '[ MAIN MENU ]', {
+    const menuButton = this.add.text(width / 2 + 90, height / 2 + 95, '[ MAIN MENU ]', {
       fontFamily: 'monospace',
       fontSize: '16px',
-      color: '#ff4444',
-      backgroundColor: '#1a1a1a',
+      color: '#999999',
       padding: { x: 16, y: 8 },
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(300).setInteractive({ useHandCursor: true });
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(299).setInteractive({ useHandCursor: true });
     
-    menuButton.on('pointerover', () => menuButton.setColor('#ffd700'));
-    menuButton.on('pointerout', () => menuButton.setColor('#ff4444'));
+    menuButton.on('pointerover', () => {
+      menuButton.setColor('#ffffff');
+      menuBorder.setStrokeStyle(2, 0xaaaaaa, 1);
+      menuBg.setFillStyle(0x1a1a1a, 1);
+    });
+    menuButton.on('pointerout', () => {
+      menuButton.setColor('#999999');
+      menuBorder.setStrokeStyle(2, 0x666666, 1);
+      menuBg.setFillStyle(0x0a0a0a, 1);
+    });
     menuButton.on('pointerdown', () => {
       // Reload the page to go back to React main menu
       window.location.reload();
     });
     
     // Make main camera ignore these UI elements
-    this.cameras.main.ignore([title, subtitle, stats, retryButton, menuButton]);
+    this.cameras.main.ignore([
+      overlay, shadow, panel, borderOuter, borderInner, headerBar,
+      titleShadow, title, subtitle, divider, stats,
+      retryBg, retryBorder, retryButton,
+      menuBg, menuBorder, menuButton
+    ]);
   }
 
   shutdown() {
