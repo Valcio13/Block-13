@@ -2104,6 +2104,126 @@ export class FloorScene extends Phaser.Scene {
     }
   }
   
+  private executeAmbusherJumpscare(ambusher: Ambusher) {
+    // Mark as major scare
+    this.jumpscareDirector.setMajorScareActive(true);
+    
+    // Disable player input temporarily
+    this.player.setVelocity(0);
+    const keyboardEnabled = this.input.keyboard?.enabled;
+    if (this.input.keyboard) {
+      this.input.keyboard.enabled = false;
+    }
+    
+    // FACE CLOSE-UP JUMPSCARE
+    // Create large face graphic (placeholder for future asset: ambusher_face_jumpscare)
+    const faceSize = 400;
+    const face = this.add.graphics();
+    face.fillStyle(0x000000, 1);
+    face.fillCircle(0, 0, faceSize / 2); // Dark face
+    
+    // Glowing amber eyes (menacing)
+    face.fillStyle(0xffaa00, 1);
+    face.fillCircle(-60, -40, 30); // Left eye
+    face.fillCircle(60, -40, 30); // Right eye
+    
+    // Mouth/teeth suggestion
+    face.fillStyle(0xff0000, 0.8);
+    face.fillRect(-80, 40, 160, 30);
+    
+    face.generateTexture('ambusher_face_temp', faceSize, faceSize);
+    face.destroy();
+    
+    const faceSprite = this.add.sprite(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2,
+      'ambusher_face_temp'
+    ).setScrollFactor(0).setDepth(300).setAlpha(0).setScale(0.5);
+    
+    // UI camera only
+    this.cameras.main.ignore(faceSprite);
+    
+    // Camera shake
+    this.cameras.main.shake(400, 0.015);
+    
+    // SCREAM PLACEHOLDER (future: ambusher_scream_audio)
+    const screamText = this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 + 150,
+      '!!! SCREAM !!!',
+      {
+        fontFamily: 'monospace',
+        fontSize: '32px',
+        color: '#ff0000',
+        fontStyle: 'bold',
+      }
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(301).setAlpha(0);
+    
+    this.cameras.main.ignore(screamText);
+    
+    // Quick zoom in + fade in
+    this.tweens.add({
+      targets: faceSprite,
+      alpha: 1,
+      scale: 1.2,
+      duration: 150,
+      ease: 'Power2',
+    });
+    
+    this.tweens.add({
+      targets: screamText,
+      alpha: 1,
+      duration: 100,
+    });
+    
+    // Brief glitch effect
+    const glitch = this.add.rectangle(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2,
+      this.cameras.main.width,
+      this.cameras.main.height,
+      0xff0000,
+      0.4
+    ).setScrollFactor(0).setDepth(299);
+    
+    this.cameras.main.ignore(glitch);
+    
+    this.tweens.add({
+      targets: glitch,
+      alpha: 0,
+      duration: 100,
+      repeat: 2,
+      yoyo: true,
+      onComplete: () => glitch.destroy()
+    });
+    
+    // Apply damage
+    this.time.delayedCall(200, () => {
+      this.applyDamage(ambusher.getDamage(), 'AMBUSH');
+    });
+    
+    // Fade out after jumpscare
+    this.time.delayedCall(800, () => {
+      this.tweens.add({
+        targets: [faceSprite, screamText],
+        alpha: 0,
+        duration: 200,
+        onComplete: () => {
+          faceSprite.destroy();
+          screamText.destroy();
+          
+          // Re-enable input
+          if (this.input.keyboard && keyboardEnabled) {
+            this.input.keyboard.enabled = true;
+          }
+          
+          // Clear major scare state
+          this.jumpscareDirector.setMajorScareActive(false);
+        }
+      });
+    });
+  }
+  
   private escalateStalkerAfterKey() {
     if (!this.stalker) return;
     
@@ -2185,8 +2305,17 @@ export class FloorScene extends Phaser.Scene {
     const majorScareActive = this.jumpscareDirector.isMajorScareActive();
     
     this.ambushers.forEach((ambusher, index) => {
-      // Don't trigger ambushers during major scares
+      // Don't trigger ambushers during major scares or if already triggered
       if (majorScareActive && ambusher.state === 'hidden') {
+        return;
+      }
+      
+      if (ambusher.hasTriggered) {
+        // Already triggered, just keep sprite invisible
+        const sprite = this.ambusherSprites[index];
+        if (sprite) {
+          sprite.setAlpha(0);
+        }
         return;
       }
       
@@ -2197,41 +2326,16 @@ export class FloorScene extends Phaser.Scene {
         false // We'll handle searching separately
       );
       
-      // Handle reveal - mark as major scare
-      if (result.shouldReveal && ambusher.state === 'warning') {
-        this.jumpscareDirector.setMajorScareActive(true);
-        this.showTemporaryMessage('SOMETHING IS NEAR...', '#ff4444', 600);
+      // Handle jumpscare trigger
+      if (result.shouldJumpscare) {
+        this.executeAmbusherJumpscare(ambusher);
       }
       
-      // Handle contact damage
-      if (result.contacted) {
-        const damaged = this.applyDamage(ambusher.getDamage(), 'AMBUSH');
-        if (damaged) {
-          this.runState.curse = Math.min(100, this.runState.curse + ambusher.getCurse());
-          this.registry.set('runState', this.runState);
-        }
-        // End major scare state
-        this.jumpscareDirector.setMajorScareActive(false);
-      }
-      
-      // Clear major scare state when ambusher becomes inactive
-      if (ambusher.state === 'inactive' || ambusher.state === 'retreating') {
-        this.jumpscareDirector.setMajorScareActive(false);
-      }
-      
-      // Update sprite
+      // Update sprite (subtle world sprite during warning only)
       const sprite = this.ambusherSprites[index];
       if (sprite) {
         sprite.setPosition(ambusher.x, ambusher.y);
-        sprite.setAlpha(ambusher.alpha);
-        
-        // Add pulsing effect when revealing/rushing
-        if (ambusher.state === 'revealing' || ambusher.state === 'rushing') {
-          const pulse = 0.8 + Math.sin(Date.now() / 100) * 0.2;
-          sprite.setScale(pulse);
-        } else {
-          sprite.setScale(1.0);
-        }
+        sprite.setAlpha(ambusher.alpha); // Very subtle (0.15-0.25) during warning
       }
     });
   }

@@ -1,6 +1,6 @@
 import { SeededRng } from './rng';
 
-export type AmbusherState = 'hidden' | 'warning' | 'revealing' | 'rushing' | 'retreating' | 'inactive';
+export type AmbusherState = 'hidden' | 'warning' | 'jumpscare' | 'inactive';
 
 export interface AmbusherConfig {
   id: number;
@@ -14,24 +14,18 @@ export class Ambusher {
   public y: number = 0;
   public state: AmbusherState = 'hidden';
   public id: number;
-  public alpha: number = 0; // Visibility
+  public alpha: number = 0; // Visibility for world sprite
+  public hasTriggered: boolean = false; // Only triggers once
   
   private rng: SeededRng;
   private floor: number;
   private tileSize: number;
   private stateTimer: number = 0;
-  private targetX: number = 0;
-  private targetY: number = 0;
   
   // Behavior parameters
   private detectionRange: number = 120; // Range to detect player
-  private warningDuration: number = 800; // Brief warning before reveal
-  private revealDuration: number = 1200; // How long reveal lasts
-  private rushDuration: number = 1500; // How long it rushes
-  private rushSpeed: number = 140; // Speed during rush
-  private retreatSpeed: number = 180; // Speed during retreat
-  private damage: number = 7; // HP damage on contact
-  private curseAmount: number = 8; // Curse on contact
+  private warningDuration: number; // Very brief warning (150-400ms)
+  private damage: number; // HP damage only
   
   constructor(config: AmbusherConfig) {
     this.id = config.id;
@@ -39,12 +33,11 @@ export class Ambusher {
     this.floor = config.floor;
     this.tileSize = config.tileSize;
     
-    // Floor-based parameter scaling
-    if (this.floor <= 1) {
-      this.damage = 8; // Slightly more dangerous on hard floors
-      this.curseAmount = 10;
-      this.rushSpeed = 160;
-    }
+    // Randomize warning duration for unpredictability (150-400ms)
+    this.warningDuration = 150 + this.rng.int(251); // 150-400ms
+    
+    // Damage: 5-8 HP only, no curse
+    this.damage = 5 + this.rng.int(4); // 5-8 HP
   }
   
   public spawn(playerX: number, playerY: number, walkableTiles: boolean[][], rooms: any[]) {
@@ -114,15 +107,19 @@ export class Ambusher {
     playerSearching: boolean,
     nearbySearchX?: number,
     nearbySearchY?: number
-  ): { shouldReveal: boolean; contacted: boolean } {
+  ): { shouldJumpscare: boolean } {
+    // Skip if already triggered
+    if (this.hasTriggered) {
+      return { shouldJumpscare: false };
+    }
+    
     this.stateTimer -= delta;
     
     const distToPlayer = Math.sqrt(
       Math.pow(this.x - playerX, 2) + Math.pow(this.y - playerY, 2)
     );
     
-    let shouldReveal = false;
-    let contacted = false;
+    let shouldJumpscare = false;
     
     switch (this.state) {
       case 'hidden':
@@ -130,8 +127,7 @@ export class Ambusher {
         if (distToPlayer < this.detectionRange) {
           this.state = 'warning';
           this.stateTimer = this.warningDuration;
-          this.alpha = 0.2; // Subtle visibility
-          shouldReveal = true;
+          this.alpha = 0.15; // Very subtle visibility (just eyes/shadow)
         }
         
         // Check if player searching nearby
@@ -143,62 +139,27 @@ export class Ambusher {
           if (distToSearch < 150 && this.rng.next() < 0.4) {
             this.state = 'warning';
             this.stateTimer = this.warningDuration;
-            this.alpha = 0.2;
-            shouldReveal = true;
+            this.alpha = 0.15;
           }
         }
         break;
         
       case 'warning':
-        // Gradually increase visibility during warning
-        this.alpha = Math.min(0.5, this.alpha + 0.02);
+        // Very subtle visibility increase during brief warning
+        this.alpha = Math.min(0.25, this.alpha + 0.01);
         
         if (this.stateTimer <= 0) {
-          this.state = 'revealing';
-          this.stateTimer = this.revealDuration;
+          // TRIGGER JUMPSCARE!
+          this.state = 'jumpscare';
+          this.hasTriggered = true;
+          shouldJumpscare = true;
         }
         break;
         
-      case 'revealing':
-        // Fully visible, preparing to rush
-        this.alpha = Math.min(1.0, this.alpha + 0.05);
-        
-        if (this.stateTimer <= 0) {
-          this.state = 'rushing';
-          this.stateTimer = this.rushDuration;
-          this.targetX = playerX;
-          this.targetY = playerY;
-        }
-        break;
-        
-      case 'rushing':
-        // Move toward player's last known position
-        this.moveTowardsTarget(this.rushSpeed, delta);
-        
-        // Check for contact
-        if (distToPlayer < 30) {
-          contacted = true;
-          this.state = 'retreating';
-          this.stateTimer = 2000;
-          this.pickRetreatTarget(playerX, playerY);
-        }
-        
-        // Timeout - retreat anyway
-        if (this.stateTimer <= 0) {
-          this.state = 'retreating';
-          this.stateTimer = 2000;
-          this.pickRetreatTarget(playerX, playerY);
-        }
-        break;
-        
-      case 'retreating':
-        this.moveTowardsTarget(this.retreatSpeed, delta);
-        this.alpha = Math.max(0, this.alpha - 0.03);
-        
-        if (this.stateTimer <= 0 || this.hasReachedTarget()) {
-          this.state = 'inactive';
-          this.alpha = 0;
-        }
+      case 'jumpscare':
+        // Jumpscare is handled by scene, ambusher becomes inactive immediately
+        this.state = 'inactive';
+        this.alpha = 0;
         break;
         
       case 'inactive':
@@ -206,48 +167,19 @@ export class Ambusher {
         break;
     }
     
-    return { shouldReveal, contacted };
-  }
-  
-  private moveTowardsTarget(speed: number, delta: number) {
-    const dx = this.targetX - this.x;
-    const dy = this.targetY - this.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    
-    if (distance > 5) {
-      const moveDistance = (speed * delta) / 1000;
-      const ratio = Math.min(moveDistance / distance, 1);
-      
-      this.x += dx * ratio;
-      this.y += dy * ratio;
-    }
-  }
-  
-  private hasReachedTarget(): boolean {
-    const dx = this.targetX - this.x;
-    const dy = this.targetY - this.y;
-    return Math.sqrt(dx * dx + dy * dy) < 20;
-  }
-  
-  private pickRetreatTarget(playerX: number, playerY: number) {
-    // Retreat away from player
-    const angle = Math.atan2(this.y - playerY, this.x - playerX);
-    const retreatDistance = 300;
-    
-    this.targetX = this.x + Math.cos(angle) * retreatDistance;
-    this.targetY = this.y + Math.sin(angle) * retreatDistance;
+    return { shouldJumpscare };
   }
   
   public getDamage(): number {
     return this.damage;
   }
   
-  public getCurse(): number {
-    return this.curseAmount;
+  public getWarningDuration(): number {
+    return this.warningDuration;
   }
   
   public isActive(): boolean {
-    return this.state !== 'inactive' && this.state !== 'hidden';
+    return this.state !== 'inactive' && !this.hasTriggered;
   }
 }
 
