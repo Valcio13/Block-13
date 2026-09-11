@@ -40,17 +40,30 @@ export type Searchable = {
 export function generateFloor(seed: number, floor: number): Floor {
   const rng = new SeededRng(seed ^ ((floor + 1) * 0x9e3779b9));
   
-  // Floor 4 is slightly smaller/easier; others scale up
+  // Floor sizes balanced for 7-12 minute total run time
   let width: number, height: number, numRooms: number;
   
   if (floor === 4) {
-    width = 45;
-    height = 37;
+    width = 35;
+    height = 29;
+    numRooms = 7 + rng.int(3); // 7-9 rooms (tutorial)
+  } else if (floor === 3) {
+    width = 39;
+    height = 33;
     numRooms = 10 + rng.int(3); // 10-12 rooms
+  } else if (floor === 2) {
+    width = 41;
+    height = 35;
+    numRooms = 12 + rng.int(3); // 12-14 rooms
+  } else if (floor === 1) {
+    width = 43;
+    height = 37;
+    numRooms = 14 + rng.int(3); // 14-16 rooms
   } else {
-    width = 51;
-    height = 41;
-    numRooms = 12 + (4 - floor) * 3; // Floor 3: 15, Floor 2: 18, Floor 1: 21
+    // Block 13
+    width = 43;
+    height = 37;
+    numRooms = 14 + rng.int(3); // 14-16 rooms
   }
   
   // Initialize all tiles as walls
@@ -206,19 +219,19 @@ function generateSearchables(
         objectType = objectTypes[rng.int(objectTypes.length)];
         
         // Rebalanced loot table:
-        // 20% battery (was 25%)
-        // 12% health (new)
+        // 20% battery
+        // 15% health (increased from 12%)
         // 25% collectibles (15% eth, 7% btc, 3% hemi)
         // 8% clue
-        // 35% nothing (was 65%)
+        // 32% nothing (reduced from 35%)
         
         if (roll < 0.20) {
           // Battery
           result = { type: 'battery', amount: 8 + rng.int(12) }; // 8-19%
-        } else if (roll < 0.32) {
+        } else if (roll < 0.35) {
           // Health
           result = { type: 'health', amount: 10 + rng.int(16) }; // 10-25 HP
-        } else if (roll < 0.57) {
+        } else if (roll < 0.60) {
           // Collectibles
           const collectRoll = rng.next();
           if (collectRoll < 0.60) {
@@ -228,7 +241,7 @@ function generateSearchables(
           } else {
             result = { type: 'collectible', item: 'hemi', score: 250 };
           }
-        } else if (roll < 0.65) {
+        } else if (roll < 0.68) {
           // Clue
           result = { type: 'clue', id: `clue_${floor}_${roomIndex}_${i}` };
         } else {

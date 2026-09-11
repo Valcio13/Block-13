@@ -35,7 +35,7 @@ export class FloorScene extends Phaser.Scene {
   private searchableSprites: SearchableSprite[] = [];
   private hasKey = false;
   private lastDamageTime: number = 0; // Track invulnerability
-  private invulnerabilityDuration: number = 1500; // 1.5 seconds
+  private invulnerabilityDuration: number = 1500; // 1.5 seconds after any damage
   private stairsUnlocked = false;
   private statusText!: Phaser.GameObjects.Text;
   private interactPrompt!: Phaser.GameObjects.Text;
@@ -65,6 +65,8 @@ export class FloorScene extends Phaser.Scene {
   private keyCollectedAt: number = 0; // Time when key was collected
   private isPaused = false; // Track pause state
   private pauseKey!: Phaser.Input.Keyboard.Key;
+  private isTransitioning = false; // Track floor transitions
+  private storyPopupOpen = false; // Track if story popup is displayed
 
   constructor() {
     super({ key: 'FloorScene' });
@@ -85,6 +87,8 @@ export class FloorScene extends Phaser.Scene {
     this.flashlightOn = false;
     this.searchableSprites = [];
     this.nearestInteractable = null;
+    this.isTransitioning = false;
+    this.storyPopupOpen = false;
   }
 
   create() {
@@ -486,6 +490,9 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private showCluePopup(clue: Clue) {
+    // Mark story popup as open to block scares/damage
+    this.storyPopupOpen = true;
+    
     // Pause gameplay
     this.physics.pause();
     
@@ -588,6 +595,7 @@ export class FloorScene extends Phaser.Scene {
     
     // Handle close
     const closeClue = () => {
+      this.storyPopupOpen = false; // Re-enable scares/damage
       this.tweens.add({
         targets: popupElements,
         alpha: 0,
@@ -1051,7 +1059,52 @@ export class FloorScene extends Phaser.Scene {
     }
   }
 
+  private canTakeDamage(): boolean {
+    // Check if player is in invulnerability period
+    const now = Date.now();
+    if (now - this.lastDamageTime < this.invulnerabilityDuration) {
+      return false;
+    }
+    
+    // Can't take damage during transitions, pauses, or story popups
+    if (this.isTransitioning || this.isPaused || this.storyPopupOpen) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  private applyDamage(amount: number, source: string) {
+    if (!this.canTakeDamage()) return false;
+    
+    this.runState.hp -= amount;
+    this.lastDamageTime = Date.now();
+    this.registry.set('runState', this.runState);
+    
+    // Visual feedback
+    this.cameras.main.shake(200, 0.005);
+    this.showTemporaryMessage(`-${amount} HP (${source})`, '#ff4444', 800);
+    
+    // Update health bar
+    this.updateHealthBar();
+    
+    // Check for death
+    if (this.runState.hp <= 0) {
+      this.runState.hp = 0;
+      this.registry.set('runState', this.runState);
+      this.time.delayedCall(500, () => {
+        this.runState.status = 'lost';
+        this.registry.set('runState', this.runState);
+        this.playerDeath();
+      });
+    }
+    
+    return true;
+  }
+
   private completeFloor() {
+    this.isTransitioning = true; // Block scares and damage during transition
+    
     // Disable player movement
     this.player.setVelocity(0);
     this.input.keyboard?.enabled && (this.input.keyboard.enabled = false);
@@ -1430,10 +1483,12 @@ export class FloorScene extends Phaser.Scene {
     // Show notification
     this.showTemporaryMessage('KEY COLLECTED!\nRETURN TO THE STAIRS', '#ffd700');
     
-    // Trigger jumpscare on key collection
-    const scare = this.jumpscareDirector.tryTriggerOnKeyCollected(Date.now());
-    if (scare) {
-      this.executeJumpscare(scare);
+    // Trigger jumpscare on key collection (only if not transitioning)
+    if (!this.isTransitioning && !this.storyPopupOpen) {
+      const scare = this.jumpscareDirector.tryTriggerOnKeyCollected(Date.now());
+      if (scare) {
+        this.executeJumpscare(scare);
+      }
     }
     
     // Escalate stalker after key collection
@@ -1493,10 +1548,12 @@ export class FloorScene extends Phaser.Scene {
       this.stalker.onPlayerSearch();
     }
     
-    // Check for jumpscare
-    const scare = this.jumpscareDirector.tryTriggerOnSearch(Date.now(), this.hasKey);
-    if (scare) {
-      this.executeJumpscare(scare);
+    // Check for jumpscare (only if not transitioning/paused/popup)
+    if (!this.isTransitioning && !this.isPaused && !this.storyPopupOpen) {
+      const scare = this.jumpscareDirector.tryTriggerOnSearch(Date.now(), this.hasKey);
+      if (scare) {
+        this.executeJumpscare(scare);
+      }
     }
 
     // Process result
@@ -1577,11 +1634,8 @@ export class FloorScene extends Phaser.Scene {
       onComplete: () => flash.destroy()
     });
     
-    // Damage player (with invulnerability check)
-    const now = Date.now();
-    if (now - this.lastDamageTime > this.invulnerabilityDuration) {
-      this.takeDamage(20, 'MIMIC ATTACK!');
-    }
+    // Damage player using new unified system (reduced from 20 to 15 HP)
+    this.applyDamage(15, 'MIMIC');
     
     // Transform sprite to aggressive mimic
     searchable.sprite.setTint(0xff4444);
@@ -1618,42 +1672,13 @@ export class FloorScene extends Phaser.Scene {
           }
           
           // Check collision during chase
-          if (dist < 25 && Date.now() - this.lastDamageTime > this.invulnerabilityDuration) {
-            this.takeDamage(10, 'MIMIC HIT!');
+          if (dist < 25) {
+            this.applyDamage(10, 'MIMIC');
           }
         }
       },
       loop: true
     });
-  }
-  
-  private takeDamage(amount: number, message: string) {
-    const now = Date.now();
-    
-    // Check invulnerability
-    if (now - this.lastDamageTime < this.invulnerabilityDuration) {
-      return; // Still invulnerable
-    }
-    
-    this.lastDamageTime = now;
-    this.runState.hp = Math.max(0, this.runState.hp - amount);
-    this.updateStatusText();
-    this.showTemporaryMessage(`${message}\n-${amount} HP`, '#ff4444', 1200);
-    
-    // Player flash
-    this.tweens.add({
-      targets: this.player,
-      alpha: 0.5,
-      duration: 100,
-      yoyo: true,
-      repeat: 3,
-      onComplete: () => this.player.setAlpha(1)
-    });
-    
-    // Check death
-    if (this.runState.hp <= 0) {
-      this.playerDeath();
-    }
   }
   
   private playerDeath() {
@@ -1694,9 +1719,11 @@ export class FloorScene extends Phaser.Scene {
         if (this.currentRoom !== i) {
           // Entered new room
           this.currentRoom = i;
-          const scare = this.jumpscareDirector.tryTriggerOnRoomEnter(Date.now(), this.hasKey);
-          if (scare) {
-            this.executeJumpscare(scare);
+          if (!this.isTransitioning && !this.isPaused && !this.storyPopupOpen) {
+            const scare = this.jumpscareDirector.tryTriggerOnRoomEnter(Date.now(), this.hasKey);
+            if (scare) {
+              this.executeJumpscare(scare);
+            }
           }
         }
         return;
@@ -1705,6 +1732,11 @@ export class FloorScene extends Phaser.Scene {
   }
   
   private checkJumpscareConditions() {
+    // Don't trigger scares during transitions, pauses, or story popups
+    if (this.isTransitioning || this.isPaused || this.storyPopupOpen) {
+      return;
+    }
+    
     const now = Date.now();
     
     // Check low battery scares
@@ -1941,12 +1973,14 @@ export class FloorScene extends Phaser.Scene {
     this.crawlers.forEach((crawler, index) => {
       const caught = crawler.update(delta, this.player.x, this.player.y, this.floorData.tiles);
       
-      if (caught && canTakeDamage) {
-        // Player caught by crawler
-        this.takeDamage(15, 'CRAWLER ATTACK!');
+      if (caught) {
+        // Player caught by crawler - use unified damage system
+        const damaged = this.applyDamage(15, 'CRAWLER');
         
-        // Respawn crawler far away
-        crawler.spawn(this.player.x, this.player.y, this.floorData.tiles);
+        if (damaged) {
+          // Respawn crawler far away after successful hit
+          crawler.spawn(this.player.x, this.player.y, this.floorData.tiles);
+        }
       }
       
       // Update sprite
@@ -2117,15 +2151,18 @@ export class FloorScene extends Phaser.Scene {
       Math.pow(this.stalker.y - this.player.y, 2)
     );
     
-    const corruptionEffect = this.corruptionManager.tryTriggerCorruption(
-      now,
-      this.runState.curse,
-      stalkerDist,
-      this.hasKey
-    );
-    
-    if (corruptionEffect) {
-      this.executeCorruptionEffect(corruptionEffect);
+    // Only trigger corruption if not transitioning, paused, or showing story
+    if (!this.isTransitioning && !this.isPaused && !this.storyPopupOpen) {
+      const corruptionEffect = this.corruptionManager.tryTriggerCorruption(
+        now,
+        this.runState.curse,
+        stalkerDist,
+        this.hasKey
+      );
+      
+      if (corruptionEffect) {
+        this.executeCorruptionEffect(corruptionEffect);
+      }
     }
   }
   
@@ -2311,18 +2348,19 @@ export class FloorScene extends Phaser.Scene {
     this.player.setVelocity(0);
     this.input.keyboard?.enabled && (this.input.keyboard.enabled = false);
 
-    // Damage player from stalker
-    const now = Date.now();
-    if (now - this.lastDamageTime < this.invulnerabilityDuration) {
+    // Damage player from stalker (35 HP) - uses unified invulnerability system
+    const damaged = this.applyDamage(35, 'STALKER');
+    
+    if (!damaged) {
       // Still invulnerable from recent hit, just retreat stalker
       this.stalker.state = 'retreating';
       this.input.keyboard && (this.input.keyboard.enabled = true);
       return;
     }
     
-    this.lastDamageTime = now;
-    this.runState.hp = Math.max(0, this.runState.hp - 35); // Stalker does significant damage
+    // Add curse on stalker hit
     this.runState.curse = Math.min(100, this.runState.curse + 30);
+    this.registry.set('runState', this.runState);
 
     // Show caught message
     const caughtText = this.add.text(
@@ -2357,16 +2395,16 @@ export class FloorScene extends Phaser.Scene {
       onComplete: () => this.player.setAlpha(1)
     });
 
-    // Check if player dies
-    if (this.runState.hp <= 0 || this.runState.curse >= 100) {
-      // Player dies
+    // Check if player dies from curse
+    if (this.runState.curse >= 100) {
+      // Player dies from curse
       this.time.delayedCall(2000, () => {
         this.runState.status = 'lost';
         this.registry.set('runState', this.runState);
         this.playerDeath();
       });
-    } else {
-      // Player survives but stalker retreats
+    } else if (this.runState.hp > 0) {
+      // Player survives, stalker retreats
       this.time.delayedCall(2000, () => {
         caughtText.destroy();
         
@@ -2377,10 +2415,11 @@ export class FloorScene extends Phaser.Scene {
         
         // Force stalker to retreat
         this.stalker.state = 'retreating';
-        this.showTemporaryMessage(`-35 HP | CURSE: ${Math.floor(this.runState.curse)}%`, '#ff4444');
+        this.showTemporaryMessage(`+30% CURSE | CURSE: ${Math.floor(this.runState.curse)}%`, '#ff4444');
         this.updateStatusText();
       });
     }
+    // If hp <= 0, applyDamage already triggered playerDeath()
   }
 
   private showGameOver() {
@@ -2450,5 +2489,33 @@ export class FloorScene extends Phaser.Scene {
     
     // Make main camera ignore these UI elements
     this.cameras.main.ignore([title, subtitle, stats, retryButton, menuButton]);
+  }
+
+  shutdown() {
+    // Clean up event listeners to prevent memory leaks
+    if (this.pauseKey) {
+      this.pauseKey.removeAllListeners();
+    }
+    if (this.interactKey) {
+      this.interactKey.removeAllListeners();
+    }
+    if (this.flashlightKey) {
+      this.flashlightKey.removeAllListeners();
+    }
+    
+    // Clear all timers
+    this.time.removeAllEvents();
+    
+    // Clear moving wall map
+    this.movingWallSprites.clear();
+    
+    // Clear secondary enemy arrays
+    this.crawlers = [];
+    this.crawlerSprites = [];
+    this.watchers = [];
+    this.watcherSprites = [];
+    
+    // Clear searchable sprites
+    this.searchableSprites = [];
   }
 }
