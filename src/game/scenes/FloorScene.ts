@@ -1041,6 +1041,12 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private handlePlayerMovement() {
+    // Don't handle movement during major scares, transitions, or pauses
+    if (this.jumpscareDirector.isMajorScareActive() || this.isTransitioning || this.isPaused || this.storyPopupOpen) {
+      this.player.setVelocity(0, 0);
+      return;
+    }
+    
     const speed = 160;
     
     // Reset velocity
@@ -2108,8 +2114,14 @@ export class FloorScene extends Phaser.Scene {
     // Mark as major scare
     this.jumpscareDirector.setMajorScareActive(true);
     
+    // Completely freeze player movement
+    this.player.setVelocity(0, 0);
+    this.player.setAcceleration(0, 0);
+    if (this.player.body) {
+      this.player.body.stop(); // Stop all physics movement
+    }
+    
     // Disable player input temporarily
-    this.player.setVelocity(0);
     const keyboardEnabled = this.input.keyboard?.enabled;
     if (this.input.keyboard) {
       this.input.keyboard.enabled = false;
