@@ -35,7 +35,7 @@ export const completeFloor = (state: RunState): RunState => ({
   score: state.score + 100 * state.floor, // Higher floors worth more points
   curse: state.curse + 10, // Danger increases
   battery: Math.min(100, state.battery + 20), // Small battery restoration
-  status: state.floor <= 1 ? 'won' : 'playing', // Win after completing Floor 1 (floor becomes 0)
+  status: state.floor - 1 < 0 ? 'won' : 'playing', // Win after completing Block 13 (floor 0)
   // seenStoryIds persists across floors (don't reset)
 });
 
