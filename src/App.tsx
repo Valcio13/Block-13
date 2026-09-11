@@ -23,6 +23,46 @@ function GameApp() {
   const { startRun, isLoading: isStarting, error: startError } = useStartRun();
   const { submitScore, isLoading: isSubmitting, isSuccess: submitSuccess } = useSubmitScore();
 
+  // Recover active run from sessionStorage on mount
+  useEffect(() => {
+    const savedRun = sessionStorage.getItem('activeRun');
+    if (savedRun && status === 'idle') {
+      try {
+        const { runState: savedState } = JSON.parse(savedRun);
+        // Only recover if the run was still playing
+        if (savedState && savedState.status === 'playing') {
+          setRunState(savedState);
+          setStatus('playing');
+          console.log('Recovered active run from refresh');
+        }
+      } catch (err) {
+        console.error('Failed to recover run:', err);
+        sessionStorage.removeItem('activeRun');
+      }
+    }
+  }, []);
+
+  // Clear sessionStorage when run completes
+  useEffect(() => {
+    if (status === 'complete') {
+      sessionStorage.removeItem('activeRun');
+    }
+  }, [status]);
+
+  // Warn user before closing/refreshing during active game
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (status === 'playing' && runState) {
+        e.preventDefault();
+        e.returnValue = 'Your game is in progress. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [status, runState]);
+
   const beginRun = async () => {
     if (!isConnected) {
       setStatus('connecting');
@@ -44,6 +84,13 @@ function GameApp() {
       const seed = seedFromBytes32(result.seed);
       const newRun = createRun(seed, result.nonce, address);
       setRunState(newRun);
+      
+      // Save run to sessionStorage for refresh recovery
+      sessionStorage.setItem('activeRun', JSON.stringify({
+        runState: newRun,
+        txHash: result.hash,
+      }));
+      
       setStatus('playing');
     } catch (err: any) {
       setError(err.message || 'Failed to start run');
@@ -59,6 +106,12 @@ function GameApp() {
     const localSeed = Math.floor(Math.random() * 0xFFFFFFFF);
     const localRun = createRun(localSeed, undefined, undefined);
     setRunState(localRun);
+    
+    // Save to sessionStorage (without blockchain data)
+    sessionStorage.setItem('activeRun', JSON.stringify({
+      runState: localRun,
+      txHash: null,
+    }));
   };
 
   const handleGameComplete = async (finalState: RunState) => {
@@ -66,6 +119,12 @@ function GameApp() {
     if (finalState.nonce === undefined || !address) {
       // Local-only run completed
       setStatus('complete');
+      return;
+    }
+
+    // Prevent duplicate submission
+    if (status === 'submitting' || status === 'complete') {
+      console.warn('Score already submitted or in progress');
       return;
     }
 
@@ -77,7 +136,7 @@ function GameApp() {
       setStatus('complete');
     } catch (err: any) {
       setError(err.message || 'Failed to submit score');
-      // Keep game state for retry
+      setStatus('playing'); // Allow retry by keeping in playing state
     }
   };
 

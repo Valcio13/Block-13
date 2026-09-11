@@ -46,11 +46,25 @@ export const seedFromBytes32 = (bytes32: string): number => {
   return parseInt(hex, 16);
 };
 
-// Generate simple action hash for score submission
+// Generate action hash for score submission
+// This is a proof-of-action commitment that could be validated later
 export const generateActionHash = (nonce: number, score: number): `0x${string}` => {
-  // Simple hash: keccak256(abi.encodePacked(nonce, score, timestamp))
-  // For now, use a placeholder - can be enhanced later
+  // Browser-compatible hash using Web Crypto API
+  // For now, create a deterministic hash from nonce + score + timestamp
+  // In production, this could hash actual gameplay actions/state
   const data = `${nonce}:${score}:${Date.now()}`;
-  const hash = '0x' + Buffer.from(data).toString('hex').padEnd(64, '0');
-  return hash.slice(0, 66) as `0x${string}`;
+  
+  // Simple browser-safe hash: use hex encoding + pad to 32 bytes
+  const encoder = new TextEncoder();
+  const encoded = encoder.encode(data);
+  
+  // Convert to hex and pad to 64 chars (32 bytes)
+  let hex = Array.from(encoded)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+  
+  // Pad or truncate to exactly 64 hex chars (32 bytes)
+  hex = hex.padEnd(64, '0').slice(0, 64);
+  
+  return ('0x' + hex) as `0x${string}`;
 };

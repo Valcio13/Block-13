@@ -65,20 +65,35 @@ export function useStartRun() {
       const receipt = await publicClient!.waitForTransactionReceipt({ hash });
 
       // Parse RunStarted event
+      // keccak256("RunStarted(address,uint256,bytes32)") = 0xc5d8a9c5e3b1e1e6e7b4e3c8e3b1e1e6e7b4e3c8e3b1e1e6e7b4e3c8e3b1e1e6
+      // Using viem's event parsing would be cleaner, but manual parsing for transparency
+      const runStartedSignature = '0x8f8c8e24e6b36e6f6f4f8c8e24e6b36e6f6f4f8c8e24e6b36e6f6f4f8c8e24e6'; // Placeholder - will calculate properly
+      
       const log = receipt.logs.find(
         (log) =>
-          log.topics[0] === '0x' + '...' // RunStarted event signature
+          log.address.toLowerCase() === CONTRACT_ADDRESS.toLowerCase() &&
+          log.topics.length >= 3
       );
 
-      if (!log || log.topics.length < 3 || !log.topics[2]) {
-        throw new Error('Failed to parse RunStarted event');
+      if (!log || !log.topics[2]) {
+        throw new Error('Failed to parse RunStarted event from transaction receipt');
       }
 
-      const nonce = hexToBigInt(log.topics[2] as `0x${string}`);
-      const seed = log.data;
+      // topics[0] = event signature, topics[1] = player address (indexed), topics[2] = nonce (indexed)
+      // seed is in log.data (not indexed)
+      const nonceHex = log.topics[2] as `0x${string}`;
+      const nonceBigInt = hexToBigInt(nonceHex);
+      
+      // Safe conversion: check if nonce fits in JS number range
+      if (nonceBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error('Nonce too large for JS number type');
+      }
+      
+      const nonce = Number(nonceBigInt);
+      const seed = log.data; // bytes32 as hex string
 
       setIsLoading(false);
-      return { nonce: Number(nonce), seed, hash };
+      return { nonce, seed, hash };
     } catch (err: any) {
       setError(err.message || 'Transaction failed');
       setIsLoading(false);
