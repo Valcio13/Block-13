@@ -9,6 +9,7 @@ import { Crawler, Watcher, spawnSecondaryEnemies } from '../../core/secondaryEne
 import { ClueManager, Clue } from '../../core/clues';
 import { BoxScareManager, BoxScareEvent } from '../../core/boxScares';
 import { Ambusher, spawnAmbushers } from '../../core/ambusher';
+import { AudioDirector, AUDIO_KEYS } from '../../core/audioDirector';
 import type { Floor, Searchable, SearchResult } from '../../core/floor';
 import type { RunState } from '../../core/run';
 
@@ -59,6 +60,7 @@ export class FloorScene extends Phaser.Scene {
   private movingWallSystem!: MovingWallSystem;
   private clueManager!: ClueManager;
   private boxScareManager!: BoxScareManager;
+  private audioDirector!: AudioDirector;
   private ambushers: Ambusher[] = [];
   private ambusherSprites: Phaser.GameObjects.Sprite[] = [];
   private crawlers: Crawler[] = [];
@@ -138,6 +140,12 @@ export class FloorScene extends Phaser.Scene {
     this.jumpscareDirector = new JumpscareDirector({
       seed: this.runState.seed,
       floor: this.runState.floor,
+    });
+    
+    // Create audio director
+    this.audioDirector = new AudioDirector({
+      seed: this.runState.seed,
+      scene: this,
     });
     
     // Create corruption manager
@@ -1165,6 +1173,9 @@ export class FloorScene extends Phaser.Scene {
     this.lastDamageTime = Date.now();
     this.registry.set('runState', this.runState);
     
+    // Play hurt sound
+    this.audioDirector.play(AUDIO_KEYS.player.hurt, 'sfx', { volume: 0.7 });
+    
     // Visual feedback
     this.cameras.main.shake(200, 0.005);
     this.showTemporaryMessage(`-${amount} HP (${source})`, '#ff4444', 800);
@@ -1188,6 +1199,9 @@ export class FloorScene extends Phaser.Scene {
 
   private completeFloor() {
     this.isTransitioning = true; // Block scares and damage during transition
+    
+    // Play floor transition sound
+    this.audioDirector.play(AUDIO_KEYS.interaction.floorTransition, 'sfx', { volume: 0.6 });
     
     // Disable player movement
     this.player.setVelocity(0);
@@ -1682,6 +1696,10 @@ export class FloorScene extends Phaser.Scene {
     this.hasKey = true;
     this.keyCollectedAt = Date.now();
     
+    // Play key pickup sound
+    this.audioDirector.play(AUDIO_KEYS.interaction.keyPickup, 'sfx', { volume: 0.8 });
+    this.audioDirector.play(AUDIO_KEYS.progression.keyFound, 'sfx', { volume: 0.6 });
+    
     // Remove key with effect
     this.tweens.add({
       targets: this.keySprite,
@@ -1712,6 +1730,8 @@ export class FloorScene extends Phaser.Scene {
 
   private interactWithStairs() {
     if (!this.hasKey) {
+      // Play locked sound
+      this.audioDirector.play(AUDIO_KEYS.interaction.locked, 'sfx', { volume: 0.6 });
       this.showTemporaryMessage('STAIRS LOCKED\nFIND THE KEY', '#ff4444');
       return;
     }
@@ -1729,6 +1749,9 @@ export class FloorScene extends Phaser.Scene {
   private unlockStairs() {
     this.stairsUnlocked = true;
     this.stairsSprite.setTexture('stairs_unlocked');
+    
+    // Play unlock sound
+    this.audioDirector.play(AUDIO_KEYS.interaction.unlock, 'sfx', { volume: 0.7 });
     
     // Update stairs label
     const stairsLabel = this.children.getByName('stairsLabel') as Phaser.GameObjects.Text;
@@ -1757,6 +1780,9 @@ export class FloorScene extends Phaser.Scene {
     searchable.searched = true;
     searchable.sprite.setTint(0x666666);
     searchable.sprite.setAlpha(0.6);
+    
+    // Play container open sound
+    this.audioDirector.play(AUDIO_KEYS.interaction.containerOpen, 'sfx', { volume: 0.5 });
 
     // Notify stalker of player action
     if (this.stalker) {
@@ -2159,11 +2185,19 @@ export class FloorScene extends Phaser.Scene {
   }
   
   private executeBoxScare(boxScare: BoxScareEvent, searchable: SearchableSprite) {
+    // Play audio for box scare type
+    const audioKey = this.getBoxScareAudioKey(boxScare.type);
+    if (audioKey) {
+      this.audioDirector.play(audioKey, 'sfx', { volume: 0.7 });
+    }
+    
     // Mark as major scare temporarily to prevent overlap
     if (boxScare.intensity === 'major') {
       this.jumpscareDirector.setMajorScareActive(true);
+      this.audioDirector.setMajorScareAudioActive(true);
       this.time.delayedCall(1500, () => {
         this.jumpscareDirector.setMajorScareActive(false);
+        this.audioDirector.setMajorScareAudioActive(false);
       });
     }
     
@@ -2298,6 +2332,10 @@ export class FloorScene extends Phaser.Scene {
   private executeAmbusherJumpscare(ambusher: Ambusher) {
     // Mark as major scare
     this.jumpscareDirector.setMajorScareActive(true);
+    this.audioDirector.setMajorScareAudioActive(true);
+    
+    // Play ambusher scream (priority audio)
+    this.audioDirector.play(AUDIO_KEYS.ambusher.scream, 'sfx', { volume: 1.0 });
     
     // Completely freeze player movement
     this.player.setVelocity(0, 0);
@@ -2397,6 +2435,8 @@ export class FloorScene extends Phaser.Scene {
     // Apply damage
     this.time.delayedCall(200, () => {
       this.applyDamage(ambusher.getDamage(), 'AMBUSH');
+      // Play impact sound
+      this.audioDirector.play(AUDIO_KEYS.ambusher.impact, 'sfx', { volume: 0.8 });
     });
     
     // Fade out after jumpscare
@@ -2416,6 +2456,7 @@ export class FloorScene extends Phaser.Scene {
           
           // Clear major scare state
           this.jumpscareDirector.setMajorScareActive(false);
+          this.audioDirector.setMajorScareAudioActive(false);
         }
       });
     });
@@ -3193,6 +3234,20 @@ export class FloorScene extends Phaser.Scene {
       menuBg, menuBorder, menuButton
     ]);
   }
+  
+  private getBoxScareAudioKey(type: string): string | null {
+    switch (type) {
+      case 'lid_slam': return AUDIO_KEYS.jumpscares.lidSlam;
+      case 'hand_inside': return AUDIO_KEYS.jumpscares.handInside;
+      case 'object_falls': return AUDIO_KEYS.jumpscares.objectFalls;
+      case 'whisper': return AUDIO_KEYS.jumpscares.whisper;
+      case 'screen_glitch': return AUDIO_KEYS.jumpscares.screenGlitch;
+      case 'false_mimic': return AUDIO_KEYS.jumpscares.falseMimic;
+      case 'wall_shift': return AUDIO_KEYS.jumpscares.wallShift;
+      case 'shadow_figure': return AUDIO_KEYS.jumpscares.shadowFigure;
+      default: return null;
+    }
+  }
 
   shutdown() {
     // Clean up event listeners to prevent memory leaks
@@ -3208,6 +3263,11 @@ export class FloorScene extends Phaser.Scene {
     
     // Clear all timers
     this.time.removeAllEvents();
+    
+    // Shutdown audio director
+    if (this.audioDirector) {
+      this.audioDirector.shutdown();
+    }
     
     // Clear moving wall map
     this.movingWallSprites.clear();
