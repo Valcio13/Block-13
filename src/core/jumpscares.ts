@@ -30,6 +30,7 @@ export class JumpscareDirector {
   private globalCooldown: number = 15000; // 15 seconds between major scares
   private minorCooldown: number = 8000; // 8 seconds between subtle scares
   private scareCount: number = 0;
+  private activeMajorScare: boolean = false; // Track if major scare is currently active
   
   constructor(config: JumpscareConfig) {
     this.rng = new SeededRng(config.seed ^ 0xBADF00D);
@@ -60,6 +61,11 @@ export class JumpscareDirector {
   }
   
   public canTriggerScare(now: number, intensity: 'subtle' | 'moderate' | 'major'): boolean {
+    // Block all scares if a major scare is currently active
+    if (this.activeMajorScare && intensity !== 'subtle') {
+      return false;
+    }
+    
     const timeSinceLastScare = now - this.lastScareTime;
     
     if (intensity === 'major' && timeSinceLastScare < this.globalCooldown) {
@@ -75,6 +81,14 @@ export class JumpscareDirector {
     }
     
     return true;
+  }
+  
+  public setMajorScareActive(active: boolean) {
+    this.activeMajorScare = active;
+  }
+  
+  public isMajorScareActive(): boolean {
+    return this.activeMajorScare;
   }
   
   public tryTriggerOnSearch(now: number, hasKey: boolean): JumpscareEvent | null {

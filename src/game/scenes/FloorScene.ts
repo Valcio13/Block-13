@@ -7,6 +7,8 @@ import { CorruptionManager, CorruptionEffect } from '../../core/corruption';
 import { MovingWallSystem, Wall, WallMoveEvent } from '../../core/movingWalls';
 import { Crawler, Watcher, spawnSecondaryEnemies } from '../../core/secondaryEnemies';
 import { ClueManager, Clue } from '../../core/clues';
+import { BoxScareManager, BoxScareEvent } from '../../core/boxScares';
+import { Ambusher, spawnAmbushers } from '../../core/ambusher';
 import type { Floor, Searchable, SearchResult } from '../../core/floor';
 import type { RunState } from '../../core/run';
 
@@ -56,6 +58,9 @@ export class FloorScene extends Phaser.Scene {
   private corruptionManager!: CorruptionManager;
   private movingWallSystem!: MovingWallSystem;
   private clueManager!: ClueManager;
+  private boxScareManager!: BoxScareManager;
+  private ambushers: Ambusher[] = [];
+  private ambusherSprites: Phaser.GameObjects.Sprite[] = [];
   private crawlers: Crawler[] = [];
   private crawlerSprites: Phaser.GameObjects.Sprite[] = [];
   private watchers: Watcher[] = [];
@@ -141,6 +146,12 @@ export class FloorScene extends Phaser.Scene {
     // Create clue manager
     this.clueManager = new ClueManager(this.runState.seed);
     
+    // Create box scare manager
+    this.boxScareManager = new BoxScareManager({
+      seed: this.runState.seed,
+      floor: this.runState.floor,
+    });
+    
     // Create moving wall system
     this.movingWallSystem = new MovingWallSystem(
       this.runState.seed,
@@ -161,6 +172,18 @@ export class FloorScene extends Phaser.Scene {
     this.crawlers = crawlers;
     this.watchers = watchers;
     this.createSecondaryEnemySprites();
+    
+    // Spawn ambushers
+    this.ambushers = spawnAmbushers(
+      this.runState.floor,
+      this.runState.seed,
+      this.player.x,
+      this.player.y,
+      this.floorData.tiles,
+      this.floorData.rooms,
+      this.tileSize
+    );
+    this.createAmbusherSprites();
 
     // Camera follows player smoothly with increased zoom
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
@@ -309,6 +332,7 @@ export class FloorScene extends Phaser.Scene {
     this.updateLighting();
     this.updateStalker(delta);
     this.updateSecondaryEnemies(delta);
+    this.updateAmbushers(delta);
     this.updateMovingWalls();
     this.updateCorruption();
     this.drainBattery(delta);
@@ -1548,15 +1572,44 @@ export class FloorScene extends Phaser.Scene {
       this.stalker.onPlayerSearch();
     }
     
-    // Check for jumpscare (only if not transitioning/paused/popup)
+    // Check for box scare (separate from normal jumpscares and mimics)
+    if (!this.isTransitioning && !this.isPaused && !this.storyPopupOpen) {
+      const boxScare = this.boxScareManager.tryTriggerOnSearch(Date.now(), this.hasKey);
+      if (boxScare && searchable.data.result.type !== 'mimic_reveal') {
+        // Trigger box scare with optional delay
+        if (boxScare.delay > 0) {
+          this.time.delayedCall(boxScare.delay, () => {
+            this.executeBoxScare(boxScare, searchable);
+          });
+        } else {
+          this.executeBoxScare(boxScare, searchable);
+        }
+      }
+    }
+    
+    // Check for normal jumpscare (only if not transitioning/paused/popup)
     if (!this.isTransitioning && !this.isPaused && !this.storyPopupOpen) {
       const scare = this.jumpscareDirector.tryTriggerOnSearch(Date.now(), this.hasKey);
       if (scare) {
         this.executeJumpscare(scare);
       }
     }
+    
+    // Trigger ambusher if nearby
+    this.ambushers.forEach(ambusher => {
+      if (ambusher.state === 'hidden') {
+        const distToBox = Math.sqrt(
+          Math.pow(ambusher.x - searchable.sprite.x, 2) +
+          Math.pow(ambusher.y - searchable.sprite.y, 2)
+        );
+        if (distToBox < 150) {
+          // Manually trigger ambusher update with search flag
+          ambusher.update(0, this.player.x, this.player.y, true, searchable.sprite.x, searchable.sprite.y);
+        }
+      }
+    });
 
-    // Process result
+    // Process result (loot is NOT affected by box scares)
     const result = searchable.data.result;
     
     switch (result.type) {
@@ -1914,6 +1967,143 @@ export class FloorScene extends Phaser.Scene {
     });
   }
   
+  private executeBoxScare(boxScare: BoxScareEvent, searchable: SearchableSprite) {
+    // Mark as major scare temporarily to prevent overlap
+    if (boxScare.intensity === 'major') {
+      this.jumpscareDirector.setMajorScareActive(true);
+      this.time.delayedCall(1500, () => {
+        this.jumpscareDirector.setMajorScareActive(false);
+      });
+    }
+    
+    // Execute box scare based on type
+    switch (boxScare.type) {
+      case 'lid_slam':
+        // Lid slams shut briefly
+        this.cameras.main.shake(150, 0.005);
+        this.tweens.add({
+          targets: searchable.sprite,
+          scaleY: 0.5,
+          duration: 100,
+          yoyo: true,
+        });
+        this.showTemporaryMessage('*SLAM*', '#ff4444', 600);
+        break;
+        
+      case 'hand_inside':
+        // Brief hand/face appears inside
+        const hand = this.add.rectangle(
+          searchable.sprite.x,
+          searchable.sprite.y,
+          20,
+          30,
+          0x330000,
+          0.9
+        ).setDepth(12);
+        
+        this.tweens.add({
+          targets: hand,
+          alpha: 0,
+          duration: 400,
+          onComplete: () => hand.destroy()
+        });
+        this.cameras.main.shake(200, 0.008);
+        break;
+        
+      case 'object_falls':
+        // Nearby searchable shakes and moves
+        const nearbySearchables = this.searchableSprites.filter(s => {
+          const dist = Phaser.Math.Distance.Between(
+            searchable.sprite.x, searchable.sprite.y,
+            s.sprite.x, s.sprite.y
+          );
+          return dist < 100 && s !== searchable;
+        });
+        
+        if (nearbySearchables.length > 0) {
+          const target = nearbySearchables[0].sprite;
+          this.tweens.add({
+            targets: target,
+            y: target.y + 10,
+            duration: 200,
+            ease: 'Bounce.Out',
+          });
+        }
+        this.showTemporaryMessage('*crash*', '#888888', 600);
+        break;
+        
+      case 'whisper':
+        // Subtle whisper text near player
+        this.showTemporaryMessage('...behind you...', '#660000', 1000);
+        break;
+        
+      case 'screen_glitch':
+        // Brief screen distortion
+        const glitch = this.add.rectangle(
+          this.cameras.main.width / 2,
+          this.cameras.main.height / 2,
+          this.cameras.main.width,
+          this.cameras.main.height,
+          0x00ff00,
+          0.2
+        ).setScrollFactor(0).setDepth(160);
+        
+        this.cameras.main.ignore(glitch);
+        
+        this.tweens.add({
+          targets: glitch,
+          alpha: 0,
+          duration: 150,
+          repeat: 1,
+          onComplete: () => glitch.destroy()
+        });
+        break;
+        
+      case 'false_mimic':
+        // Box briefly shows teeth then returns to normal
+        const teeth = this.add.graphics();
+        teeth.fillStyle(0xffffff, 1);
+        teeth.fillTriangle(
+          searchable.sprite.x - 8, searchable.sprite.y,
+          searchable.sprite.x, searchable.sprite.y - 10,
+          searchable.sprite.x + 8, searchable.sprite.y
+        );
+        teeth.setDepth(12);
+        
+        this.cameras.main.shake(250, 0.01);
+        
+        this.time.delayedCall(300, () => {
+          teeth.destroy();
+        });
+        break;
+        
+      case 'wall_shift':
+        // Nearby wall seems to shift
+        this.cameras.main.shake(200, 0.004);
+        this.showTemporaryMessage('The wall moved...', '#888888', 800);
+        break;
+        
+      case 'shadow_figure':
+        // Dark figure briefly visible near box
+        const figure = this.add.rectangle(
+          searchable.sprite.x + 60,
+          searchable.sprite.y,
+          20,
+          40,
+          0x000000,
+          0.8
+        ).setDepth(11);
+        
+        this.tweens.add({
+          targets: figure,
+          alpha: 0,
+          duration: 500,
+          onComplete: () => figure.destroy()
+        });
+        break;
+    }
+  }
+  
   private escalateStalkerAfterKey() {
     if (!this.stalker) return;
     
@@ -1962,6 +2152,87 @@ export class FloorScene extends Phaser.Scene {
       sprite.setDepth(8);
       sprite.setAlpha(0.6);
       this.watcherSprites.push(sprite);
+    });
+  }
+  
+  private createAmbusherSprites() {
+    // Create ambusher sprites
+    this.ambushers.forEach((ambusher) => {
+      const graphics = this.add.graphics();
+      // Darker, more menacing figure
+      graphics.fillStyle(0x0a0a0a, 0.9); // Almost black
+      graphics.fillRect(-10, -14, 20, 28); // Hunched figure
+      graphics.fillStyle(0xffaa00, 1); // Amber glowing eyes
+      graphics.fillCircle(-4, -8, 3);
+      graphics.fillCircle(4, -8, 3);
+      graphics.generateTexture(`ambusher_${ambusher.id}`, 24, 32);
+      graphics.destroy();
+      
+      const sprite = this.add.sprite(ambusher.x, ambusher.y, `ambusher_${ambusher.id}`);
+      sprite.setDepth(9);
+      sprite.setAlpha(0); // Start invisible
+      this.ambusherSprites.push(sprite);
+    });
+  }
+  
+  private updateAmbushers(delta: number) {
+    // Don't update ambushers during transitions or pauses
+    if (this.isTransitioning || this.isPaused || this.storyPopupOpen) {
+      return;
+    }
+    
+    // Check if any major scare is active
+    const majorScareActive = this.jumpscareDirector.isMajorScareActive();
+    
+    this.ambushers.forEach((ambusher, index) => {
+      // Don't trigger ambushers during major scares
+      if (majorScareActive && ambusher.state === 'hidden') {
+        return;
+      }
+      
+      const result = ambusher.update(
+        delta,
+        this.player.x,
+        this.player.y,
+        false // We'll handle searching separately
+      );
+      
+      // Handle reveal - mark as major scare
+      if (result.shouldReveal && ambusher.state === 'warning') {
+        this.jumpscareDirector.setMajorScareActive(true);
+        this.showTemporaryMessage('SOMETHING IS NEAR...', '#ff4444', 600);
+      }
+      
+      // Handle contact damage
+      if (result.contacted) {
+        const damaged = this.applyDamage(ambusher.getDamage(), 'AMBUSH');
+        if (damaged) {
+          this.runState.curse = Math.min(100, this.runState.curse + ambusher.getCurse());
+          this.registry.set('runState', this.runState);
+        }
+        // End major scare state
+        this.jumpscareDirector.setMajorScareActive(false);
+      }
+      
+      // Clear major scare state when ambusher becomes inactive
+      if (ambusher.state === 'inactive' || ambusher.state === 'retreating') {
+        this.jumpscareDirector.setMajorScareActive(false);
+      }
+      
+      // Update sprite
+      const sprite = this.ambusherSprites[index];
+      if (sprite) {
+        sprite.setPosition(ambusher.x, ambusher.y);
+        sprite.setAlpha(ambusher.alpha);
+        
+        // Add pulsing effect when revealing/rushing
+        if (ambusher.state === 'revealing' || ambusher.state === 'rushing') {
+          const pulse = 0.8 + Math.sin(Date.now() / 100) * 0.2;
+          sprite.setScale(pulse);
+        } else {
+          sprite.setScale(1.0);
+        }
+      }
     });
   }
   
@@ -2509,11 +2780,13 @@ export class FloorScene extends Phaser.Scene {
     // Clear moving wall map
     this.movingWallSprites.clear();
     
-    // Clear secondary enemy arrays
+    // Clear enemy arrays
     this.crawlers = [];
     this.crawlerSprites = [];
     this.watchers = [];
     this.watcherSprites = [];
+    this.ambushers = [];
+    this.ambusherSprites = [];
     
     // Clear searchable sprites
     this.searchableSprites = [];
