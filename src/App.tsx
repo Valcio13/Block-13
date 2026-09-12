@@ -3,7 +3,8 @@ import Phaser from 'phaser';
 import { WagmiProvider } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createGameConfig } from './game/config';
-import { createRun, seedFromBytes32, generateActionHash } from './core/run';
+import { createRun, generateActionHash } from './core/run';
+import { initRNG, initLocalRNG } from './core/rng';
 import { useWallet, useStartRun, useSubmitScore } from './web3/hooks';
 import { wagmiConfig } from './web3/wagmi';
 import type { RunState } from './core/run';
@@ -33,6 +34,14 @@ function GameApp() {
         if (savedState && savedState.status === 'playing') {
           setRunState(savedState);
           setStatus('playing');
+          
+          // Re-initialize RNG from saved manifest
+          if (savedState.manifest) {
+            initRNG(savedState.manifest);
+          } else {
+            initLocalRNG();
+          }
+          
           console.log('Recovered active run from refresh');
         }
       } catch (err) {
@@ -80,9 +89,15 @@ function GameApp() {
     setError(null);
 
     try {
+      console.log('[App] Starting blockchain run...');
       const result = await startRun();
-      const seed = seedFromBytes32(result.seed);
-      const newRun = createRun(seed, result.nonce, address);
+      console.log('[App] Run started:', result);
+      
+      // Initialize RNG from manifest
+      initRNG(result.manifest);
+      
+      // Create run state with manifest
+      const newRun = createRun(result.manifest);
       setRunState(newRun);
       
       // Save run to sessionStorage for refresh recovery
@@ -93,6 +108,7 @@ function GameApp() {
       
       setStatus('playing');
     } catch (err: any) {
+      console.error('[App] Failed to start run:', err);
       setError(err.message || 'Failed to start run');
       setStatus('idle');
     }
@@ -102,9 +118,13 @@ function GameApp() {
     setStatus('playing');
     setError(null);
     
-    // Generate local-only run with random seed
-    const localSeed = Math.floor(Math.random() * 0xFFFFFFFF);
-    const localRun = createRun(localSeed, undefined, undefined);
+    console.log('[App] Starting local run...');
+    
+    // Initialize local RNG (no blockchain manifest)
+    initLocalRNG();
+    
+    // Create local-only run (no manifest)
+    const localRun = createRun(undefined);
     setRunState(localRun);
     
     // Save to sessionStorage (without blockchain data)
@@ -116,7 +136,7 @@ function GameApp() {
 
   const handleGameComplete = async (finalState: RunState) => {
     // Check if this is a blockchain run
-    if (finalState.nonce === undefined || !address) {
+    if (!finalState.manifest || !address) {
       // Local-only run completed
       setStatus('complete');
       return;
@@ -131,8 +151,9 @@ function GameApp() {
     setStatus('submitting');
 
     try {
-      const actionHash = generateActionHash(finalState.nonce, finalState.score);
-      await submitScore(finalState.nonce, finalState.score, actionHash);
+      const runId = finalState.manifest.runId;
+      const actionHash = generateActionHash(runId, finalState.score);
+      await submitScore(runId, finalState.score, actionHash);
       setStatus('complete');
     } catch (err: any) {
       setError(err.message || 'Failed to submit score');
@@ -193,7 +214,7 @@ function GameApp() {
   }
 
   if (status === 'complete' || submitSuccess) {
-    const isBlockchainRun = runState?.nonce !== undefined;
+    const isBlockchainRun = runState?.manifest !== undefined;
     
     return (
       <main className="app-shell">
@@ -223,7 +244,7 @@ function GameApp() {
         <h1 id="game-title">BLOCK 13</h1>
         <p className="subtitle">DESCENT INTO DARKNESS</p>
         <p className="premise">
-          A transaction opened a door inside the building. Find the keys. Descend three floors. Do not let it see you.
+          A transaction opened a door inside the building. Find the keys. Descend through floors. Do not let it see you.
         </p>
 
         {!isConnected ? (
@@ -252,9 +273,23 @@ function GameApp() {
             SWITCH TO HEMI TESTNET
           </button>
         ) : (
-          <button type="button" onClick={beginRun} disabled={status === 'starting'}>
-            {status === 'starting' ? 'STARTING RUN...' : 'START RUN'}
-          </button>
+          <>
+            <button type="button" onClick={beginRun} disabled={status === 'starting'}>
+              {status === 'starting' ? 'FETCHING ENTROPY...' : 'START RUN (BLOCKCHAIN)'}
+            </button>
+            <button 
+              type="button" 
+              onClick={beginLocalRun} 
+              style={{ 
+                marginTop: '1rem',
+                background: 'transparent',
+                border: '1px solid #4a5568',
+                color: '#a5b6b5'
+              }}
+            >
+              PLAY WITHOUT BLOCKCHAIN
+            </button>
+          </>
         )}
 
         {isConnected && (
@@ -263,6 +298,7 @@ function GameApp() {
           </p>
         )}
 
+        <p className="run-rule">Multi-chain entropy: BTC · Hemi · Ethereum</p>
         <p className="run-rule">2 transactions only: start run · submit score</p>
 
         {(error || startError) && (

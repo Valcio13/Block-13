@@ -1,7 +1,9 @@
 import { useAccount, useConnect, useDisconnect, useWriteContract, useWaitForTransactionReceipt, useSwitchChain, usePublicClient } from 'wagmi';
 import { hemiTestnet, CONTRACT_ADDRESS, RUN_REGISTRY_ABI } from './config';
 import { useState, useCallback } from 'react';
-import { hexToBigInt, type Hash } from 'viem';
+import { type Hash } from 'viem';
+import { fetchEntropyBundle, validateEntropyBundle, type EntropyBundle } from './entropyFetcher';
+import type { RunManifest } from '../core/seedDerivation';
 
 export function useWallet() {
   const { address, isConnected, chain } = useAccount();
@@ -35,9 +37,25 @@ export function useWallet() {
   };
 }
 
+/**
+ * Game configuration constants
+ */
+const GAME_VERSION = '0.1.0';
+const DEFAULT_CHARACTER = 'survivor';
+const DEFAULT_RULES = 'classic';
+
+// Convert strings to bytes32 format for contract
+function stringToBytes32(str: string): `0x${string}` {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(str);
+  const hex = Array.from(data).map(b => b.toString(16).padStart(2, '0')).join('');
+  return ('0x' + hex.padEnd(64, '0')) as `0x${string}`;
+}
+
 export function useStartRun() {
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
+  const { address } = useAccount();
   const [txHash, setTxHash] = useState<Hash | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,60 +64,99 @@ export function useStartRun() {
     hash: txHash || undefined,
   });
 
-  const startRun = useCallback(async () => {
+  const startRun = useCallback(async (gameMode: number = 0): Promise<{ runId: number; manifest: RunManifest; hash: Hash }> => {
+    if (!publicClient || !address) {
+      throw new Error('Wallet not connected');
+    }
+
     setIsLoading(true);
     setError(null);
     setTxHash(null);
 
     try {
+      console.log('[useStartRun] Fetching entropy sources...');
+      
+      // Fetch entropy from multiple chains
+      const entropy: EntropyBundle = await fetchEntropyBundle(publicClient, address);
+      
+      if (!validateEntropyBundle(entropy)) {
+        throw new Error('Failed to fetch valid entropy sources');
+      }
+
+      console.log('[useStartRun] Entropy validated, starting run transaction...');
+
+      // Convert game config to bytes32
+      const gameVersion = stringToBytes32(GAME_VERSION);
+      const character = stringToBytes32(DEFAULT_CHARACTER);
+      const rulesHash = stringToBytes32(DEFAULT_RULES);
+
+      // Call startRun with all entropy sources
       const hash = await writeContractAsync({
         address: CONTRACT_ADDRESS,
         abi: RUN_REGISTRY_ABI,
         functionName: 'startRun',
-        args: [],
+        args: [
+          gameMode,
+          gameVersion,
+          character,
+          rulesHash,
+          entropy.btcBlockHash,
+          entropy.hemiBlockHash,
+          entropy.ethBlockHash,
+          entropy.hemiTxHash,
+        ],
       });
 
       setTxHash(hash);
+      console.log('[useStartRun] Transaction submitted:', hash);
 
-      // Wait for transaction receipt to get event logs
-      const receipt = await publicClient!.waitForTransactionReceipt({ hash });
+      // Wait for confirmation
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      console.log('[useStartRun] Transaction confirmed');
 
-      // Parse RunStarted event
-      // keccak256("RunStarted(address,uint256,bytes32)") = 0xc5d8a9c5e3b1e1e6e7b4e3c8e3b1e1e6e7b4e3c8e3b1e1e6e7b4e3c8e3b1e1e6
-      // Using viem's event parsing would be cleaner, but manual parsing for transparency
-      const runStartedSignature = '0x8f8c8e24e6b36e6f6f4f8c8e24e6b36e6f6f4f8c8e24e6b36e6f6f4f8c8e24e6'; // Placeholder - will calculate properly
-      
+      // Parse RunStarted event to get runId
       const log = receipt.logs.find(
         (log) =>
           log.address.toLowerCase() === CONTRACT_ADDRESS.toLowerCase() &&
-          log.topics.length >= 3
+          log.topics.length >= 2 // player (indexed) + runId (indexed)
       );
 
       if (!log || !log.topics[2]) {
-        throw new Error('Failed to parse RunStarted event from transaction receipt');
+        throw new Error('Failed to parse RunStarted event');
       }
 
-      // topics[0] = event signature, topics[1] = player address (indexed), topics[2] = nonce (indexed)
-      // seed is in log.data (not indexed)
-      const nonceHex = log.topics[2] as `0x${string}`;
-      const nonceBigInt = hexToBigInt(nonceHex);
+      // topics[2] is the indexed runId
+      const runIdBigInt = BigInt(log.topics[2]);
       
-      // Safe conversion: check if nonce fits in JS number range
-      if (nonceBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
-        throw new Error('Nonce too large for JS number type');
+      if (runIdBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error('RunId too large');
       }
       
-      const nonce = Number(nonceBigInt);
-      const seed = log.data; // bytes32 as hex string
+      const runId = Number(runIdBigInt);
+      console.log('[useStartRun] Run started with ID:', runId);
+
+      // Create manifest for local use
+      const manifest: RunManifest = {
+        runId,
+        player: address,
+        gameVersion: gameVersion,
+        rulesHash: rulesHash,
+        btcBlockHash: entropy.btcBlockHash,
+        hemiBlockHash: entropy.hemiBlockHash,
+        ethBlockHash: entropy.ethBlockHash,
+        hemiTxHash: entropy.hemiTxHash,
+      };
 
       setIsLoading(false);
-      return { nonce, seed, hash };
+      return { runId, manifest, hash };
     } catch (err: any) {
-      setError(err.message || 'Transaction failed');
+      const errorMsg = err.message || 'Transaction failed';
+      console.error('[useStartRun] Error:', errorMsg);
+      setError(errorMsg);
       setIsLoading(false);
       throw err;
     }
-  }, [writeContractAsync, publicClient]);
+  }, [writeContractAsync, publicClient, address]);
 
   return {
     startRun,
@@ -121,7 +178,7 @@ export function useSubmitScore() {
   });
 
   const submitScore = useCallback(
-    async (nonce: number, score: number, actionHash: string) => {
+    async (runId: number, score: number, actionHash: string) => {
       setIsLoading(true);
       setError(null);
       setTxHash(null);
@@ -131,7 +188,7 @@ export function useSubmitScore() {
           address: CONTRACT_ADDRESS,
           abi: RUN_REGISTRY_ABI,
           functionName: 'submitScore',
-          args: [BigInt(nonce), score, actionHash as `0x${string}`],
+          args: [BigInt(runId), score, actionHash as `0x${string}`],
         });
 
         setTxHash(hash);
