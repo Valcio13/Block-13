@@ -1,5 +1,7 @@
 # Hemi Testnet Integration - Implementation Report
 
+> **Historical integration report — superseded.** This describes an earlier `actionHash` score submission flow. The current app starts TX1 runs and does not call the legacy score method. See [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Changed Files
 
 ### New Files

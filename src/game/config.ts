@@ -3,7 +3,11 @@ import { BootScene } from './scenes/BootScene';
 import { FloorScene } from './scenes/FloorScene';
 import type { RunState } from '../core/run';
 
-export function createGameConfig(parent: string, runState: RunState): Phaser.Types.Core.GameConfig {
+export function createGameConfig(
+  parent: string,
+  runState: RunState,
+  options: { replayLog?: Uint8Array } = {},
+): Phaser.Types.Core.GameConfig {
   return {
     type: Phaser.AUTO,
     width: 1280,
@@ -31,6 +35,7 @@ export function createGameConfig(parent: string, runState: RunState): Phaser.Typ
     callbacks: {
       preBoot: (game) => {
         game.registry.set('runState', runState);
+        if (options.replayLog) game.registry.set('replayLog', options.replayLog);
       },
     },
   };

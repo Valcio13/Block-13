@@ -19,6 +19,14 @@ export class PCG32 {
     this.nextInt();
   }
 
+  /** Exact serializable state for verifier snapshots (unsigned hex, fixed width). */
+  snapshot(): { state: string; increment: string } {
+    return {
+      state: this.state.toString(16).padStart(16, '0'),
+      increment: this.inc.toString(16).padStart(16, '0'),
+    };
+  }
+
   /**
    * Generate next 32-bit unsigned integer
    */

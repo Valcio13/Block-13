@@ -24,9 +24,9 @@ export class Stalker {
   public targetY: number = 0;
   
   private stateTimer: number = 0;
-  private chaseStartTime: number = 0;
-  private lastChaseEndTime: number = 0;
-  private retreatCooldown: number = 10000; // 10 seconds cooldown after retreat
+  private chaseStartTick: number = 0;
+  private lastChaseEndTick: number = 0;
+  private retreatCooldownTicks: number = 600; // 10 seconds at 60Hz
   
   // Floor-based parameters
   private dormantChance: number;
@@ -156,6 +156,7 @@ export class Stalker {
   
   public update(
     delta: number,
+    currentTick: number,
     playerX: number,
     playerY: number,
     playerFlashlightOn: boolean,
@@ -167,9 +168,8 @@ export class Stalker {
       Math.pow(this.x - playerX, 2) + Math.pow(this.y - playerY, 2)
     );
     
-    // Check if in cooldown after retreat
-    const now = Date.now();
-    const inCooldown = (now - this.lastChaseEndTime) < this.retreatCooldown;
+    // Check if in cooldown after retreat (tick-based)
+    const inCooldown = (currentTick - this.lastChaseEndTick) < this.retreatCooldownTicks;
     
     switch (this.state) {
       case 'dormant':
@@ -203,7 +203,7 @@ export class Stalker {
         // If player is very close or flashlight is off, start hunting
         if (!inCooldown && distToPlayer < this.detectionRange * 0.6 && !playerFlashlightOn) {
           this.state = 'hunting';
-          this.chaseStartTime = now;
+          this.chaseStartTick = currentTick;
         }
         
         // Investigation timeout
@@ -225,12 +225,12 @@ export class Stalker {
         }
         
         // Give up chase if player uses flashlight or chase too long
-        const chaseDuration = now - this.chaseStartTime;
-        if (playerFlashlightOn || chaseDuration > 15000) {
+        const chaseDurationTicks = currentTick - this.chaseStartTick;
+        if (playerFlashlightOn || chaseDurationTicks > 900) { // 15 seconds at 60Hz
           this.state = 'retreating';
           this.pickRetreatTarget(playerX, playerY, walkableTiles);
           this.stateTimer = 3000;
-          this.lastChaseEndTime = now;
+          this.lastChaseEndTick = currentTick;
         }
         break;
         

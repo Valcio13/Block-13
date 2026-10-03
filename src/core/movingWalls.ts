@@ -19,8 +19,8 @@ export class MovingWallSystem {
   private floor: number;
   private tiles: boolean[][];
   private walls: Wall[] = [];
-  private lastMoveTime: number = 0;
-  private moveCooldown: number = 30000; // 30 seconds base
+  private lastMoveTick: number = -Infinity;
+  private moveCooldownTicks: number = 1800; // 30 seconds at 60Hz
   
   constructor(seed: number, floor: number, tiles: boolean[][]) {
     this.rng = new SeededRng(seed ^ 0xFA115);
@@ -87,7 +87,7 @@ export class MovingWallSystem {
   }
   
   public tryTriggerWallMove(
-    now: number,
+    currentTick: number,
     playerX: number,
     playerY: number,
     keyX: number,
@@ -96,35 +96,35 @@ export class MovingWallSystem {
     stairsY: number,
     hasKey: boolean
   ): WallMoveEvent | null {
-    const timeSinceLast = now - this.lastMoveTime;
+    const ticksSinceLast = currentTick - this.lastMoveTick;
     
     // Floor-based cooldown and trigger chance
-    let cooldown = this.moveCooldown;
+    let cooldownTicks = this.moveCooldownTicks;
     let chance = hasKey ? 0.15 : 0.08;
     
     switch (this.floor) {
       case 4:
-        cooldown = this.moveCooldown * 2; // 60s - very rare
+        cooldownTicks = this.moveCooldownTicks * 2; // 60s - very rare
         chance *= 0.3; // Much less likely
         break;
       case 3:
-        cooldown = this.moveCooldown; // 30s
+        cooldownTicks = this.moveCooldownTicks; // 30s
         break;
       case 2:
-        cooldown = this.moveCooldown * 0.7; // 21s
+        cooldownTicks = this.moveCooldownTicks * 0.7; // 21s
         chance *= 1.2;
         break;
       case 1:
-        cooldown = this.moveCooldown * 0.5; // 15s
+        cooldownTicks = this.moveCooldownTicks * 0.5; // 15s
         chance *= 1.5;
         break;
       case 0: // Block 13
-        cooldown = this.moveCooldown * 0.3; // 9s
+        cooldownTicks = this.moveCooldownTicks * 0.3; // 9s
         chance *= 2.0;
         break;
     }
     
-    if (timeSinceLast < cooldown) return null;
+    if (ticksSinceLast < cooldownTicks) return null;
     
     if (this.rng.next() > chance) return null;
     
@@ -166,7 +166,7 @@ export class MovingWallSystem {
     }
     
     // Safe to move wall
-    this.lastMoveTime = now;
+    this.lastMoveTick = currentTick;
     wall.active = closing;
     this.toggleWallTiles(wall, !closing);
     

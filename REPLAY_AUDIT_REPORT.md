@@ -1,5 +1,7 @@
 # Block 13 - Level-2 Verified Replay Audit
 
+> **Historical replay audit — superseded.** Sections describing Phaser Arcade Physics as authoritative and replay as incomplete predate the deterministic simulation migration. Current gameplay authority is in the Phaser-free `AuthoritativeSimulation`; see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 **Date**: 2026-09-09  
 **Goal**: Prepare for deterministic replay with off-chain verification  
 **Status**: 🟡 **POSSIBLE WITH MODIFICATIONS**

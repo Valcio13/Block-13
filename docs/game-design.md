@@ -1,5 +1,7 @@
 # Block 13 — MVP
 
+> **Historical game design snapshot — superseded.** This MVP predates the current six-stage route and migrated enemy roster. For current gameplay, controls, progression, and implementation status, see [../README.md](../README.md).
+
 ## Player fantasy
 
 Trapped in a corrupted blockchain building, the player descends three cursed floors to reach the street-level emergency exit. The apparent escape opens into the hidden Block 13 final chase.

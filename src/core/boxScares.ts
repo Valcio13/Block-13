@@ -24,9 +24,9 @@ export interface BoxScareConfig {
 export class BoxScareManager {
   private rng: SeededRng;
   private floor: number;
-  private lastScareTime: number = 0;
+  private lastScareTick: number = -Infinity;
   private lastScareType: BoxScareType | null = null;
-  private globalCooldown: number = 12000; // 12 seconds between box scares
+  private globalCooldownTicks: number = 720; // 12 seconds at 60Hz
   private triggerChance: number;
   
   // Available scare types for this run (deterministic selection)
@@ -70,10 +70,10 @@ export class BoxScareManager {
     }
   }
   
-  public tryTriggerOnSearch(now: number, hasKey: boolean): BoxScareEvent | null {
+  public tryTriggerOnSearch(currentTick: number, hasKey: boolean): BoxScareEvent | null {
     // Check cooldown
-    const timeSinceLast = now - this.lastScareTime;
-    if (timeSinceLast < this.globalCooldown) {
+    const ticksSinceLast = currentTick - this.lastScareTick;
+    if (ticksSinceLast < this.globalCooldownTicks) {
       return null;
     }
     
@@ -87,13 +87,13 @@ export class BoxScareManager {
     
     // Check if we trigger
     if (this.rng.next() < chance) {
-      return this.selectScare(now);
+      return this.selectScare(currentTick);
     }
     
     return null;
   }
   
-  private selectScare(now: number): BoxScareEvent | null {
+  private selectScare(currentTick: number): BoxScareEvent | null {
     // Filter out last scare type to avoid repetition
     const candidates = this.availableScares.filter(scare => 
       scare.type !== this.lastScareType
@@ -106,7 +106,7 @@ export class BoxScareManager {
     
     const selected = candidates[this.rng.int(candidates.length)];
     
-    this.lastScareTime = now;
+    this.lastScareTick = currentTick;
     this.lastScareType = selected.type;
     
     return selected;

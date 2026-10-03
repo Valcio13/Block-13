@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createRun, completeFloor } from './run';
+import { deriveSeeds, type RunManifest } from './seedDerivation';
 
 describe('Run State Management', () => {
   it('creates a new run with initial state', () => {
@@ -14,6 +15,24 @@ describe('Run State Management', () => {
     expect(run.status).toBe('playing');
     expect(run.floorsCompleted).toBe(0);
     expect(run.manifest).toBeUndefined(); // Local run
+  });
+
+  it('keeps the complete manifest-derived world seed as an exact decimal BigInt', () => {
+    const manifest: RunManifest = {
+      runId: 9n,
+      player: '0x1111111111111111111111111111111111111111',
+      gameVersion: `0x${'22'.repeat(32)}`,
+      rulesHash: `0x${'33'.repeat(32)}`,
+      btcBlockHash: `0x${'44'.repeat(32)}`,
+      hemiBlockHash: `0x${'55'.repeat(32)}`,
+      ethBlockHash: `0x${'66'.repeat(32)}`,
+      hemiTxHash: `0x${'77'.repeat(32)}`,
+      startedAt: 0,
+    };
+    const run = createRun(manifest);
+    const exact = deriveSeeds(manifest).world;
+    expect(run.canonicalSeed).toBe(exact.toString(10));
+    expect(run.seed).toBe(Number(exact & 0xffff_ffffn));
   });
 
   it('progresses through floors correctly', () => {

@@ -167,8 +167,9 @@ export class BootScene extends Phaser.Scene {
   create() {
     // Get run state from registry
     const runState = this.registry.get('runState') as RunState;
+    const replayLog = this.registry.get('replayLog') as Uint8Array | undefined;
     
     // Boot complete, transition to floor scene
-    this.scene.start('FloorScene', { runState });
+    this.scene.start('FloorScene', { runState, replayLog });
   }
 }

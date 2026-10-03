@@ -18,8 +18,8 @@ export interface CorruptionEffect {
 export class CorruptionManager {
   private rng: SeededRng;
   private floor: number;
-  private lastCorruptionTime: number = 0;
-  private baseCorruptionCooldown: number = 12000; // 12 seconds base
+  private lastCorruptionTick: number = -Infinity;
+  private baseCorruptionCooldownTicks: number = 720; // 12 seconds at 60Hz
   
   constructor(seed: number, floor: number) {
     this.rng = new SeededRng(seed ^ 0xC0FFEE);
@@ -27,12 +27,12 @@ export class CorruptionManager {
   }
   
   public tryTriggerCorruption(
-    now: number,
+    currentTick: number,
     curse: number,
     stalkerDist: number,
     hasKey: boolean
   ): CorruptionEffect | null {
-    const timeSinceLast = now - this.lastCorruptionTime;
+    const ticksSinceLast = currentTick - this.lastCorruptionTick;
     
     // Floor-based cooldown (higher floors = less corruption)
     let cooldownMultiplier = 1.0;
@@ -44,9 +44,9 @@ export class CorruptionManager {
       case 0: cooldownMultiplier = 0.5; break; // Block 13: Very frequent
     }
     
-    const cooldown = this.baseCorruptionCooldown * cooldownMultiplier;
+    const cooldownTicks = this.baseCorruptionCooldownTicks * cooldownMultiplier;
     
-    if (timeSinceLast < cooldown) return null;
+    if (ticksSinceLast < cooldownTicks) return null;
     
     // Calculate trigger chance based on factors
     let chance = 0.08; // Base 8%
@@ -66,16 +66,16 @@ export class CorruptionManager {
     chance *= floorEscalation;
     
     if (this.rng.next() < chance) {
-      this.lastCorruptionTime = now;
+      this.lastCorruptionTick = currentTick;
       return this.generateEffect(curse, stalkerDist);
     }
     
     return null;
   }
   
-  public triggerOnWallMove(): CorruptionEffect {
+  public triggerOnWallMove(currentTick: number): CorruptionEffect {
     // Always trigger corruption when walls move
-    this.lastCorruptionTime = Date.now();
+    this.lastCorruptionTick = currentTick;
     return {
       type: 'horizontal_shift',
       intensity: 0.6,

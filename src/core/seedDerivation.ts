@@ -1,38 +1,44 @@
 /**
- * Block 13 Seed Derivation
- * 
+ * Block 13 Seed Derivation - CANONICAL SPECIFICATION
+ *
  * Derives independent deterministic seeds from multi-chain entropy sources
  * using domain separation to ensure different RNG systems don't correlate.
- * 
+ *
  * Architecture:
  * - WORLD seed: BTC block hash + Hemi block hash (procedural generation)
  * - ECONOMY seed: Ethereum block hash (loot, drops, resources)
  * - EVENT seed: Existing Hemi tx hash (scares, encounters, timing)
- * 
+ *
  * Each seed includes: player, runId, gameVersion, rulesHash for uniqueness
+ *
+ * IMPORTANT: This implementation must produce IDENTICAL seeds to any other
+ * implementation given the same RunManifest. The encoding specification is
+ * documented in TX1_RUN_MANIFEST_SPEC.md
  */
 
+import { keccak256, toBytes, type Hex } from 'viem';
 import { PCG32, hexToBigInt } from './pcg32';
 
 /**
  * Domain separation prefixes (prevent cross-contamination)
  */
-const DOMAIN_WORLD = 'BLOCK13_WORLD';
-const DOMAIN_ECONOMY = 'BLOCK13_ECONOMY';
-const DOMAIN_EVENT = 'BLOCK13_EVENT';
+export const DOMAIN_WORLD = 'BLOCK13_WORLD';
+export const DOMAIN_ECONOMY = 'BLOCK13_ECONOMY';
+export const DOMAIN_EVENT = 'BLOCK13_EVENT';
 
 /**
- * Run manifest from blockchain
+ * Run manifest from blockchain (TX1)
  */
 export interface RunManifest {
-  runId: number;
-  player: string;
-  gameVersion: string; // hex string (bytes32)
-  rulesHash: string;   // hex string (bytes32)
-  btcBlockHash: string;
-  hemiBlockHash: string;
-  ethBlockHash: string;
-  hemiTxHash: string;
+  runId: bigint;
+  player: string;       // Ethereum address (0x...)
+  gameVersion: string;  // bytes32 as hex string (0x...)
+  rulesHash: string;    // bytes32 as hex string (0x...)
+  btcBlockHash: string; // bytes32 as hex string (0x...)
+  hemiBlockHash: string; // bytes32 as hex string (0x...)
+  ethBlockHash: string; // bytes32 as hex string (0x...)
+  hemiTxHash: string;   // bytes32 as hex string (0x...)
+  startedAt: number;    // Unix timestamp (milliseconds) - for display only
 }
 
 /**
@@ -45,51 +51,79 @@ export interface DerivedSeeds {
 }
 
 /**
- * Hash data using simple browser-compatible method
- * (In production, consider using keccak256 from viem for true compatibility with Solidity)
- */
-function simpleHash(data: string): string {
-  // Simple hash for determinism - for production use crypto library
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    const char = data.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32-bit integer
-  }
-  // Pad to 64 hex chars (32 bytes)
-  return '0x' + Math.abs(hash).toString(16).padStart(64, '0');
-}
-
-/**
- * Derive domain-separated seed
+ * Derive domain-separated seed using canonical encoding
+ *
+ * Encoding specification:
+ * - Format: domain:entropy1:entropy2:...:player:runId:gameVersion:rulesHash
+ * - Separator: single colon ':' (ASCII 0x3A)
+ * - domain: UTF-8, UPPERCASE (e.g., 'BLOCK13_WORLD')
+ * - entropy: lowercase hex with 0x prefix
+ * - player: lowercase hex with 0x prefix
+ * - runId: decimal string, no leading zeros
+ * - gameVersion: lowercase hex with 0x prefix
+ * - rulesHash: lowercase hex with 0x prefix
+ * - Hash function: keccak256 (Ethereum-compatible)
+ *
+ * @param domain - Domain separation string (e.g., 'BLOCK13_WORLD')
+ * @param entropy - Array of entropy sources (block/tx hashes)
+ * @param player - Player address
+ * @param runId - Run ID (nonce)
+ * @param gameVersion - Game version hash
+ * @param rulesHash - Game rules hash
+ * @returns Deterministic seed as bigin
  */
 function deriveSeed(
   domain: string,
   entropy: string[],
   player: string,
-  runId: number,
+  runId: bigint,
   gameVersion: string,
   rulesHash: string
 ): bigint {
-  // Concatenate all inputs with domain separation
-  const data = [
-    domain,
-    ...entropy,
-    player.toLowerCase(),
-    runId.toString(),
-    gameVersion,
-    rulesHash
-  ].join(':');
+  // Normalize all inputs to lowercase (except domain which stays uppercase)
+  const normalizedPlayer = player.toLowerCase();
+  const normalizedEntropy = entropy.map(e => e.toLowerCase());
+  const normalizedGameVersion = gameVersion.toLowerCase();
+  const normalizedRulesHash = rulesHash.toLowerCase();
 
-  const hash = simpleHash(data);
+  // Concatenate with colons as separator
+  const parts = [
+    domain,  // Keep uppercase for domain separation
+    ...normalizedEntropy,
+    normalizedPlayer,
+    runId.toString(),  // Decimal string, no leading zeros
+    normalizedGameVersion,
+    normalizedRulesHash
+  ];
+
+  const data = parts.join(':');
+
+  // Hash with keccak256 (Ethereum-compatible)
+  const hash = keccak256(toBytes(data));
+
+  // Convert to bigint for PCG32
   return hexToBigInt(hash);
 }
 
 /**
- * Derive all three independent seeds from run manifest
+ * Derive all three independent seeds from run manifes
+ *
+ * This is the canonical seed derivation that must be reproduced identically
+ * by any independent implementation (e.g., off-chain verifiers).
  */
 export function deriveSeeds(manifest: RunManifest): DerivedSeeds {
   const { runId, player, gameVersion, rulesHash, btcBlockHash, hemiBlockHash, ethBlockHash, hemiTxHash } = manifest;
+
+  // Validate all entropy sources are non-zero
+  const zeroHash = '0x0000000000000000000000000000000000000000000000000000000000000000';
+  if (
+    btcBlockHash === zeroHash ||
+    hemiBlockHash === zeroHash ||
+    ethBlockHash === zeroHash ||
+    hemiTxHash === zeroHash
+  ) {
+    throw new Error('Invalid manifest: entropy source cannot be zero hash');
+  }
 
   // WORLD seed: BTC + Hemi block hashes (most critical for fairness)
   const worldSeed = deriveSeed(

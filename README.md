@@ -1,273 +1,86 @@
 # Block 13
 
-An onchain 2D top-down survival-horror game built for the Hemi Arcade Contest 2: Turbo Edition.
+Block 13 is a survival horror game built for the **Hemi Arcade Contest 2: Turbo Edition**. Players descend through a procedurally generated building while managing health, flashlight battery, and curse, then escape from Outside. The current project is **deterministic and auditable**: a Phaser-free simulation owns gameplay outcomes, and recorded inputs can be replayed against that simulation.
 
-## Overview
+> **Verification status:** An independent verifier and the future verified-result TX2 are **not implemented**. Current replay tests establish deterministic behavior within this repository; they do not constitute production verification or a claim of provable fairness.
 
-Block 13 is a blockchain-based survival horror experience where players navigate through procedurally generated floors while being hunted by intelligent AI enemies. Trapped in a corrupted building, you must descend three cursed floors to reach the emergency exit. Each run is deterministic based on a blockchain seed, ensuring fairness and verifiable replayability.
+## Gameplay
 
-## Tech Stack
+The route is:
 
-- **Frontend**: React + TypeScript + Vite
-- **Game Engine**: Phaser 3
-- **Blockchain**: Hemi Network (EVM-compatible)
-- **Web3**: Wagmi + Viem + TanStack Query
-- **Smart Contract**: Solidity
+**Floor 4 → Floor 3 → Floor 2 → Floor 1 → Block 13 → Outside**
 
-## Run Flow
+On each floor, explore the maze, search containers for supplies and score, find the key, and reach the stairs. Enemies, traps, and shifting walls make the return route dangerous. Progression, loot, damage, resources, score, and the ending are decided by the authoritative simulation.
 
-1. `startRun()` creates a seeded run on Hemi
-2. Player clears three descending floors locally in browser
-3. `submitScore()` records the completed run on-chain
+### Controls
 
-No transactions occur during gameplay session.
+- **WASD** or **arrow keys:** move
+- **F:** toggle flashlight
+- **E:** interact with containers, keys, and stairs
+- **Escape:** pause
 
-## Key Features
+### Gameplay systems
 
-### 🎮 Core Gameplay
-- **3 Descending Floors**: Floor 3 → Floor 2 → Floor 1, each with escalating difficulty
-- **Procedural Generation**: Deterministic maze layouts (51×41 tiles, 12-21 rooms per floor)
-- **Resource Management**: Health, battery, and curse systems with meaningful risk/reward decisions
-- **Survival Horror**: Navigate darkness with limited visibility and flashlight
-- **Target Run Time**: 5-8 minutes for experienced players
+- Procedurally generated connected floor layouts and deterministic search results
+- Health, battery, curse, invulnerability, and score systems
+- Stalker pursuit, Crawler chase/contact, Watcher curse, Ambusher warnings, and Mimic encounters
+- Moving walls, corruption events, and gameplay scare lockouts
+- Key and stair progression from Floor 4 through Block 13 to Outside
+- Phaser lighting, enemy sprites, HUD, audio, camera effects, and scare visuals
 
-### 👾 Enemy System
+## Deterministic architecture
 
-#### The Stalker (Primary Threat)
-- **5 AI States**: Dormant, roaming, investigating, hunting, retreating
-- **Difficulty Scaling**: 85% dormant on Floor 3 → 20% dormant on Floor 1
-- **Speed**: 50-90 px/s roaming, 140-180 px/s hunting
-- **Detection**: Sound-based (searching, moving), light-based (flashlight)
-- **Damage**: 35 HP + 30 Curse per hit
-- **Behavior**: Retreats when flashlight aimed directly at it
+`AuthoritativeSimulation` is a pure TypeScript gameplay layer that does not construct Phaser. It owns movement, collisions, interactions, enemies, resources, loot, progression, score, and terminal state. Gameplay advances on a **fixed 60 Hz tick**. Gameplay-critical positions and resources use integer fixed-point values: 256 subpixels per world pixel, with integer movement remainders and documented truncation rules. The simulation engine carries tick backlog rather than discarding simulation time.
 
-#### Crawlers (Secondary Enemies)
-- Fast-moving patrol enemies (60 px/s patrol, 100 px/s chase)
-- Detect player within 120px radius
-- 3-second chase duration before returning to patrol
-- **Damage**: 15 HP per hit
-- **Population**: 2-4 per floor
+World generation, economy, events, and gameplay subsystems use separated deterministic PCG32 streams. Cosmetic effects are presentation-only and do not decide gameplay. Phaser samples live keyboard input through `InputSource`, sends the resulting inputs into the simulation, and renders simulation snapshots. Replay uses `InputReplayer` as the same input source for the same simulation path.
 
-#### Watchers (Area Denial)
-- Stationary apparitions in dark corridors
-- Apply curse when player approaches while facing them
-- Disappear after 4 seconds of direct flashlight exposure
-- **Effect**: ~2 curse/second when very close
-- **Population**: 1-3 per floor
+`InputLogV2` stores canonical binary input events and the terminal simulation tick. Its canonical hash is Ethereum Keccak-256 over the binary log. `FinalStateV1` is a compact canonical result containing run binding, terminal tick, outcome, score, progression, and final resources; it does not hash the internal simulation snapshot. See [ARCHITECTURE.md](ARCHITECTURE.md), [INPUT_LOG_V2_SPEC.md](INPUT_LOG_V2_SPEC.md), and [FINAL_STATE_V1_SPEC.md](FINAL_STATE_V1_SPEC.md).
 
-#### Mimics (Traps)
-- Disguised as searchable containers with subtle visual tells:
-  - Darker color (0x6e665c vs 0x8b7355)
-  - Diagonal tape pattern (normal boxes have horizontal)
-  - Periodic twitching animation
-- **Damage**: 20 HP on reveal + 10 HP during 2-second chase phase
-- **Population**: 0-1 (Floor 3), 1 (Floor 2), 1-2 (Floor 1)
+## Web3 status
 
-### 💡 Lighting System
-- **Dynamic Darkness**: MULTIPLY blend mode lightmap with rendered shadows
-- **Directional Flashlight**: Cone-based illumination with battery drain
-- **Ambient Vision**: Minimal visibility around player when flashlight is off
-- **Camera System**: Main camera at 1.4x zoom + dedicated UI camera at 1.0x zoom
-- **Post-Processing**: Corruption effects including scanlines, chromatic aberration, glitches
+- **TX1 — Run Manifest:** Implemented for starting a Hemi Testnet run. The manifest binds player/run identity, game/rules version, and selected multi-chain entropy sources. Seed derivation uses domain-separated Keccak-256 digests for WORLD, ECONOMY, and EVENT streams.
+- **Gameplay and replay:** Implemented locally in the game and covered by deterministic tests. The input log and FinalStateV1 can be used as inputs/results for a future verifier.
+- **Independent verifier:** **Not implemented.** No verifier currently independently attests to submitted results.
+- **TX2 — verified result submission:** **Planned, not implemented.** The game does not submit score, `inputHash`, or `finalStateHash` on-chain. The existing Solidity contract and frontend ABI retain a legacy `submitScore(runId, score, actionHash)` method; the app does not call it and it is not the future verified TX2 flow.
 
-### 🎯 Interaction & Loot
+No private keys or signing secrets belong in this repository. Wallet actions use the connected wallet. TX1 entropy currently includes public Hemi Testnet, Ethereum Mainnet, and Bitcoin sources; see [TX1_RUN_MANIFEST_SPEC.md](TX1_RUN_MANIFEST_SPEC.md) for the current selection and seed details.
 
-#### Searchable Containers
-- Cabinets, lockers, boxes, drawers with deterministic seeded loot
-- Proximity-based interaction (press **E** within range)
-- Visual feedback and sound effects
-- Searching creates noise that can alert stalker
+### Hemi Testnet configuration
 
-#### Loot Table (Seeded RNG)
-- **20%** Battery (8-19% charge restoration)
-- **12%** Medical Supplies (10-25 HP restoration)
-- **25%** Score Collectibles:
-  - ETH (common): +50 score
-  - BTC (uncommon): +100 score
-  - HEMI (rare): +250 score
-- **8%** Clues (lore fragments)
-- **35%** Empty containers
-- **~2-5%** Mimics (disguised as containers)
+- Chain ID: `743111`
+- RPC: `https://testnet.rpc.hemi.network/rpc`
+- Explorer: `https://testnet.explorer.hemi.xyz`
+- Contract address: configure `VITE_GAME_CONTRACT_ADDRESS` in a local `.env` file. `.env.example` contains a zero-address placeholder, not a deployed contract address.
 
-*Note: Collectibles are fictional in-game score items only - no real cryptocurrency transactions occur during gameplay.*
+## Development status
 
-### 🌊 Environmental Hazards
+The deterministic simulation, InputLogV2, TX1 manifest integration, FinalStateV1 encoding, and full-route replay tests are implemented. The independent Node verifier, verifier signing/service, and verified TX2 are future work. The current suite includes the full Floor 4 to Outside replay at multiple render schedules, after a long stall, and on repeated replay. Standard gameplay starts at 100 HP; the test suite also uses a separate high-HP traversal fixture to exercise the complete route.
 
-#### Moving Walls
-- Corridors dynamically shift and block paths
-- Safety validation ensures no player trapping
-- Creates navigation pressure and forces route changes
-
-#### Corruption Effects
-- Screen glitches and visual distortion
-- Chromatic aberration
-- Scanline artifacts
-- Static overlay
-- Intensity increases with curse level
-
-#### Jumpscare System
-- **8 Event Types**: Door slams, shadow movement, false stalker, light flickers, footsteps, object movement, screen glitches, environmental scares
-- Deterministic seeded director (no random spam)
-- Triggers from: searching, entering rooms, collecting key, low battery, stalker proximity
-- Global cooldown prevents event flooding
-- Post-key escalation increases frequency
-
-### 📊 Player Stats
-
-#### HP (Health Points)
-- Start: 100 / 100 HP
-- Death at 0 HP
-- Invulnerability frames: 1.5 seconds after taking damage
-- Restored by medical supplies from loot (10-25 HP, cannot exceed 100)
-
-#### Curse (Corruption Meter)
-- Separate from HP
-- Increases from: Watcher proximity, stalker attacks, corruption zones
-- Death at 100 curse
-- Visual corruption effects intensify with curse level
-
-#### Battery
-- Powers flashlight
-- Drains while flashlight is active
-- **+20% bonus** on floor completion (capped at 100%)
-- **Persists between floors** (not reset)
-- Restored by battery pickups from loot (8-19%)
-
-#### Score
-- Points from:
-  - Collectibles (ETH +50, BTC +100, HEMI +250)
-  - Floor completion bonuses
-  - Survival time
-- Submitted to blockchain after successful run
-
-### 🔑 Floor Progression
-
-1. **Spawn** on floor with stairs locked
-2. **Explore** procedurally generated maze (dead ends, loops, branching paths)
-3. **Search containers** for resources (risk/reward vs noise/mimics)
-4. **Find key** (guaranteed spawn in predetermined room)
-5. **Collect key** triggers escalation:
-   - Stalker becomes more aggressive
-   - Jumpscare frequency increases
-   - Return journey is more dangerous
-6. **Return to stairs** with key
-7. **Unlock stairs** (press E at stairs with key)
-8. **Descend** to next floor (press E again on unlocked stairs)
-9. **Repeat** for Floors 2 and 1
-10. **Victory** - Complete Floor 1 and submit score
-
-### 🎮 Controls
-
-- **WASD / Arrow Keys**: Move player (8-directional with collision)
-- **F**: Toggle flashlight on/off
-- **E**: Interact (search containers, pick up items, unlock/use stairs)
-
-## Project Layout
-
-- `src/` — React shell and Phaser game client
-  - `game/` — Phaser game engine integration
-    - `scenes/` — Game scenes (Boot, Floor)
-    - `config.ts` — Phaser configuration
-  - `core/` — Game logic modules:
-    - `rng.ts` — Seeded random number generator
-    - `floor.ts` — Procedural dungeon generation
-    - `run.ts` — Run state management
-    - `stalker.ts` — Primary enemy AI (5 states)
-    - `secondaryEnemies.ts` — Crawler and Watcher classes
-    - `movingWalls.ts` — Dynamic wall system
-    - `corruption.ts` — Visual corruption effects
-    - `jumpscares.ts` — Scare event director
-- `contracts/` — Solidity run registry
-  - `RunRegistry.sol` — On-chain seed generation and score tracking
-- `docs/` — Design documentation
-  - `game-design.md` — Detailed gameplay specifications
-
-## Local Development
+Current local validation commands:
 
 ```bash
-# Install dependencies
 npm install
-
-# Start development server
-npm run dev
-
-# Build for production
+npm test
 npm run build
+npm run dev
 ```
 
-### Local Testing
+Tests use Vitest. The production build runs TypeScript project checks and Vite.
 
-The game supports **local play without wallet connection** for testing:
-- Local runs bypass blockchain seed generation
-- Full gameplay features available
-- No score submission to chain
+## Project structure
 
-For blockchain features, connect MetaMask or compatible wallet to Hemi Network.
+- `src/core/authoritativeSimulation.ts` — Phaser-free authoritative gameplay
+- `src/core/inputRecorder.ts` — InputSource, InputLogV2 recording, replay, and input hash
+- `src/core/seedDerivation.ts`, `src/core/pcg32.ts`, `src/core/rng.ts` — manifest seeds and random streams
+- `src/core/finalStateV1.ts` — canonical FinalStateV1 projection, encoding, decoding, and hash
+- `src/game/` — Phaser presentation and keyboard adapter
+- `src/web3/` — wallet, Hemi Testnet setup, TX1 manifest/entropy integration
+- `contracts/RunRegistry.sol` — current run registry contract, including its legacy score method
+- `tests/` and `src/core/*.test.ts` — replay, determinism, and core tests
+- `docs/` — gameplay, art, audio, and design notes
 
-## Game Mechanics Deep Dive
-
-### Procedural Generation
-- **Seeded Deterministic**: Same seed always produces identical layout and loot
-- **Floor Size**: 51×41 tiles (~2040 tiles per floor)
-- **Room Count**: 12-21 rooms with guaranteed connectivity
-- **Architecture**: Dead ends, loops, branching corridors
-- **Enemy Placement**: Deterministic spawn points per seed
-- **Loot Distribution**: Fixed container locations with seeded reward table
-
-### Difficulty Scaling
-- **Floor 3**: Introduction phase, 85% stalker dormancy
-- **Floor 2**: Moderate pressure, more crawlers, scare frequency up
-- **Floor 1**: High danger, 20% stalker dormancy, maximum enemy population
-- **Post-Key**: Escalation phase on every floor after collecting key
-
-### Resource Economy
-- Battery persists across floors (no full refill)
-- Health persists across floors
-- Floor completion gives +20% battery bonus
-- Medical supplies are uncommon (12% loot drop)
-- Score collectibles encourage risky searching
-
-## Smart Contract Integration
-
-The `RunRegistry.sol` contract deployed on Hemi Network provides:
-- **Verifiable Seed Generation**: Uses block hashes for unpredictable seeds
-- **Run Tracking**: Records start time, seed, and player address
-- **Score Submission**: One-time submission per completed run
-- **Leaderboard Support**: On-chain score history for competitive play
-- **Replay Verification**: Deterministic runs can be verified and replayed
-
-## Technical Architecture
-
-### Rendering System
-- **Two-Camera Setup**:
-  - Main camera: 1.4x zoom, renders world + enemies + lightmap
-  - UI camera: 1.0x zoom, renders HUD only
-- **Lightmap**: MULTIPLY blend mode applied once to main camera
-- **HUD Elements**: Unaffected by world zoom and darkness
-- **Performance**: Optimized for smooth 60 FPS gameplay
-
-### State Management
-- Persistent `RunState` across floor transitions
-- Deterministic seeded RNG for all random events
-- No state reset bugs (battery/HP persist correctly)
-
-### Damage & Combat
-- Invulnerability frames prevent damage stacking
-- Multiple simultaneous enemy hits only apply once per i-frame window
-- Flashlight creates safe space by repelling stalker
-
-## Known Issues & Future Improvements
-
-- Sound effects and ambient audio pending
-- Additional enemy types in development
-- Enhanced environmental storytelling
-- Multiplayer leaderboard UI
-- Mobile touch controls
+Current protocol and architecture documentation is indexed in [ARCHITECTURE.md](ARCHITECTURE.md). Older audit and implementation reports are retained as historical records and are marked accordingly.
 
 ## License
 
-MIT
-
----
-
-Built with 🔦 for Hemi Arcade Contest 2: Turbo Edition
+MIT. See [LICENSE](LICENSE).

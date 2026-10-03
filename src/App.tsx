@@ -3,15 +3,15 @@ import Phaser from 'phaser';
 import { WagmiProvider } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createGameConfig } from './game/config';
-import { createRun, generateActionHash } from './core/run';
+import { createRun } from './core/run';
 import { initRNG, initLocalRNG } from './core/rng';
-import { useWallet, useStartRun, useSubmitScore } from './web3/hooks';
+import { useWallet, useStartRun } from './web3/hooks';
 import { wagmiConfig } from './web3/wagmi';
 import type { RunState } from './core/run';
 
 const queryClient = new QueryClient();
 
-type RunStatus = 'idle' | 'connecting' | 'starting' | 'playing' | 'submitting' | 'complete';
+type RunStatus = 'idle' | 'connecting' | 'starting' | 'playing' | 'complete';
 
 function GameApp() {
   const [status, setStatus] = useState<RunStatus>('idle');
@@ -22,7 +22,6 @@ function GameApp() {
 
   const { address, isConnected, isCorrectNetwork, connectWallet, switchToHemi } = useWallet();
   const { startRun, isLoading: isStarting, error: startError } = useStartRun();
-  const { submitScore, isLoading: isSubmitting, isSuccess: submitSuccess } = useSubmitScore();
 
   // Recover active run from sessionStorage on mount
   useEffect(() => {
@@ -134,31 +133,10 @@ function GameApp() {
     }));
   };
 
-  const handleGameComplete = async (finalState: RunState) => {
-    // Check if this is a blockchain run
-    if (!finalState.manifest || !address) {
-      // Local-only run completed
-      setStatus('complete');
-      return;
-    }
-
-    // Prevent duplicate submission
-    if (status === 'submitting' || status === 'complete') {
-      console.warn('Score already submitted or in progress');
-      return;
-    }
-
-    setStatus('submitting');
-
-    try {
-      const runId = finalState.manifest.runId;
-      const actionHash = generateActionHash(runId, finalState.score);
-      await submitScore(runId, finalState.score, actionHash);
-      setStatus('complete');
-    } catch (err: any) {
-      setError(err.message || 'Failed to submit score');
-      setStatus('playing'); // Allow retry by keeping in playing state
-    }
+  const handleGameComplete = (finalState: RunState) => {
+    // Score submission and inputHash commitment are intentionally deferred until TX2.
+    setRunState(finalState);
+    setStatus('complete');
   };
 
   useEffect(() => {
@@ -202,18 +180,7 @@ function GameApp() {
     );
   }
 
-  if (status === 'submitting') {
-    return (
-      <main className="app-shell">
-        <section className="title-card">
-          <h1>SUBMITTING SCORE...</h1>
-          <p>Transaction pending on Hemi Testnet</p>
-        </section>
-      </main>
-    );
-  }
-
-  if (status === 'complete' || submitSuccess) {
+  if (status === 'complete') {
     const isBlockchainRun = runState?.manifest !== undefined;
     
     return (
@@ -221,7 +188,7 @@ function GameApp() {
         <section className="title-card">
           <h1>RUN COMPLETE!</h1>
           {isBlockchainRun ? (
-            <p className="premise">Score submitted to Hemi blockchain</p>
+            <p className="premise">Run complete. Score submission will be added in a later transaction update.</p>
           ) : (
             <p className="premise">Local run completed (not recorded on-chain)</p>
           )}

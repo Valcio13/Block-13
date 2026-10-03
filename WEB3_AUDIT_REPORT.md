@@ -1,4 +1,6 @@
 # Block 13 - Web3 Integration Audit Report
+
+> **Historical Web3 audit — superseded.** Its `actionHash` implementation review, score-submission flow, and production-readiness verdict describe an earlier revision. The current app does not submit scores; verified TX2 and the independent verifier are not implemented. See [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 **Date**: 2026-09-09  
 **Target Network**: Hemi Testnet (Chain ID: 743111)  
 **Status**: ✅ **READY FOR HEMI TESTNET DEPLOYMENT**

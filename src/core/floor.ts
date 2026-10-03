@@ -1,11 +1,11 @@
 import { SeededRng } from './rng';
 
-export type Floor = { 
-  width: number; 
-  height: number; 
-  tiles: boolean[][]; 
-  start: [number, number]; 
-  key: [number, number]; 
+export type Floor = {
+  width: number;
+  height: number;
+  tiles: boolean[][];
+  start: [number, number];
+  key: [number, number];
   exit: [number, number];
   rooms: Room[];
   doors: [number, number][];
@@ -21,7 +21,7 @@ export type Room = {
 
 export type SearchableType = 'cabinet' | 'locker' | 'box' | 'drawer' | 'mimic';
 
-export type SearchResult = 
+export type SearchResult =
   | { type: 'battery'; amount: number }
   | { type: 'health'; amount: number }
   | { type: 'collectible'; item: 'eth' | 'btc' | 'hemi'; score: number }
@@ -37,12 +37,17 @@ export type Searchable = {
   isMimic: boolean; // Track if this is a mimic
 };
 
-export function generateFloor(seed: number, floor: number): Floor {
+export interface FloorLootRng {
+  next(): number;
+  int(max: number): number;
+}
+
+export function generateFloor(seed: number, floor: number, lootRng?: FloorLootRng): Floor {
   const rng = new SeededRng(seed ^ ((floor + 1) * 0x9e3779b9));
-  
+
   // Floor sizes balanced for 7-12 minute total run time
   let width: number, height: number, numRooms: number;
-  
+
   if (floor === 4) {
     width = 35;
     height = 29;
@@ -65,9 +70,9 @@ export function generateFloor(seed: number, floor: number): Floor {
     height = 37;
     numRooms = 14 + rng.int(3); // 14-16 rooms
   }
-  
+
   // Initialize all tiles as walls
-  const tiles = Array.from({ length: height }, () => 
+  const tiles = Array.from({ length: height }, () =>
     Array.from({ length: width }, () => false)
   );
 
@@ -84,7 +89,7 @@ export function generateFloor(seed: number, floor: number): Floor {
     const newRoom: Room = { x, y, width: roomWidth, height: roomHeight };
 
     // Check if room overlaps with existing rooms (with 2-tile buffer)
-    const overlaps = rooms.some(room => 
+    const overlaps = rooms.some(room =>
       !(newRoom.x + newRoom.width + 1 < room.x ||
         newRoom.x > room.x + room.width + 1 ||
         newRoom.y + newRoom.height + 1 < room.y ||
@@ -99,7 +104,7 @@ export function generateFloor(seed: number, floor: number): Floor {
 
   // Connect rooms with more complex corridors
   const doors: [number, number][] = [];
-  
+
   // Connect each room to next (main path)
   for (let i = 1; i < rooms.length; i++) {
     const roomA = rooms[i - 1];
@@ -128,15 +133,15 @@ export function generateFloor(seed: number, floor: number): Floor {
 
   // Place key, exit, and start with maximum distance
   const start = getCenterOfRoom(rooms[0]);
-  
+
   // Place stairs in last room (far from start)
   const exit = getCenterOfRoom(rooms[rooms.length - 1]);
-  
+
   // Place key in a distant room (not start, not exit)
   let keyRoomIndex = Math.floor(rooms.length * 0.6) + rng.int(Math.floor(rooms.length * 0.3));
   if (keyRoomIndex >= rooms.length) keyRoomIndex = rooms.length - 2;
   if (keyRoomIndex === 0) keyRoomIndex = Math.floor(rooms.length / 2);
-  
+
   const key = getCenterOfRoom(rooms[keyRoomIndex]);
 
   // Ensure important positions are walkable
@@ -145,21 +150,21 @@ export function generateFloor(seed: number, floor: number): Floor {
   }
 
   // Generate searchable objects (more side rooms to explore)
-  const searchables = generateSearchables(rooms, rng, start, keyRoomIndex, floor);
+  const searchables = generateSearchables(rooms, lootRng ?? rng, start, keyRoomIndex, floor);
 
   return { width, height, tiles, start, key, exit, rooms, doors, searchables };
 }
 
 function generateSearchables(
-  rooms: Room[], 
-  rng: SeededRng, 
+  rooms: Room[],
+  rng: FloorLootRng,
   start: [number, number],
   keyRoomIndex: number,
   floor: number
 ): Searchable[] {
   const searchables: Searchable[] = [];
   const objectTypes: SearchableType[] = ['cabinet', 'locker', 'box', 'drawer'];
-  
+
   // Determine number of mimics for this floor
   let numMimics = 0;
   switch (floor) {
@@ -169,17 +174,17 @@ function generateSearchables(
     case 1: numMimics = 1 + (rng.next() < 0.5 ? 1 : 0); break; // 1-2
     case 0: numMimics = 2 + rng.int(2); break; // Block 13: 2-3
   }
-  
+
   // Place 1-2 searchables per room (except start room)
   rooms.forEach((room, roomIndex) => {
     // Skip start room only
     if (roomIndex === 0) return;
 
     const searchablesInRoom = 1 + rng.int(2); // 1-2 searchables per room
-    
+
     for (let i = 0; i < searchablesInRoom; i++) {
       // Random wall position in room
-      const side = rng.int(4); // 0=top, 1=right, 2=bottom, 3=left
+      const side = rng.int(4); // 0=top, 1=right, 2=bottom, 3=lef
       let x: number, y: number;
 
       switch (side) {
@@ -210,21 +215,21 @@ function generateSearchables(
       const roll = rng.next();
       let result: SearchResult;
       let objectType: SearchableType;
-      
+
       if (isMimic) {
         // Mimic always looks like a box
         objectType = 'mimic';
         result = { type: 'mimic_reveal' };
       } else {
         objectType = objectTypes[rng.int(objectTypes.length)];
-        
+
         // Rebalanced loot table:
         // 20% battery
         // 15% health (increased from 12%)
         // 25% collectibles (15% eth, 7% btc, 3% hemi)
         // 8% clue
         // 32% nothing (reduced from 35%)
-        
+
         if (roll < 0.20) {
           // Battery
           result = { type: 'battery', amount: 8 + rng.int(12) }; // 8-19%
@@ -264,8 +269,8 @@ function generateSearchables(
 }
 
 function createDeadEnd(
-  tiles: boolean[][], 
-  fromRoom: Room, 
+  tiles: boolean[][],
+  fromRoom: Room,
   rng: SeededRng,
   worldWidth: number,
   worldHeight: number
@@ -274,7 +279,7 @@ function createDeadEnd(
   const side = rng.int(4);
   let startX: number, startY: number;
   let dirX: number, dirY: number;
-  
+
   switch (side) {
     case 0: // top
       startX = fromRoom.x + 1 + rng.int(Math.max(1, fromRoom.width - 2));
@@ -282,7 +287,7 @@ function createDeadEnd(
       dirX = 0;
       dirY = -1;
       break;
-    case 1: // right
+    case 1: // righ
       startX = fromRoom.x + fromRoom.width - 1;
       startY = fromRoom.y + 1 + rng.int(Math.max(1, fromRoom.height - 2));
       dirX = 1;
@@ -294,7 +299,7 @@ function createDeadEnd(
       dirX = 0;
       dirY = 1;
       break;
-    case 3: // left
+    case 3: // lef
     default:
       startX = fromRoom.x;
       startY = fromRoom.y + 1 + rng.int(Math.max(1, fromRoom.height - 2));
@@ -302,18 +307,18 @@ function createDeadEnd(
       dirY = 0;
       break;
   }
-  
+
   // Extend corridor for 3-7 tiles
   const length = 3 + rng.int(5);
   let x = startX;
   let y = startY;
-  
+
   for (let i = 0; i < length; i++) {
     x += dirX;
     y += dirY;
-    
+
     if (x < 1 || x >= worldWidth - 1 || y < 1 || y >= worldHeight - 1) break;
-    
+
     tiles[y][x] = true;
     // Make it 2 tiles wide
     if (dirX !== 0 && y + 1 < worldHeight) {
@@ -335,13 +340,13 @@ function carveRoom(tiles: boolean[][], room: Room) {
 }
 
 function connectRooms(
-  tiles: boolean[][], 
-  roomA: Room, 
-  roomB: Room, 
+  tiles: boolean[][],
+  roomA: Room,
+  roomB: Room,
   rng: SeededRng
 ): [number, number][] {
   const doors: [number, number][] = [];
-  
+
   // Get random points in each room
   const pointA: [number, number] = [
     roomA.x + 1 + rng.int(roomA.width - 2),
@@ -376,9 +381,9 @@ function connectRooms(
 }
 
 function carveHorizontalCorridor(
-  tiles: boolean[][], 
-  x1: number, 
-  x2: number, 
+  tiles: boolean[][],
+  x1: number,
+  x2: number,
   y: number,
   doors: [number, number][]
 ): [number, number] | null {
@@ -391,25 +396,25 @@ function carveHorizontalCorridor(
       // Check if this is a door position (transition from wall to floor or vice versa)
       const wasWall = !tiles[y][x];
       tiles[y][x] = true;
-      
+
       // Make corridor 2 tiles wide for better visibility
       if (y + 1 < tiles.length) {
         tiles[y + 1][x] = true;
       }
-      
+
       if (wasWall && !doorPos) {
         doorPos = [x, y];
       }
     }
   }
-  
+
   return doorPos;
 }
 
 function carveVerticalCorridor(
-  tiles: boolean[][], 
-  y1: number, 
-  y2: number, 
+  tiles: boolean[][],
+  y1: number,
+  y2: number,
   x: number,
   doors: [number, number][]
 ): [number, number] | null {
@@ -422,18 +427,18 @@ function carveVerticalCorridor(
       // Check if this is a door position
       const wasWall = !tiles[y][x];
       tiles[y][x] = true;
-      
+
       // Make corridor 2 tiles wide
       if (x + 1 < tiles[0].length) {
         tiles[y][x + 1] = true;
       }
-      
+
       if (wasWall && !doorPos) {
         doorPos = [x, y];
       }
     }
   }
-  
+
   return doorPos;
 }
 

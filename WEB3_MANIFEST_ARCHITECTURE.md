@@ -1,5 +1,7 @@
 # Block 13 Run Manifest Architecture
 
+> **Historical architecture proposal — superseded.** This file documents an earlier design, including a legacy `actionHash` TX2 flow and outdated seed details. The current architecture is in [ARCHITECTURE.md](ARCHITECTURE.md); canonical protocols are in the TX1, InputLogV2, and FinalStateV1 specs.
+
 **Status**: ✅ **IMPLEMENTED**  
 **Date**: 2026-09-09  
 **Version**: 0.1.0 (Multi-Chain Entropy)

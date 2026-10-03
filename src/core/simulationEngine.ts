@@ -11,9 +11,10 @@ export class SimulationEngine {
   public static readonly FIXED_DELTA_MS = 1000 / SimulationEngine.TICK_RATE; // 16.666ms
   public static readonly FIXED_DELTA_SEC = 1 / SimulationEngine.TICK_RATE; // 0.01666s
 
-  private accumulator: number = 0;
+  // Accumulator units are fractional ticks scaled by 1,000,000.
+  private accumulatorUnits = 0;
   private simulationTick: number = 0;
-  private maxAccumulator: number = SimulationEngine.FIXED_DELTA_MS * 10; // Cap at 10 ticks to prevent spiral of death
+  private readonly maxTicksPerUpdate = 10;
 
   /**
    * Get current simulation tick
@@ -26,7 +27,7 @@ export class SimulationEngine {
    * Reset simulation to tick 0
    */
   reset() {
-    this.accumulator = 0;
+    this.accumulatorUnits = 0;
     this.simulationTick = 0;
   }
 
@@ -40,31 +41,19 @@ export class SimulationEngine {
    */
   update(realDelta: number, fixedUpdateCallback: (fixedDelta: number, tick: number) => void): number {
     // Add real delta to accumulator
-    this.accumulator += realDelta;
-
-    // Cap accumulator to prevent spiral of death on lag spikes
-    if (this.accumulator > this.maxAccumulator) {
-      console.warn(`[SimulationEngine] Capping accumulator at ${this.maxAccumulator}ms (was ${this.accumulator}ms)`);
-      this.accumulator = this.maxAccumulator;
-    }
+    if (!Number.isFinite(realDelta) || realDelta < 0) throw new RangeError('realDelta must be a finite non-negative number');
+    this.accumulatorUnits += Math.round(realDelta * SimulationEngine.TICK_RATE * 1_000_000 / 1000);
 
     let ticksExecuted = 0;
 
     // Run fixed updates until caught up
-    while (this.accumulator >= SimulationEngine.FIXED_DELTA_MS) {
+    while (this.accumulatorUnits >= 1_000_000 && ticksExecuted < this.maxTicksPerUpdate) {
       // Execute fixed update with FIXED delta
       fixedUpdateCallback(SimulationEngine.FIXED_DELTA_MS, this.simulationTick);
 
       this.simulationTick++;
-      this.accumulator -= SimulationEngine.FIXED_DELTA_MS;
+      this.accumulatorUnits -= 1_000_000;
       ticksExecuted++;
-
-      // Safety limit: don't run more than 10 ticks per frame
-      if (ticksExecuted >= 10) {
-        console.warn(`[SimulationEngine] Executed 10 ticks in one frame, discarding remaining accumulator`);
-        this.accumulator = 0;
-        break;
-      }
     }
 
     return ticksExecuted;
@@ -77,35 +66,35 @@ export class SimulationEngine {
    * @returns Alpha value between 0 and 1
    */
   getInterpolationAlpha(): number {
-    return this.accumulator / SimulationEngine.FIXED_DELTA_MS;
+    return Math.min(1, this.accumulatorUnits / 1_000_000);
   }
 
   /**
    * Convert ticks to milliseconds
    */
   static ticksToMs(ticks: number): number {
-    return ticks * SimulationEngine.FIXED_DELTA_MS;
+    return Math.round(ticks * SimulationEngine.FIXED_DELTA_MS);
   }
 
   /**
    * Convert ticks to seconds
    */
   static ticksToSec(ticks: number): number {
-    return ticks * SimulationEngine.FIXED_DELTA_SEC;
+    return Math.round(ticks * SimulationEngine.FIXED_DELTA_SEC * 1000) / 1000; // Round to 3 decimal places
   }
 
   /**
    * Convert milliseconds to ticks
    */
   static msToTicks(ms: number): number {
-    return Math.floor(ms / SimulationEngine.FIXED_DELTA_MS);
+    return Math.round(ms / SimulationEngine.FIXED_DELTA_MS);
   }
 
   /**
    * Convert seconds to ticks
    */
   static secToTicks(sec: number): number {
-    return Math.floor(sec * SimulationEngine.TICK_RATE);
+    return Math.round(sec * SimulationEngine.TICK_RATE);
   }
 }
 

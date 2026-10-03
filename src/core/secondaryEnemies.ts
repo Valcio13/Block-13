@@ -13,8 +13,8 @@ export class Crawler {
   private speed: number = 60; // Slower than stalker
   private chaseSpeed: number = 100;
   private detectionRange: number = 120;
-  private chaseStartTime: number = 0;
-  private maxChaseDuration: number = 3000; // 3 seconds
+  private chaseStartTick: number = 0;
+  private maxChaseDurationTicks: number = 180; // 3 seconds at 60Hz
   private tileSize: number;
   
   constructor(id: number, seed: number, tileSize: number) {
@@ -58,12 +58,10 @@ export class Crawler {
     this.targetY = this.y;
   }
   
-  public update(delta: number, playerX: number, playerY: number, walkableTiles: boolean[][]): boolean {
+  public update(delta: number, currentTick: number, playerX: number, playerY: number, walkableTiles: boolean[][]): boolean {
     const distToPlayer = Math.sqrt(
       Math.pow(this.x - playerX, 2) + Math.pow(this.y - playerY, 2)
     );
-    
-    const now = Date.now();
     
     if (this.chasing) {
       // Chase player
@@ -75,7 +73,8 @@ export class Crawler {
       if (distToPlayer < 25) return true; // Collision!
       
       // Give up chase after timeout or if player is too far
-      if (now - this.chaseStartTime > this.maxChaseDuration || distToPlayer > 300) {
+      const chaseDurationTicks = currentTick - this.chaseStartTick;
+      if (chaseDurationTicks > this.maxChaseDurationTicks || distToPlayer > 300) {
         this.chasing = false;
         this.pickPatrolTarget(walkableTiles);
       }
@@ -86,7 +85,7 @@ export class Crawler {
       // Detect player
       if (distToPlayer < this.detectionRange) {
         this.chasing = true;
-        this.chaseStartTime = now;
+        this.chaseStartTick = currentTick;
       }
       
       // Pick new patrol target if reached
@@ -188,6 +187,7 @@ export class Watcher {
   
   public update(
     delta: number,
+    currentTick: number,
     playerX: number,
     playerY: number,
     playerApproaching: boolean,

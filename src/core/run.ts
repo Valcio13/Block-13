@@ -1,4 +1,4 @@
-import type { RunManifest } from './seedDerivation';
+import { deriveSeeds, type RunManifest } from './seedDerivation';
 
 export type RunState = {
   floor: number;
@@ -10,29 +10,36 @@ export type RunState = {
   floorsCompleted: number;
   timeStarted: number;
   seenStoryIds: string[]; // Track which stories have been shown this run
-  
+
   // Blockchain manifest (optional - only present for blockchain runs)
   manifest?: RunManifest;
-  
+
   // Legacy seed for backward compatibility with existing game code
   // Derived from manifest if present, otherwise random
   seed: number;
+  /** Exact unsigned seed used by the Phaser-free simulation (decimal serialization). */
+  canonicalSeed: string;
 };
 
 export const createRun = (manifest?: RunManifest): RunState => {
   // Generate legacy seed for existing game code
   // If manifest exists, derive from world entropy
   // Otherwise use random
-  let legacySeed: number;
-  
+  let canonicalSeed: bigint;
+
   if (manifest) {
-    // Convert first 8 bytes of BTC hash to number for legacy seed
-    const hex = manifest.btcBlockHash.slice(2, 18); // Remove 0x, take 16 hex chars
-    legacySeed = parseInt(hex, 16);
+    // Use canonical TX1 WORLD seed directly (32-byte keccak digest -> unsigned BigInt).
+    canonicalSeed = deriveSeeds(manifest).world;
   } else {
-    legacySeed = Math.floor(Math.random() * 0xFFFFFFFF);
+    const bytes = new Uint8Array(8);
+    globalThis.crypto?.getRandomValues(bytes);
+    if (!globalThis.crypto?.getRandomValues) {
+      for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    canonicalSeed = 0n;
+    for (const byte of bytes) canonicalSeed = (canonicalSeed << 8n) | BigInt(byte);
   }
-  
+
   return {
     floor: 4, // Starting on Floor 4
     battery: 100,
@@ -44,7 +51,8 @@ export const createRun = (manifest?: RunManifest): RunState => {
     timeStarted: Date.now(),
     seenStoryIds: [], // Empty at start of run
     manifest, // Store full manifest for seed derivation
-    seed: legacySeed, // Legacy compatibility
+    seed: Number(canonicalSeed & 0xffff_ffffn), // Legacy compatibility
+    canonicalSeed: canonicalSeed.toString(10),
   };
 };
 
@@ -60,26 +68,3 @@ export const completeFloor = (state: RunState): RunState => ({
   // manifest persists across floors (don't reset)
   // seed persists across floors (don't reset)
 });
-
-// Generate action hash for score submission
-// This is a proof-of-action commitment that could be validated later
-export const generateActionHash = (runId: number, score: number): `0x${string}` => {
-  // Browser-compatible hash using Web Crypto API
-  // For now, create a deterministic hash from runId + score + timestamp
-  // In production, this could hash actual gameplay actions/state
-  const data = `${runId}:${score}:${Date.now()}`;
-  
-  // Simple browser-safe hash: use hex encoding + pad to 32 bytes
-  const encoder = new TextEncoder();
-  const encoded = encoder.encode(data);
-  
-  // Convert to hex and pad to 64 chars (32 bytes)
-  let hex = Array.from(encoded)
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-  
-  // Pad or truncate to exactly 64 hex chars (32 bytes)
-  hex = hex.padEnd(64, '0').slice(0, 64);
-  
-  return ('0x' + hex) as `0x${string}`;
-};

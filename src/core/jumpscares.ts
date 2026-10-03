@@ -25,10 +25,10 @@ export class JumpscareDirector {
   private rng: SeededRng;
   private floor: number;
   private availableScares: JumpscareEvent[];
-  private lastScareTime: number = 0;
+  private lastScareTick: number = -Infinity;
   private lastScareType: JumpscareType | null = null;
-  private globalCooldown: number = 15000; // 15 seconds between major scares
-  private minorCooldown: number = 8000; // 8 seconds between subtle scares
+  private globalCooldownTicks: number = 900; // 15 seconds at 60Hz
+  private minorCooldownTicks: number = 480; // 8 seconds at 60Hz
   private scareCount: number = 0;
   private activeMajorScare: boolean = false; // Track if major scare is currently active
   
@@ -60,23 +60,23 @@ export class JumpscareDirector {
     }
   }
   
-  public canTriggerScare(now: number, intensity: 'subtle' | 'moderate' | 'major'): boolean {
+  public canTriggerScare(currentTick: number, intensity: 'subtle' | 'moderate' | 'major'): boolean {
     // Block all scares if a major scare is currently active
     if (this.activeMajorScare && intensity !== 'subtle') {
       return false;
     }
     
-    const timeSinceLastScare = now - this.lastScareTime;
+    const ticksSinceLastScare = currentTick - this.lastScareTick;
     
-    if (intensity === 'major' && timeSinceLastScare < this.globalCooldown) {
+    if (intensity === 'major' && ticksSinceLastScare < this.globalCooldownTicks) {
       return false;
     }
     
-    if (intensity === 'moderate' && timeSinceLastScare < this.minorCooldown) {
+    if (intensity === 'moderate' && ticksSinceLastScare < this.minorCooldownTicks) {
       return false;
     }
     
-    if (intensity === 'subtle' && timeSinceLastScare < 5000) {
+    if (intensity === 'subtle' && ticksSinceLastScare < 300) { // 5 seconds at 60Hz
       return false;
     }
     
@@ -91,68 +91,68 @@ export class JumpscareDirector {
     return this.activeMajorScare;
   }
   
-  public tryTriggerOnSearch(now: number, hasKey: boolean): JumpscareEvent | null {
-    if (!this.canTriggerScare(now, 'moderate')) return null;
+  public tryTriggerOnSearch(currentTick: number, hasKey: boolean): JumpscareEvent | null {
+    if (!this.canTriggerScare(currentTick, 'moderate')) return null;
     
     // Higher chance of scares after getting key
     const baseChance = hasKey ? 0.3 : 0.15;
     
     if (this.rng.next() < baseChance) {
-      return this.selectScare(now, ['subtle', 'moderate']);
+      return this.selectScare(currentTick, ['subtle', 'moderate']);
     }
     
     return null;
   }
   
-  public tryTriggerOnRoomEnter(now: number, hasKey: boolean): JumpscareEvent | null {
-    if (!this.canTriggerScare(now, 'subtle')) return null;
+  public tryTriggerOnRoomEnter(currentTick: number, hasKey: boolean): JumpscareEvent | null {
+    if (!this.canTriggerScare(currentTick, 'subtle')) return null;
     
     // Rare environmental scares
     const chance = hasKey ? 0.12 : 0.06;
     
     if (this.rng.next() < chance) {
-      return this.selectScare(now, ['subtle']);
+      return this.selectScare(currentTick, ['subtle']);
     }
     
     return null;
   }
   
-  public tryTriggerOnKeyCollected(now: number): JumpscareEvent | null {
-    if (!this.canTriggerScare(now, 'major')) return null;
+  public tryTriggerOnKeyCollected(currentTick: number): JumpscareEvent | null {
+    if (!this.canTriggerScare(currentTick, 'major')) return null;
     
     // High chance of moderate/major scare when collecting key
     if (this.rng.next() < 0.7) {
-      return this.selectScare(now, ['moderate', 'major']);
+      return this.selectScare(currentTick, ['moderate', 'major']);
     }
     
     return null;
   }
   
-  public tryTriggerOnLowBattery(now: number, battery: number): JumpscareEvent | null {
+  public tryTriggerOnLowBattery(currentTick: number, battery: number): JumpscareEvent | null {
     if (battery > 20) return null;
-    if (!this.canTriggerScare(now, 'subtle')) return null;
+    if (!this.canTriggerScare(currentTick, 'subtle')) return null;
     
     // Occasional subtle scares when battery is critically low
     if (this.rng.next() < 0.1) {
-      return this.selectScare(now, ['subtle']);
+      return this.selectScare(currentTick, ['subtle']);
     }
     
     return null;
   }
   
-  public tryTriggerNearStairs(now: number, hasKey: boolean, distToStairs: number): JumpscareEvent | null {
+  public tryTriggerNearStairs(currentTick: number, hasKey: boolean, distToStairs: number): JumpscareEvent | null {
     if (!hasKey || distToStairs > 200) return null;
-    if (!this.canTriggerScare(now, 'moderate')) return null;
+    if (!this.canTriggerScare(currentTick, 'moderate')) return null;
     
     // Approaching stairs with key can trigger moderate scares
     if (this.rng.next() < 0.15) {
-      return this.selectScare(now, ['moderate']);
+      return this.selectScare(currentTick, ['moderate']);
     }
     
     return null;
   }
   
-  private selectScare(now: number, allowedIntensities: ('subtle' | 'moderate' | 'major')[]): JumpscareEvent | null {
+  private selectScare(currentTick: number, allowedIntensities: ('subtle' | 'moderate' | 'major')[]): JumpscareEvent | null {
     // Filter available scares by intensity
     const candidates = this.availableScares.filter(scare => 
       allowedIntensities.includes(scare.intensity) &&
@@ -163,7 +163,7 @@ export class JumpscareDirector {
     
     const selected = candidates[this.rng.int(candidates.length)];
     
-    this.lastScareTime = now;
+    this.lastScareTick = currentTick;
     this.lastScareType = selected.type;
     this.scareCount++;
     

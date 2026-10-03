@@ -64,7 +64,7 @@ export function useStartRun() {
     hash: txHash || undefined,
   });
 
-  const startRun = useCallback(async (gameMode: number = 0): Promise<{ runId: number; manifest: RunManifest; hash: Hash }> => {
+  const startRun = useCallback(async (gameMode: number = 0): Promise<{ runId: bigint; manifest: RunManifest; hash: Hash }> => {
     if (!publicClient || !address) {
       throw new Error('Wallet not connected');
     }
@@ -128,11 +128,7 @@ export function useStartRun() {
       // topics[2] is the indexed runId
       const runIdBigInt = BigInt(log.topics[2]);
       
-      if (runIdBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
-        throw new Error('RunId too large');
-      }
-      
-      const runId = Number(runIdBigInt);
+      const runId = runIdBigInt;
       console.log('[useStartRun] Run started with ID:', runId);
 
       // Create manifest for local use
@@ -145,6 +141,7 @@ export function useStartRun() {
         hemiBlockHash: entropy.hemiBlockHash,
         ethBlockHash: entropy.ethBlockHash,
         hemiTxHash: entropy.hemiTxHash,
+        startedAt: Date.now(),
       };
 
       setIsLoading(false);
@@ -167,6 +164,7 @@ export function useStartRun() {
   };
 }
 
+/** Legacy contract call retained for the pre-TX2 ABI; the app does not call it. */
 export function useSubmitScore() {
   const { writeContractAsync } = useWriteContract();
   const [txHash, setTxHash] = useState<Hash | null>(null);
