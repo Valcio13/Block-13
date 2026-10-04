@@ -1,6 +1,6 @@
 # Hemi Testnet Integration - Implementation Report
 
-> **Historical integration report — superseded.** This describes an earlier `actionHash` score submission flow. The current app starts TX1 runs and does not call the legacy score method. See [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
+> **Historical integration report — superseded.** This describes the earlier `actionHash` score flow. The current app uses `completeRun` for a TX2 result/replay commitment; it does not independently prove honest gameplay. The current contract address and architecture are in [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Changed Files
 

@@ -1,10 +1,11 @@
 # FinalStateV1 canonical result
 
-FinalStateV1 is the public deterministic result produced after replaying a TX1
-manifest and its canonical input log. It is a compact result projection, not a
-hash of the internal simulation snapshot. A verifier must replay the run and
-derive these fields from that simulation; it must not accept a separately
-supplied score, outcome, or progress value as authoritative.
+FinalStateV1 is the public deterministic result produced by the authoritative
+simulation for a TX1 manifest and canonical input log. It is a compact result
+projection, not a hash of the internal simulation snapshot. Current TX2 stores
+the player's result commitment; it does not independently establish execution.
+An independent verifier could later replay the run and derive these fields,
+but no such verifier is part of the current contest flow.
 
 ## Schema and field purpose
 
@@ -26,8 +27,8 @@ supplied score, outcome, or progress value as authoritative.
 
 Progression is coherent when `floorsCompleted == 4 - finalFloor`; a win must
 end at floor `-1` with positive HP and curse below 100 percent. A loss must end
-on floor 0 through 4 with zero HP or maximum curse. These are encoding checks;
-the verifier still establishes them by replay.
+on floor 0 through 4 with zero HP or maximum curse. These are encoding checks.
+Matching them to execution requires replay.
 
 ## Canonical binary layout
 
@@ -62,9 +63,9 @@ internal snapshot fields, or cosmetic state are included.
 ## Replay derivation and run binding
 
 The game constructs the result from `AuthoritativeSimulation` only after its
-state becomes terminal. An independent verifier derives TX1 seeds, replays the
-canonical input log through its Node-compatible simulation, checks
-`terminalTick`, and then projects the result fields. The per-player TX1
+state becomes terminal. An independent verifier could derive TX1 seeds, replay
+the canonical input log, check `terminalTick`, and project the result, but no
+verifier is implemented. Current TX2 stores a player-submitted commitment. The per-player TX1
 `runId`, `player`, `gameVersion`, and `rulesHash` are committed into the bytes.
 TX1's uint256 run ID is retained as a JavaScript `bigint`; it is never rounded
 through `number`.

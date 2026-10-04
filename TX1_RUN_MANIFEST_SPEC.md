@@ -13,13 +13,9 @@ TX1 creates a **deterministic and auditable** run manifest that defines all init
 - **Multi-chain entropy** from BTC, Hemi, and Ethereum
 - **Deterministic seed derivation** with domain separation
 - **Replay compatibility** with the deterministic simulation engine
-- **Replay inputs** for the current deterministic gameplay system and a future independent verifier
+- **Replay inputs** for the current deterministic gameplay and result-commitment flow
 
-**Important**: TX1 alone does not provide "provably fair" gameplay. Full verified gameplay requires:
-1. TX1: Deterministic initial conditions (this document)
-2. Deterministic replay system (implemented)
-3. TX2: Score submission with input hash (future)
-4. Off-chain verifier: Replay validation (future)
+**Important**: TX1 plus TX2 does not independently prove honest gameplay execution. TX2 stores the player's result and replay hashes for deterministic audit; no verifier is part of the current contest flow.
 
 ---
 
@@ -47,13 +43,12 @@ struct RunManifest {
 
     // Timing
     uint64 startedAt;           // Block timestamp when TX1 was mined
-    uint64 submittedAt;         // Block timestamp when TX2 was mined (0 if not submitted)
-
-    // Scoring
-    uint32 score;               // Final score (0 until TX2)
-    bool submitted;             // Whether TX2 was submitted
 }
 ```
+
+TX2 completion data is stored separately in `CompletedRun`; it is not part of
+the TX1 manifest. The legacy contract's `submittedAt`, `score`, and `submitted`
+fields have been removed from the current deployment ABI.
 
 ### TypeScript Interface
 
@@ -372,19 +367,19 @@ The Run Manifest contains all data needed to recreate initial game state:
 - **character**: Future expansion (currently unused)
 - **gameMode**: Display only, doesn't affect gameplay
 - **startedAt**: Timestamp for display/leaderboards only
-- **score/submitted**: TX2 data, not needed for replay
+- **completion result**: Stored separately by TX2, not part of TX1
 
-### Verification Flow:
+### Deterministic replay flow:
 
 ```
 1. Load RunManifest from blockchain (TX1)
 2. Derive three seeds using canonical algorithm
 3. Initialize PCG32 generators: world, economy, event
-4. Load the canonical InputLogV2 (currently local; TX2 has not been implemented)
+4. Load the canonical InputLogV2
 5. Create SimulationEngine at 60Hz
 6. Create InputReplayer with input log
 7. Run game loop: for each tick, get input state, run fixed update
-8. Derive FinalStateV1 and compare it with the result commitment when a future verified TX2 exists
+8. Derive FinalStateV1 and compare it with the player's TX2 commitment for audit
 ```
 
 ---
@@ -424,9 +419,9 @@ activity is low. Please wait a few moments and try again."
 
 - TX1 `RunRegistry` manifest and start-run integration are implemented; this contract/schema remains frozen.
 - Seed derivation uses `viem` Keccak-256 over the documented canonical text fields and retains `runId` as `bigint` in TypeScript.
-- The client currently has a legacy `submitScore(runId, score, actionHash)` contract method, but the game does not call it. It is not the planned verified TX2.
+- TX2 uses `completeRun` to store canonical result and replay hashes. It does not prove the game was honestly executed.
 - InputLogV2 and FinalStateV1 are documented separately and implemented locally.
-- Independent replay verifier, verifier signing/service, and verified-result TX2 are not implemented.
+- An independent replay verifier, verifier signing/service, and honest-execution proof are not implemented or in the current contest flow.
 
 See [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) for current project status. Earlier implementation checklists later in this historical specification describe past work and are not current status indicators.
 

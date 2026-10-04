@@ -6,6 +6,9 @@ import { createGameConfig } from './game/config';
 import { createRun } from './core/run';
 import { initRNG, initLocalRNG } from './core/rng';
 import { useWallet, useStartRun } from './web3/hooks';
+import { useCompleteRun } from './web3/hooks';
+import { submitRunCompletion } from './web3/tx2Completion';
+import type { Hash } from 'viem';
 import { wagmiConfig } from './web3/wagmi';
 import type { RunState } from './core/run';
 
@@ -13,22 +16,36 @@ const queryClient = new QueryClient();
 
 type RunStatus = 'idle' | 'connecting' | 'starting' | 'playing' | 'complete';
 
+const stringifyRunSession = (value: unknown) => JSON.stringify(value, (_key, item) =>
+  typeof item === 'bigint' ? { __block13Uint256: item.toString(10) } : item,
+);
+const parseRunSession = (value: string) => JSON.parse(value, (_key, item) =>
+  item && typeof item === 'object' && typeof item.__block13Uint256 === 'string'
+    ? BigInt(item.__block13Uint256)
+    : item,
+);
+
 function GameApp() {
   const [status, setStatus] = useState<RunStatus>('idle');
   const [runState, setRunState] = useState<RunState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [completionData, setCompletionData] = useState<{ inputLogBytes?: Uint8Array; finalStateBytes?: Uint8Array } | null>(null);
+  const [completionHash, setCompletionHash] = useState<Hash | null>(null);
+  const [completionPhase, setCompletionPhase] = useState<'idle' | 'wallet' | 'submitted' | 'confirmed' | 'failed'>('idle');
+  const [completionError, setCompletionError] = useState<string | null>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
   const gameContainerRef = useRef<HTMLDivElement>(null);
 
   const { address, isConnected, isCorrectNetwork, connectWallet, switchToHemi } = useWallet();
   const { startRun, isLoading: isStarting, error: startError } = useStartRun();
+  const { completeRun } = useCompleteRun();
 
   // Recover active run from sessionStorage on mount
   useEffect(() => {
     const savedRun = sessionStorage.getItem('activeRun');
     if (savedRun && status === 'idle') {
       try {
-        const { runState: savedState } = JSON.parse(savedRun);
+        const { runState: savedState } = parseRunSession(savedRun);
         // Only recover if the run was still playing
         if (savedState && savedState.status === 'playing') {
           setRunState(savedState);
@@ -100,7 +117,7 @@ function GameApp() {
       setRunState(newRun);
       
       // Save run to sessionStorage for refresh recovery
-      sessionStorage.setItem('activeRun', JSON.stringify({
+      sessionStorage.setItem('activeRun', stringifyRunSession({
         runState: newRun,
         txHash: result.hash,
       }));
@@ -127,16 +144,41 @@ function GameApp() {
     setRunState(localRun);
     
     // Save to sessionStorage (without blockchain data)
-    sessionStorage.setItem('activeRun', JSON.stringify({
+    sessionStorage.setItem('activeRun', stringifyRunSession({
       runState: localRun,
       txHash: null,
     }));
   };
 
-  const handleGameComplete = (finalState: RunState) => {
-    // Score submission and inputHash commitment are intentionally deferred until TX2.
+  const handleGameComplete = (finalState: RunState, registry: Phaser.Data.DataManager) => {
     setRunState(finalState);
+    setCompletionData({
+      inputLogBytes: registry.get('inputLogV2Bytes') as Uint8Array | undefined,
+      finalStateBytes: registry.get('finalStateV1Bytes') as Uint8Array | undefined,
+    });
     setStatus('complete');
+  };
+
+  const submitCompletion = async () => {
+    if (!runState?.manifest) return;
+    setCompletionPhase('wallet');
+    setCompletionError(null);
+    try {
+      await submitRunCompletion({
+        manifest: runState.manifest,
+        inputLogBytes: completionData?.inputLogBytes,
+        finalStateBytes: completionData?.finalStateBytes,
+        submit: (args) => completeRun(args, hash => {
+          setCompletionHash(hash);
+          setCompletionPhase('submitted');
+        }),
+        confirm: async () => undefined,
+      });
+      setCompletionPhase('confirmed');
+    } catch (err: any) {
+      setCompletionPhase('failed');
+      setCompletionError(err.message || 'TX2 submission failed. You can retry.');
+    }
   };
 
   useEffect(() => {
@@ -148,9 +190,9 @@ function GameApp() {
       if (gameRef.current.registry) {
         const checkCompletion = setInterval(() => {
           const currentState = gameRef.current?.registry.get('runState') as RunState;
-          if (currentState && currentState.status === 'won') {
+          if (currentState && (currentState.status === 'won' || currentState.status === 'lost')) {
             clearInterval(checkCompletion);
-            handleGameComplete(currentState);
+            handleGameComplete(currentState, gameRef.current!.registry);
           }
         }, 1000);
 
@@ -188,7 +230,7 @@ function GameApp() {
         <section className="title-card">
           <h1>RUN COMPLETE!</h1>
           {isBlockchainRun ? (
-            <p className="premise">Run complete. Score submission will be added in a later transaction update.</p>
+            <p className="premise">Commit this deterministic result and replay hashes to Hemi Testnet.</p>
           ) : (
             <p className="premise">Local run completed (not recorded on-chain)</p>
           )}
@@ -196,6 +238,27 @@ function GameApp() {
             <div style={{ marginTop: '2rem', color: '#a5b6b5' }}>
               <p>Final Score: {runState.score}</p>
               <p>Floors Completed: {runState.floorsCompleted}</p>
+            </div>
+          )}
+          {isBlockchainRun && runState?.manifest && (
+            <div style={{ marginTop: '1rem', color: '#a5b6b5' }}>
+              <p>Run ID: {runState.manifest.runId.toString()}</p>
+              {completionPhase === 'confirmed' ? (
+                <>
+                  <p>On-chain completion: Confirmed</p>
+                  <p>Transaction: {completionHash ? `${completionHash.slice(0, 10)}…${completionHash.slice(-8)}` : 'Confirmed'}</p>
+                </>
+              ) : (
+                <>
+                  {completionPhase === 'wallet' && <p>Waiting for wallet confirmation…</p>}
+                  {completionPhase === 'submitted' && <p>Submitting… {completionHash ? `${completionHash.slice(0, 10)}…${completionHash.slice(-8)}` : ''}</p>}
+                  {completionError && <p role="alert">{completionError}</p>}
+                  <button onClick={submitCompletion} disabled={completionPhase === 'wallet' || completionPhase === 'submitted'}>
+                    {completionPhase === 'failed' ? 'Retry Result Submission' : 'Submit Result to Hemi'}
+                  </button>
+                </>
+              )}
+              <p>Final score: {runState.score}</p>
             </div>
           )}
           <button onClick={() => window.location.reload()}>New Run</button>
@@ -266,7 +329,7 @@ function GameApp() {
         )}
 
         <p className="run-rule">Multi-chain entropy: BTC · Hemi · Ethereum</p>
-        <p className="run-rule">2 transactions only: start run · submit score</p>
+        <p className="run-rule">2 transactions: start run · commit result</p>
 
         {(error || startError) && (
           <p style={{ color: '#ff4444', marginTop: '1rem' }}>{error || startError}</p>

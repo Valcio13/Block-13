@@ -8,6 +8,7 @@ import type { Floor, Searchable } from '../../core/floor';
 import type { RunState } from '../../core/run';
 import { AuthoritativeSimulation, FIXED_SCALE, type AuthoritativeState } from '../../core/authoritativeSimulation';
 import { encodeFinalStateV1, finalStateV1FromSimulation, hashFinalStateV1 } from '../../core/finalStateV1';
+import { keccak256, toHex } from 'viem';
 import { getAuthoredClueForSearchId } from '../../core/clues';
 import { formatFixedPointPercent, formatWholePercent } from '../../core/uiFormatting';
 
@@ -339,6 +340,7 @@ export class FloorScene extends Phaser.Scene {
     if (this.isTransitioning || this.isPaused || this.storyPopupOpen) {
       return;
     }
+    if (this.authoritativeSimulation.state.status !== 'playing') return;
 
     // Single live/replay input path into the Phaser-free authority.
     this.inputPipeline.step(tick, inputs => {
@@ -356,13 +358,6 @@ export class FloorScene extends Phaser.Scene {
       this.runState.score = state.score;
       this.runState.status = state.status;
       this.registry.set('runState', this.runState);
-      if (state.status !== 'playing' && this.runState.manifest) {
-        const finalState = finalStateV1FromSimulation(this.runState.manifest, this.authoritativeSimulation);
-        this.registry.set('finalStateV1', finalState);
-        this.registry.set('finalStateV1Bytes', encodeFinalStateV1(finalState));
-        this.registry.set('finalStateHash', hashFinalStateV1(finalState));
-      }
-
       // Progression has already happened in the simulation. Start the scene
       // presentation timer immediately and do not let an event/tween/render
       // adapter run before it or become a gate for loading the next floor.
@@ -380,6 +375,23 @@ export class FloorScene extends Phaser.Scene {
         this.playerDeath();
       }
     });
+
+    // InputPipeline records this terminal tick after the simulation callback.
+    // Freeze both canonical artifacts only after that write is complete.
+    const state = this.authoritativeSimulation.state;
+    if (state.status !== 'playing') {
+      this.inputRecorder.setTerminalTick(state.tick);
+      const inputLogV2Bytes = this.inputRecorder.encodeBinary();
+      this.registry.set('inputLogV2Bytes', inputLogV2Bytes);
+      this.registry.set('inputHash', keccak256(toHex(inputLogV2Bytes)));
+      if (this.runState.manifest) {
+        const finalState = finalStateV1FromSimulation(this.runState.manifest, this.authoritativeSimulation);
+        const finalStateV1Bytes = encodeFinalStateV1(finalState);
+        this.registry.set('finalStateV1', finalState);
+        this.registry.set('finalStateV1Bytes', finalStateV1Bytes);
+        this.registry.set('finalStateHash', hashFinalStateV1(finalState));
+      }
+    }
   }
 
   private presentSimulationEvents(events: ReturnType<AuthoritativeSimulation['stepWithEvents']>['events']) {

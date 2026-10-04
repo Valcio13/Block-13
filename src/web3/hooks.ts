@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { type Hash } from 'viem';
 import { fetchEntropyBundle, validateEntropyBundle, type EntropyBundle } from './entropyFetcher';
 import type { RunManifest } from '../core/seedDerivation';
+import type { CompleteRunArgs } from './tx2Completion';
 
 export function useWallet() {
   const { address, isConnected, chain } = useAccount();
@@ -83,7 +84,7 @@ export function useStartRun() {
         throw new Error('Failed to fetch valid entropy sources');
       }
 
-      console.log('[useStartRun] Entropy validated, starting run transaction...');
+      console.log('[useStartRun] Entropy bundle complete; requesting wallet TX1');
 
       // Convert game config to bytes32
       const gameVersion = stringToBytes32(GAME_VERSION);
@@ -164,46 +165,50 @@ export function useStartRun() {
   };
 }
 
-/** Legacy contract call retained for the pre-TX2 ABI; the app does not call it. */
-export function useSubmitScore() {
+/** Submit and confirm a deterministic result commitment on Hemi Testnet. */
+export function useCompleteRun() {
   const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
   const [txHash, setTxHash] = useState<Hash | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isSuccess, setIsSuccess] = useState(false);
 
-  const { isSuccess, isLoading: isConfirming } = useWaitForTransactionReceipt({
-    hash: txHash || undefined,
-  });
-
-  const submitScore = useCallback(
-    async (runId: number, score: number, actionHash: string) => {
+  const completeRun = useCallback(
+    async (args: CompleteRunArgs, onSubmitted?: (hash: Hash) => void) => {
+      if (!publicClient) throw new Error('Hemi Testnet client is unavailable');
       setIsLoading(true);
       setError(null);
       setTxHash(null);
+      setIsSuccess(false);
 
       try {
         const hash = await writeContractAsync({
           address: CONTRACT_ADDRESS,
           abi: RUN_REGISTRY_ABI,
-          functionName: 'submitScore',
-          args: [BigInt(runId), score, actionHash as `0x${string}`],
+          functionName: 'completeRun',
+          args: [args.runId, args.score, args.outcome, args.terminalTick, args.inputHash, args.finalStateHash],
         });
-
         setTxHash(hash);
+        onSubmitted?.(hash);
+        const receipt = await publicClient.waitForTransactionReceipt({ hash });
+        if (receipt.status !== 'success') throw new Error('TX2 completion transaction reverted');
+        setIsSuccess(true);
         setIsLoading(false);
-        return { hash };
+        return hash;
       } catch (err: any) {
-        setError(err.message || 'Transaction failed');
+        const message = err.message || 'Transaction failed';
+        setError(message);
         setIsLoading(false);
         throw err;
       }
     },
-    [writeContractAsync]
+    [writeContractAsync, publicClient]
   );
 
   return {
-    submitScore,
-    isLoading: isLoading || isConfirming,
+    completeRun,
+    isLoading,
     isSuccess,
     error,
     txHash,

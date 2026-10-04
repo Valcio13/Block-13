@@ -1,6 +1,6 @@
 # TX1 Run Manifest - Completion Report
 
-> **Historical completion report.** Read [TX1_RUN_MANIFEST_SPEC.md](TX1_RUN_MANIFEST_SPEC.md) for the canonical TX1 contract/seed specification and [README.md](README.md) for current implementation boundaries. No verified TX2 or independent verifier is implemented.
+> **Historical completion report.** Read [TX1_RUN_MANIFEST_SPEC.md](TX1_RUN_MANIFEST_SPEC.md) for the canonical TX1 contract/seed specification and [README.md](README.md) for current implementation boundaries. Direct TX2 result/replay commitment is implemented; no independent verifier or honest-execution proof is implemented.
 
 ## Status: ✅ COMPLETE
 

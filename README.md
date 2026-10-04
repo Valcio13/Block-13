@@ -2,7 +2,7 @@
 
 Block 13 is a survival horror game built for the **Hemi Arcade Contest 2: Turbo Edition**. Players descend through a procedurally generated building while managing health, flashlight battery, and curse, then escape from Outside. The current project is **deterministic and auditable**: a Phaser-free simulation owns gameplay outcomes, and recorded inputs can be replayed against that simulation.
 
-> **Verification status:** An independent verifier and the future verified-result TX2 are **not implemented**. Current replay tests establish deterministic behavior within this repository; they do not constitute production verification or a claim of provable fairness.
+> **Verification status:** TX2 stores the player's result and canonical replay hashes. It does not independently prove that gameplay was honestly executed. No verifier, backend, or signing service is implemented.
 
 ## Gameplay
 
@@ -41,9 +41,9 @@ World generation, economy, events, and gameplay subsystems use separated determi
 ## Web3 status
 
 - **TX1 — Run Manifest:** Implemented for starting a Hemi Testnet run. The manifest binds player/run identity, game version `0.2.0`, rules identifier `classic-static-walls`, and selected multi-chain entropy sources. Seed derivation uses domain-separated Keccak-256 digests for WORLD, ECONOMY, and EVENT streams. Only the field values changed for this gameplay rules update; the frozen manifest structure and encoding did not change.
-- **Gameplay and replay:** Implemented locally in the game and covered by deterministic tests. The input log and FinalStateV1 can be used as inputs/results for a future verifier.
-- **Independent verifier:** **Not implemented.** No verifier currently independently attests to submitted results.
-- **TX2 — verified result submission:** **Planned, not implemented.** The game does not submit score, `inputHash`, or `finalStateHash` on-chain. The existing Solidity contract and frontend ABI retain a legacy `submitScore(runId, score, actionHash)` method; the app does not call it and it is not the future verified TX2 flow.
+- **Gameplay and replay:** Implemented locally in the game and covered by deterministic tests. InputLogV2 and FinalStateV1 are committed by TX2.
+- **TX2 — completion/result commitment:** The contract accepts canonical score, outcome, terminal tick, InputLogV2 hash, and FinalStateV1 hash after an explicit player action. This commitment is deterministic and auditable, but does not independently prove honest execution.
+- **Independent verifier/backend/signing:** Not implemented and not part of the current contest flow.
 
 No private keys or signing secrets belong in this repository. Wallet actions use the connected wallet. TX1 entropy currently includes public Hemi Testnet, Ethereum Mainnet, and Bitcoin sources; see [TX1_RUN_MANIFEST_SPEC.md](TX1_RUN_MANIFEST_SPEC.md) for the current selection and seed details.
 
@@ -52,11 +52,31 @@ No private keys or signing secrets belong in this repository. Wallet actions use
 - Chain ID: `743111`
 - RPC: `https://testnet.rpc.hemi.network/rpc`
 - Explorer: `https://testnet.explorer.hemi.xyz`
-- Contract address: configure `VITE_GAME_CONTRACT_ADDRESS` in a local `.env` file. `.env.example` contains a zero-address placeholder, not a deployed contract address.
+- Current RunRegistry deployment: `0xfd12F980daa569f4d60736da4227d1BDC15AF662` on Hemi Testnet (chain ID `743111`). `.env.example` contains this public contract address; override it in local `.env.local` if needed.
+
+Browser entropy transport is configured with `VITE_ETH_RPC_URL` (the safe
+example uses PublicNode). Ethereum tries that URL first, then the fixed
+PublicNode and dRPC public RPC fallbacks in order; each gets a 4-second
+timeout and one retry. Bitcoin keeps the Esplora one-confirmation reference
+(`tip - 1`), tries Blockstream then mempool.space in fixed order, and compares
+hashes for the selected height wherever providers respond. A disagreement
+fails closed. These are transport fallbacks: BTC remains WORLD entropy and the
+Ethereum block remains ECONOMY entropy.
+
+The deployed registry includes the current TX2 ABI. For a future fresh
+deployment, from PowerShell with Foundry installed and `PRIVATE_KEY` set in
+the environment, use:
+
+```powershell
+forge script script/Deploy.s.sol:DeployScript --rpc-url hemi_testnet --broadcast --private-key $env:PRIVATE_KEY
+```
+
+Do not commit a wallet key or `.env` file. The deployment command is provided
+for future deployments; the address above is the current Hemi Testnet registry.
 
 ## Development status
 
-The deterministic simulation, InputLogV2, TX1 manifest integration, FinalStateV1 encoding, and full-route replay tests are implemented. The independent Node verifier, verifier signing/service, and verified TX2 are future work. The current suite includes the full Floor 4 to Outside replay at multiple render schedules, after a long stall, and on repeated replay. Standard gameplay starts at 100 HP; the test suite also uses a separate high-HP traversal fixture to exercise the complete route.
+The deterministic simulation, InputLogV2, TX1 manifest integration, FinalStateV1 encoding, TX2 result commitment, and full-route replay tests are implemented. No independent Node verifier, verifier signing/service, or honest-execution proof exists. The current suite includes the full Floor 4 to Outside replay at multiple render schedules, after a long stall, and on repeated replay. Standard gameplay starts at 100 HP; the test suite also uses a separate high-HP traversal fixture to exercise the complete route.
 
 Current local validation commands:
 
@@ -77,7 +97,7 @@ Tests use Vitest. The production build runs TypeScript project checks and Vite.
 - `src/core/finalStateV1.ts` — canonical FinalStateV1 projection, encoding, decoding, and hash
 - `src/game/` — Phaser presentation and keyboard adapter
 - `src/web3/` — wallet, Hemi Testnet setup, TX1 manifest/entropy integration
-- `contracts/RunRegistry.sol` — current run registry contract, including its legacy score method
+- `contracts/RunRegistry.sol` — TX1 run registry and TX2 result commitment
 - `tests/` and `src/core/*.test.ts` — replay, determinism, and core tests
 - `docs/` — gameplay, art, audio, and design notes
 

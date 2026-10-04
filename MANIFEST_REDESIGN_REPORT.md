@@ -1,6 +1,6 @@
 # Web3 Redesign Report: Run Manifest Architecture
 
-> **Historical redesign report — superseded.** Its simple-hash seed derivation, `actionHash` TX2 proposal, and production-readiness claims do not describe the current project. Current seed/replay/result formats are specified in [TX1_RUN_MANIFEST_SPEC.md](TX1_RUN_MANIFEST_SPEC.md), [INPUT_LOG_V2_SPEC.md](INPUT_LOG_V2_SPEC.md), and [FINAL_STATE_V1_SPEC.md](FINAL_STATE_V1_SPEC.md). The independent verifier and verified TX2 are not implemented.
+> **Historical redesign report — superseded.** Its simple-hash seed derivation, `actionHash` TX2 proposal, and production-readiness claims do not describe the current project. Current seed/replay/result formats are specified in [TX1_RUN_MANIFEST_SPEC.md](TX1_RUN_MANIFEST_SPEC.md), [INPUT_LOG_V2_SPEC.md](INPUT_LOG_V2_SPEC.md), and [FINAL_STATE_V1_SPEC.md](FINAL_STATE_V1_SPEC.md). Direct TX2 result/replay commitment is implemented; independent verification is not.
 
 **Date**: 2026-09-09  
 **Status**: ✅ **COMPLETE - READY FOR DEPLOYMENT**
