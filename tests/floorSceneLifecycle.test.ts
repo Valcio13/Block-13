@@ -36,4 +36,24 @@ describe('FloorScene restart lifecycle', () => {
       expect(initBody).toContain(resource);
     }
   });
+
+  it('stops floor ambience on floor restart, death, victory, and scene shutdown', async () => {
+    const source = await readFile(fileURLToPath(sceneSourceUrl), 'utf8');
+    const transitionStart = source.indexOf('  private completeFloor(');
+    const transitionEnd = source.indexOf('\n  private ', transitionStart + 10);
+    const transitionBody = source.slice(transitionStart, transitionEnd);
+    expect(transitionBody).toContain('this.scene.restart({ runState: this.runState })');
+    expect(transitionBody).toContain('AUDIO_KEYS.interaction.floorTransition');
+
+    const terminalStart = source.indexOf("if (state.status === 'won') {");
+    const terminalEnd = source.indexOf('\n      }', source.indexOf("} else if (state.status === 'lost')", terminalStart));
+    const terminalBody = source.slice(terminalStart, terminalEnd);
+    expect(terminalBody.match(/stopCategory\('ambience'\)/g)).toHaveLength(2);
+    expect(terminalBody).toContain('this.showVictoryScreen(this.runState)');
+    expect(terminalBody).toContain('this.playerDeath()');
+
+    const shutdownStart = source.indexOf('  shutdown() {');
+    const shutdownEnd = source.indexOf('\n  private ', shutdownStart + 10);
+    expect(source.slice(shutdownStart, shutdownEnd)).toContain('this.audioDirector.shutdown()');
+  });
 });

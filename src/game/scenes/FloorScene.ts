@@ -3,7 +3,8 @@ import { type CorruptionEffect } from '../../core/corruption';
 import { AudioDirector, AUDIO_KEYS } from '../../core/audioDirector';
 import { SimulationEngine } from '../../core/simulationEngine';
 import { InputPipeline, InputRecorder, InputReplayer, LiveInputSource, type InputSource, type InputState } from '../../core/inputRecorder';
-import { getEventRNG } from '../../core/rng';
+import { firstMimicTwitchDelay, mimicTwitch } from '../../core/cosmeticAnimation';
+import { audioCuesForEvents, audioCuesForStateChange, floorAmbienceKeys, type AudioCue } from '../../core/presentationAudio';
 import type { Floor, Searchable } from '../../core/floor';
 import type { RunState } from '../../core/run';
 import { AuthoritativeSimulation, FIXED_SCALE, type AuthoritativeState } from '../../core/authoritativeSimulation';
@@ -47,7 +48,7 @@ export class FloorScene extends Phaser.Scene {
   private authoritativeSimulation!: AuthoritativeSimulation;
 
   // Mimic twitch state (tick-based)
-  private mimicTwitchStates: Map<Phaser.GameObjects.Sprite, number> = new Map(); // sprite -> nextTwitchTick
+  private mimicTwitchStates: Map<Phaser.GameObjects.Sprite, { nextTick: number; entityId: number }> = new Map();
   private statusText!: Phaser.GameObjects.Text;
   private interactPrompt!: Phaser.GameObjects.Text;
   private controlsHint!: Phaser.GameObjects.Text;
@@ -70,6 +71,7 @@ export class FloorScene extends Phaser.Scene {
   private isTransitioning = false; // Track floor transitions
   private storyPopupOpen = false; // Track if story popup is displayed
   private closeStoryPopup?: () => void;
+  private storyCloseKey?: Phaser.Input.Keyboard.Key;
 
   constructor() {
     super({ key: 'FloorScene' });
@@ -88,6 +90,8 @@ export class FloorScene extends Phaser.Scene {
     this.searchableSprites = [];
     this.isTransitioning = false;
     this.storyPopupOpen = false;
+    this.closeStoryPopup = undefined;
+    this.storyCloseKey = undefined;
     // Phaser restarts this Scene instance. Clear every presentation reference
     // here so create() cannot accidentally touch a destroyed floor's objects.
     this.statusText = undefined as unknown as Phaser.GameObjects.Text;
@@ -127,7 +131,7 @@ export class FloorScene extends Phaser.Scene {
     // released on restart as well as when the scene is stopped.
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
 
-    const { width, height, tiles, start, key, exit, doors, searchables } = this.floorData;
+    const { width, height, tiles, start, key, exit, searchables } = this.floorData;
 
     // Calculate camera bounds
     const worldWidth = width * this.tileSize;
@@ -137,9 +141,6 @@ export class FloorScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
     // Draw floor tiles; collision is resolved only by AuthoritativeSimulation.
     this.drawFloor(tiles);
-
-    // Draw doors
-    this.drawDoors(doors);
 
     // Create searchable objects
     this.createSearchables(searchables);
@@ -161,6 +162,12 @@ export class FloorScene extends Phaser.Scene {
       seed: this.runState.seed,
       scene: this,
     });
+    for (const key of floorAmbienceKeys(this.authoritativeSimulation.state.floor)) {
+      this.audioDirector.play(key, 'ambience', { loop: true, volume: 0.32 });
+    }
+    if (this.authoritativeSimulation.state.floor === 0) {
+      this.audioDirector.playWithCooldown('sfx_block13_reveal', 'sfx', 5000, { volume: 0.8 });
+    }
 
     // Legacy managers are not constructed: AuthoritativeSimulation owns all AI,
     // random decisions, movement, damage, searches, and progression.
@@ -204,10 +211,16 @@ export class FloorScene extends Phaser.Scene {
 
     // Setup pause key handler
     this.pauseKey.on('down', () => {
+      if (this.storyPopupOpen) {
+        this.closeStoryPopup?.();
+        return;
+      }
       if (!this.isPaused) {
         this.showPauseMenu();
       }
     });
+    this.storyCloseKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.storyCloseKey.on('down', () => this.closeStoryPopup?.());
 
     // Ensure keyboard is enabled
     if (this.input.keyboard) {
@@ -315,16 +328,12 @@ export class FloorScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
-    // Pause and transition freeze the tick clock. Story overlays still sample the
-    // canonical interaction input so the same log can close them during replay.
-    if (this.storyPopupOpen && !this.isTransitioning && !this.isPaused) {
-      this.inputPipeline.step(this.simulationEngine.getTick(), inputs => {
-        if (inputs.interact) this.closeStoryPopup?.();
-      });
-    } else if (!this.isTransitioning && !this.isPaused) {
+    // Story and pause overlays freeze simulation ticks. Dismissing a note is UI
+    // input only, so it is neither recorded nor allowed to consume a gameplay tick.
+    if (!this.storyPopupOpen && !this.isTransitioning && !this.isPaused) {
       this.simulationEngine.update(delta, (fixedDelta, tick) => {
         this.fixedUpdate(fixedDelta, tick);
-      });
+      }, () => this.storyPopupOpen || this.isTransitioning || this.isPaused);
     }
 
     // Update UI (can use variable delta/wall-clock timing - cosmetic only)
@@ -367,11 +376,13 @@ export class FloorScene extends Phaser.Scene {
       }
 
       this.updateLighting();
-      this.renderAuthoritativeState(before, state);
+      this.renderAuthoritativeState(before, state, result.events);
       this.presentSimulationEvents(result.events);
       if (state.status === 'won') {
+        this.audioDirector.stopCategory('ambience');
         this.showVictoryScreen(this.runState);
       } else if (state.status === 'lost') {
+        this.audioDirector.stopCategory('ambience');
         this.playerDeath();
       }
     });
@@ -395,6 +406,7 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private presentSimulationEvents(events: ReturnType<AuthoritativeSimulation['stepWithEvents']>['events']) {
+    for (const audioCue of audioCuesForEvents(events)) this.playAudioCue(audioCue);
     for (const event of events) {
       if (event.type === 'key_collected') this.showTemporaryMessage('KEY FOUND', '#ffd700');
       else if (event.type === 'damage') this.showTemporaryMessage(`HURT -${event.amount} HP`, '#ff6666');
@@ -405,7 +417,7 @@ export class FloorScene extends Phaser.Scene {
         else if (result.type === 'collectible') this.showTemporaryMessage(`${result.item.toUpperCase()} +${result.score} POINTS`, '#ffd700');
         else if (result.type === 'clue') {
           const clue = getAuthoredClueForSearchId(result.id);
-          this.showTemporaryMessage(clue ? `${clue.title}\n${clue.content}` : 'CLUE FOUND', '#c4a7e7', 4200);
+          this.showClueModal(clue?.title ?? 'NOTE FOUND', clue?.content ?? 'The writing is too faded to read.');
         } else if (result.type === 'nothing') this.showTemporaryMessage('EMPTY', '#a5b6b5');
         else this.showTemporaryMessage('SOMETHING MOVED INSIDE', '#ff6666');
       } else if (event.type === 'floor_transition' && event.toFloor >= 0) {
@@ -414,8 +426,29 @@ export class FloorScene extends Phaser.Scene {
     }
   }
 
+  private playAudioCue(audioCue: AudioCue) {
+    const director = this.audioDirector;
+    if (!director) return;
+    if (audioCue.key === 'sfx_player_hurt') {
+      director.playVariantWithCooldown(audioCue.key, AUDIO_KEYS.player.hurtVariants, 'sfx', audioCue.cooldownMs, { volume: 0.7 });
+    } else if (audioCue.key === 'sfx_crawler_skitter') {
+      director.playVariantWithCooldown(audioCue.key, 2, 'sfx', audioCue.cooldownMs, { volume: 0.5 });
+    } else if (audioCue.positional) {
+      director.playPositionalWithCooldown({
+        key: audioCue.key,
+        x: audioCue.positional.x / FIXED_SCALE,
+        y: audioCue.positional.y / FIXED_SCALE,
+        maxDistance: 420,
+        category: 'sfx',
+        volume: 0.65,
+      }, this.player.x, this.player.y, audioCue.cooldownMs);
+    } else {
+      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.65 });
+    }
+  }
+
   /** Presentation adapter: every moving enemy/object comes from an immutable sim snapshot. */
-  private renderAuthoritativeState(previous: AuthoritativeState, state: AuthoritativeState) {
+  private renderAuthoritativeState(previous: AuthoritativeState, state: AuthoritativeState, events: ReturnType<AuthoritativeSimulation['stepWithEvents']>['events']) {
     if (state.facingX !== 0 || state.facingY !== 0) this.playerFacingAngle = Math.atan2(state.facingY, state.facingX);
     this.hasKey = state.hasKey;
     this.stairsUnlocked = state.hasKey;
@@ -456,8 +489,11 @@ export class FloorScene extends Phaser.Scene {
     });
     this.updateAuthoritativePrompt(state);
     if (state.hp !== previous.hp) this.updateHealthBar();
+    if ((state.x !== previous.x || state.y !== previous.y) && state.tick % 15 === 0) {
+      this.audioDirector?.playVariantWithCooldown(AUDIO_KEYS.player.footstep, AUDIO_KEYS.player.footstepVariants, 'sfx', 90, { volume: 0.22 });
+    }
+    for (const audioCue of audioCuesForStateChange(previous, state, events)) this.playAudioCue(audioCue);
     if (state.damageEventId !== previous.damageEventId) {
-      this.audioDirector?.play(AUDIO_KEYS.player.hurt, 'sfx', { volume: 0.7 });
       this.cameras.main.shake(180, 0.004);
     }
     if (state.scareEventId !== previous.scareEventId) this.cameras.main.shake(220, 0.006);
@@ -511,20 +547,20 @@ export class FloorScene extends Phaser.Scene {
    * Update tick-based mimic twitches
    */
   private updateMimicTwitches(tick: number) {
-    this.mimicTwitchStates.forEach((nextTwitchTick, sprite) => {
-      if (tick >= nextTwitchTick && sprite.active) {
+    this.mimicTwitchStates.forEach((schedule, sprite) => {
+      if (tick >= schedule.nextTick && sprite.active) {
+        const twitch = mimicTwitch(schedule.entityId, tick);
         // Trigger twitch animation
         this.tweens.add({
           targets: sprite,
-          x: sprite.x + (getEventRNG().nextFloat() - 0.5) * 2,
-          y: sprite.y + (getEventRNG().nextFloat() - 0.5) * 2,
+          x: sprite.x + twitch.offsetX,
+          y: sprite.y + twitch.offsetY,
           duration: 100,
           yoyo: true,
         });
 
-        // Schedule next twitch (2-5 seconds)
-        const nextDelay = 120 + getEventRNG().nextRange(0, 180);
-        this.mimicTwitchStates.set(sprite, tick + nextDelay);
+        // Schedule the next cosmetic twitch (2-5 seconds) without RNG state.
+        this.mimicTwitchStates.set(sprite, { ...schedule, nextTick: tick + twitch.nextDelayTicks });
       }
     });
   }
@@ -631,6 +667,46 @@ export class FloorScene extends Phaser.Scene {
         });
       }
     });
+  }
+
+  private showClueModal(title: string, content: string) {
+    if (this.storyPopupOpen) return;
+    this.storyPopupOpen = true;
+    this.interactPrompt.setVisible(false);
+
+    const { width, height } = this.cameras.main;
+    const panelWidth = Math.min(600, width - 32);
+    const panelHeight = Math.min(420, height - 32);
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const depth = 400;
+
+    const overlay = this.add.rectangle(centerX, centerY, width, height, 0x000000, 0.84)
+      .setScrollFactor(0).setDepth(depth).setInteractive();
+    const panel = this.add.rectangle(centerX, centerY, panelWidth, panelHeight, 0x101417, 1)
+      .setScrollFactor(0).setDepth(depth + 1).setStrokeStyle(2, 0x8d7baa, 1);
+    const heading = this.add.text(centerX, centerY - panelHeight / 2 + 38, title, {
+      fontFamily: 'monospace', fontSize: '20px', color: '#d9c9ef', fontStyle: 'bold',
+      align: 'center', wordWrap: { width: panelWidth - 56, useAdvancedWrap: true },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(depth + 2);
+    const note = this.add.text(centerX - panelWidth / 2 + 28, centerY - panelHeight / 2 + 86, content, {
+      fontFamily: 'monospace', fontSize: '15px', color: '#e0ded7', lineSpacing: 8,
+      wordWrap: { width: panelWidth - 56, useAdvancedWrap: true },
+    }).setScrollFactor(0).setDepth(depth + 2);
+    const closeButton = this.add.text(centerX, centerY + panelHeight / 2 - 34, 'CLOSE NOTE  ·  [SPACE / ESC]', {
+      fontFamily: 'monospace', fontSize: '13px', color: '#70d4c6',
+      backgroundColor: '#202a2a', padding: { x: 14, y: 8 },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(depth + 2).setInteractive();
+    const elements = [overlay, panel, heading, note, closeButton];
+    this.cameras.main.ignore(elements);
+
+    const close = () => {
+      this.storyPopupOpen = false;
+      elements.forEach(element => element.destroy());
+      this.closeStoryPopup = undefined;
+    };
+    this.closeStoryPopup = close;
+    closeButton.on('pointerdown', close);
   }
 
   private showPauseMenu() {
@@ -866,23 +942,6 @@ export class FloorScene extends Phaser.Scene {
     }
   }
 
-  private drawDoors(doors: [number, number][]) {
-    const graphics = this.add.graphics();
-
-    for (const [x, y] of doors) {
-      const posX = x * this.tileSize;
-      const posY = y * this.tileSize;
-
-      // Door frame (slightly lighter than floor)
-      graphics.fillStyle(0x2d3748, 1);
-      graphics.fillRect(posX + 6, posY + 4, this.tileSize - 12, this.tileSize - 8);
-
-      // Door highligh
-      graphics.lineStyle(2, 0x4a5568, 1);
-      graphics.strokeRect(posX + 6, posY + 4, this.tileSize - 12, this.tileSize - 8);
-    }
-  }
-
   private createKey(x: number, y: number): Phaser.GameObjects.Sprite {
     const posX = x * this.tileSize + this.tileSize / 2;
     const posY = y * this.tileSize + this.tileSize / 2;
@@ -1022,7 +1081,7 @@ export class FloorScene extends Phaser.Scene {
     this.time.delayedCall(2800, () => this.scene.restart({ runState: this.runState }));
 
     // The simulation has already advanced. Optional audio cannot stop the next floor.
-    try { this.audioDirector?.play(AUDIO_KEYS.interaction.floorTransition, 'sfx', { volume: 0.6 }); } catch { /* optional audio */ }
+    try { this.audioDirector?.playWithCooldown(AUDIO_KEYS.interaction.floorTransition, 'sfx', 1500, { volume: 0.6 }); } catch { /* optional audio */ }
 
     // Disable player movemen
     this.input.keyboard?.enabled && (this.input.keyboard.enabled = false);
@@ -1277,8 +1336,8 @@ export class FloorScene extends Phaser.Scene {
   // ====== SEARCHABLE OBJECTS ======
 
   private createSearchables(searchables: Searchable[]) {
-    searchables.forEach((searchable) => {
-      const sprite = this.createSearchableSprite(searchable);
+    searchables.forEach((searchable, index) => {
+      const sprite = this.createSearchableSprite(searchable, index);
       this.searchableSprites.push({
         sprite,
         data: searchable,
@@ -1287,7 +1346,7 @@ export class FloorScene extends Phaser.Scene {
     });
   }
 
-  private createSearchableSprite(searchable: Searchable): Phaser.GameObjects.Sprite {
+  private createSearchableSprite(searchable: Searchable, searchableIndex: number): Phaser.GameObjects.Sprite {
     const posX = searchable.x * this.tileSize + this.tileSize / 2;
     const posY = searchable.y * this.tileSize + this.tileSize / 2;
 
@@ -1367,8 +1426,10 @@ export class FloorScene extends Phaser.Scene {
     // Add subtle twitch animation for mimics (tick-based)
     if (searchable.isMimic) {
       // Initialize mimic twitch: schedule first twitch 2-5 seconds from now
-      const initialDelay = 120 + getEventRNG().nextRange(0, 180); // 2-5 seconds in ticks
-      this.mimicTwitchStates.set(sprite, this.simulationEngine.getTick() + initialDelay);
+      this.mimicTwitchStates.set(sprite, {
+        nextTick: this.simulationEngine.getTick() + firstMimicTwitchDelay(searchableIndex),
+        entityId: searchableIndex,
+      });
     }
 
     return sprite;
@@ -1830,6 +1891,8 @@ export class FloorScene extends Phaser.Scene {
     if (this.pauseKey) {
       this.pauseKey.removeAllListeners();
     }
+    this.storyCloseKey?.removeAllListeners();
+    this.closeStoryPopup?.();
     if (this.interactKey) {
       this.interactKey.removeAllListeners();
     }

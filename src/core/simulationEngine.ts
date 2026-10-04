@@ -39,7 +39,11 @@ export class SimulationEngine {
    * @param fixedUpdateCallback - Function called each fixed tick
    * @returns Number of ticks executed this frame
    */
-  update(realDelta: number, fixedUpdateCallback: (fixedDelta: number, tick: number) => void): number {
+  update(
+    realDelta: number,
+    fixedUpdateCallback: (fixedDelta: number, tick: number) => void,
+    stopAfterTick?: () => boolean,
+  ): number {
     // Add real delta to accumulator
     if (!Number.isFinite(realDelta) || realDelta < 0) throw new RangeError('realDelta must be a finite non-negative number');
     this.accumulatorUnits += Math.round(realDelta * SimulationEngine.TICK_RATE * 1_000_000 / 1000);
@@ -54,6 +58,9 @@ export class SimulationEngine {
       this.simulationTick++;
       this.accumulatorUnits -= 1_000_000;
       ticksExecuted++;
+      // Preserve any remaining backlog if presentation opens a blocking modal
+      // or a floor transition during this tick.
+      if (stopAfterTick?.()) break;
     }
 
     return ticksExecuted;

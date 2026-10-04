@@ -295,6 +295,46 @@ export class AudioDirector {
     return sound;
   }
 
+  /** Play an optional one-shot at most once during the requested wall-clock cooldown. */
+  public playWithCooldown(
+    key: string,
+    category: AudioCategory,
+    cooldownMs: number,
+    config?: Phaser.Types.Sound.SoundConfig,
+  ): Phaser.Sound.BaseSound | null {
+    if (this.isOnCooldown(key)) return null;
+    const sound = this.play(key, category, config);
+    if (sound && cooldownMs > 0) this.setCooldown(key, cooldownMs);
+    return sound;
+  }
+
+  public playVariantWithCooldown(
+    baseKey: string,
+    variantCount: number,
+    category: AudioCategory,
+    cooldownMs: number,
+    config?: Phaser.Types.Sound.SoundConfig,
+  ): Phaser.Sound.BaseSound | null {
+    if (!Number.isInteger(variantCount) || variantCount < 1) return null;
+    if (this.isOnCooldown(baseKey)) return null;
+    const key = `${baseKey}_${this.rng.int(variantCount) + 1}`;
+    const sound = this.play(key, category, config);
+    if (sound && cooldownMs > 0) this.setCooldown(baseKey, cooldownMs);
+    return sound;
+  }
+
+  public playPositionalWithCooldown(
+    config: PositionalAudioConfig,
+    playerX: number,
+    playerY: number,
+    cooldownMs: number,
+  ): Phaser.Sound.BaseSound | null {
+    if (this.isOnCooldown(config.key)) return null;
+    const sound = this.playPositional(config, playerX, playerY);
+    if (sound && cooldownMs > 0) this.setCooldown(config.key, cooldownMs);
+    return sound;
+  }
+
   private isAudioAvailable(key: string): boolean {
     // Keys outside the allowlist are intentionally silent (the current
     // manifest is empty until real audio files are checked in).
@@ -345,8 +385,9 @@ export class AudioDirector {
   
   public stopCategory(category: AudioCategory) {
     this.activeSounds.forEach((sound, key) => {
-      if (this.getSoundCategory(key) === category && sound.isPlaying) {
-        sound.stop();
+      if (this.getSoundCategory(key) === category) {
+        if (sound.isPlaying) sound.stop();
+        this.activeSounds.delete(key);
       }
     });
   }
@@ -412,19 +453,23 @@ export const AUDIO_KEYS = {
   // PLAYER
   player: {
     footstep: 'sfx_player_footstep', // Has variants _1, _2, _3
-    footstepVariants: 4,
+    footstepVariants: 3,
     footstepSprint: 'sfx_player_footstep_sprint',
-    hurt: 'sfx_player_hurt',
+    hurt: 'sfx_player_hurt', // Has variants _1 and _2
+    hurtVariants: 2,
+    death: 'sfx_player_death',
     breathingLow: 'sfx_player_breathing_low',
   },
   
   // INTERACTION
   interaction: {
-    containerOpen: 'sfx_interaction_container_open',
-    keyPickup: 'sfx_interaction_key_pickup',
+    containerOpen: 'sfx_interaction_search',
+    keyPickup: 'sfx_key_pickup',
+    itemPickup: 'sfx_item_pickup',
+    healing: 'sfx_item_heal',
     locked: 'sfx_interaction_locked',
     unlock: 'sfx_interaction_unlock',
-    floorTransition: 'sfx_interaction_floor_transition',
+    floorTransition: 'sfx_floor_transition',
   },
   
   // FLASHLIGHT
@@ -432,7 +477,7 @@ export const AUDIO_KEYS = {
     on: 'sfx_flashlight_on',
     off: 'sfx_flashlight_off',
     flicker: 'sfx_flashlight_flicker',
-    depleted: 'sfx_flashlight_depleted',
+    depleted: 'sfx_battery_warning',
   },
   
   // ENVIRONMENT
@@ -452,6 +497,8 @@ export const AUDIO_KEYS = {
     detected: 'sfx_stalker_detected',
     chase: 'sfx_stalker_chase',
     attack: 'sfx_stalker_attack',
+    presence: 'sfx_stalker_presence',
+    hunt: 'sfx_stalker_hunt',
   },
   
   // CRAWLER
@@ -459,6 +506,7 @@ export const AUDIO_KEYS = {
     movement: 'sfx_crawler_movement',
     detection: 'sfx_crawler_detection',
     attack: 'sfx_crawler_attack',
+    skitter: 'sfx_crawler_skitter',
   },
   
   // WATCHER
@@ -503,6 +551,9 @@ export const AUDIO_KEYS = {
     block13Reveal: 'sfx_progression_block13_reveal',
     objectiveComplete: 'sfx_progression_objective_complete',
     victory: 'sfx_progression_victory',
+    block13Arrival: 'sfx_block13_reveal',
+    finalChase: 'sfx_final_chase_stinger',
+    escape: 'sfx_escape',
   },
   
   // AMBIENCE (looping)
@@ -510,6 +561,11 @@ export const AUDIO_KEYS = {
     floorGeneral: 'amb_floor_general',
     floorDeep: 'amb_floor_deep',
     block13: 'amb_block13',
+    roomTone: 'amb_room_tone',
+    floor4: 'amb_floor_4',
+    floor3: 'amb_floor_3',
+    floor2: 'amb_floor_2',
+    floor1: 'amb_floor_1',
   },
   
   // MUSIC

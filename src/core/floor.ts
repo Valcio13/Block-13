@@ -163,6 +163,7 @@ function generateSearchables(
   floor: number
 ): Searchable[] {
   const searchables: Searchable[] = [];
+  const occupiedSearchableTiles = new Set<string>();
   const objectTypes: SearchableType[] = ['cabinet', 'locker', 'box', 'drawer'];
 
   // Determine number of mimics for this floor
@@ -183,29 +184,8 @@ function generateSearchables(
     const searchablesInRoom = 1 + rng.int(2); // 1-2 searchables per room
 
     for (let i = 0; i < searchablesInRoom; i++) {
-      // Random wall position in room
-      const side = rng.int(4); // 0=top, 1=right, 2=bottom, 3=lef
-      let x: number, y: number;
-
-      switch (side) {
-        case 0: // top wall
-          x = room.x + 1 + rng.int(Math.max(1, room.width - 2));
-          y = room.y;
-          break;
-        case 1: // right wall
-          x = room.x + room.width - 1;
-          y = room.y + 1 + rng.int(Math.max(1, room.height - 2));
-          break;
-        case 2: // bottom wall
-          x = room.x + 1 + rng.int(Math.max(1, room.width - 2));
-          y = room.y + room.height - 1;
-          break;
-        case 3: // left wall
-        default:
-          x = room.x;
-          y = room.y + 1 + rng.int(Math.max(1, room.height - 2));
-          break;
-      }
+      const [x, y] = chooseUniqueSearchablePosition(room, rng, occupiedSearchableTiles);
+      occupiedSearchableTiles.add(`${x},${y}`);
 
       // Determine if this is a mimic
       const isMimic = numMimics > 0 && rng.next() < 0.08; // 8% chance per container
@@ -266,6 +246,40 @@ function generateSearchables(
   });
 
   return searchables;
+}
+
+/** Choose a normal wall position when possible, retrying only on collisions. */
+function chooseUniqueSearchablePosition(
+  room: Room,
+  rng: FloorLootRng,
+  occupied: ReadonlySet<string>,
+): [number, number] {
+  const candidateAt = (side: number): [number, number] => {
+    switch (side) {
+      case 0: return [room.x + 1 + rng.int(Math.max(1, room.width - 2)), room.y];
+      case 1: return [room.x + room.width - 1, room.y + 1 + rng.int(Math.max(1, room.height - 2))];
+      case 2: return [room.x + 1 + rng.int(Math.max(1, room.width - 2)), room.y + room.height - 1];
+      default: return [room.x, room.y + 1 + rng.int(Math.max(1, room.height - 2))];
+    }
+  };
+
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const candidate = candidateAt(rng.int(4));
+    if (!occupied.has(`${candidate[0]},${candidate[1]}`)) return candidate;
+  }
+
+  // A room has several valid wall cells even at the minimum generated size.
+  // Enumerate them deterministically if random retries collide.
+  const candidates: [number, number][] = [];
+  for (let x = room.x + 1; x < room.x + room.width - 1; x++) {
+    candidates.push([x, room.y], [x, room.y + room.height - 1]);
+  }
+  for (let y = room.y + 1; y < room.y + room.height - 1; y++) {
+    candidates.push([room.x, y], [room.x + room.width - 1, y]);
+  }
+  const available = candidates.filter(([x, y]) => !occupied.has(`${x},${y}`));
+  if (available.length === 0) throw new Error('No unoccupied wall tile available for searchable object');
+  return available[rng.int(available.length)];
 }
 
 function createDeadEnd(

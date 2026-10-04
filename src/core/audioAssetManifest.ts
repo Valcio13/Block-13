@@ -1,7 +1,63 @@
 /**
- * Audio assets are optional presentation resources. The repository currently
- * contains no audio files, so this manifest intentionally stays empty instead
- * of asking the browser to fetch dozens of missing .ogg files. Add a key/path
- * pair here when a real, decodable asset is checked in.
+ * Staged audio catalog. Paths describe assets expected for the first audio
+ * pass, but are deliberately not preloaded until the files actually exist.
+ * Promote checked-in/decodable files into AUDIO_ASSET_MANIFEST below.
  */
-export const AUDIO_ASSET_MANIFEST: Readonly<Record<string, string>> = {};
+export const AUDIO_ASSET_CATALOG: Readonly<Record<string, string>> = {
+  amb_room_tone: '/assets/audio/ambience/amb_room_tone.ogg',
+  amb_floor_4: '/assets/audio/ambience/amb_floor_4.ogg',
+  amb_floor_3: '/assets/audio/ambience/amb_floor_3.ogg',
+  amb_floor_2: '/assets/audio/ambience/amb_floor_2.ogg',
+  amb_floor_1: '/assets/audio/ambience/amb_floor_1.ogg',
+  amb_block13: '/assets/audio/ambience/amb_block13.ogg',
+  sfx_player_footstep_1: '/assets/audio/player/sfx_player_footstep_1.ogg',
+  sfx_player_footstep_2: '/assets/audio/player/sfx_player_footstep_2.ogg',
+  sfx_player_footstep_3: '/assets/audio/player/sfx_player_footstep_3.ogg',
+  sfx_flashlight_on: '/assets/audio/flashlight/sfx_flashlight_on.ogg',
+  sfx_flashlight_off: '/assets/audio/flashlight/sfx_flashlight_off.ogg',
+  sfx_interaction_search: '/assets/audio/interactions/sfx_interaction_search.ogg',
+  sfx_item_pickup: '/assets/audio/interactions/sfx_item_pickup.ogg',
+  sfx_item_heal: '/assets/audio/interactions/sfx_item_heal.ogg',
+  sfx_key_pickup: '/assets/audio/interactions/sfx_key_pickup.ogg',
+  sfx_player_hurt_1: '/assets/audio/player/sfx_player_hurt_1.ogg',
+  sfx_player_hurt_2: '/assets/audio/player/sfx_player_hurt_2.ogg',
+  sfx_player_death: '/assets/audio/player/sfx_player_death.ogg',
+  sfx_battery_warning: '/assets/audio/flashlight/sfx_battery_warning.ogg',
+  sfx_corruption_pulse: '/assets/audio/effects/sfx_corruption_pulse.ogg',
+  sfx_danger_stinger: '/assets/audio/effects/sfx_danger_stinger.ogg',
+  sfx_jumpscare_hit: '/assets/audio/jumpscares/sfx_jumpscare_hit.ogg',
+  sfx_stalker_presence: '/assets/audio/enemies/stalker/sfx_stalker_presence.ogg',
+  sfx_stalker_hunt: '/assets/audio/enemies/stalker/sfx_stalker_hunt.ogg',
+  sfx_crawler_skitter_1: '/assets/audio/enemies/crawler/sfx_crawler_skitter_1.ogg',
+  sfx_crawler_skitter_2: '/assets/audio/enemies/crawler/sfx_crawler_skitter_2.ogg',
+  sfx_watcher_presence: '/assets/audio/enemies/watcher/sfx_watcher_presence.ogg',
+  sfx_watcher_vanish: '/assets/audio/enemies/watcher/sfx_watcher_vanish.ogg',
+  sfx_ambusher_warning: '/assets/audio/enemies/ambusher/sfx_ambusher_warning.ogg',
+  sfx_ambusher_attack: '/assets/audio/enemies/ambusher/sfx_ambusher_attack.ogg',
+  sfx_mimic_reveal: '/assets/audio/enemies/mimic/sfx_mimic_reveal.ogg',
+  sfx_floor_transition: '/assets/audio/progression/sfx_floor_transition.ogg',
+  sfx_block13_reveal: '/assets/audio/progression/sfx_block13_reveal.ogg',
+  sfx_final_chase_stinger: '/assets/audio/progression/sfx_final_chase_stinger.ogg',
+  sfx_escape: '/assets/audio/progression/sfx_escape.ogg',
+};
+
+/** Real, preloaded files only. Every path below is checked into public/assets/audio. */
+export const AUDIO_ASSET_MANIFEST: Readonly<Record<string, string>> = {
+  amb_floor_4: AUDIO_ASSET_CATALOG.amb_floor_4,
+  amb_floor_3: AUDIO_ASSET_CATALOG.amb_floor_3,
+  amb_floor_2: AUDIO_ASSET_CATALOG.amb_floor_2,
+  amb_floor_1: AUDIO_ASSET_CATALOG.amb_floor_1,
+  amb_block13: AUDIO_ASSET_CATALOG.amb_block13,
+  sfx_player_footstep_1: AUDIO_ASSET_CATALOG.sfx_player_footstep_1,
+  sfx_player_footstep_2: AUDIO_ASSET_CATALOG.sfx_player_footstep_2,
+  sfx_player_footstep_3: AUDIO_ASSET_CATALOG.sfx_player_footstep_3,
+  sfx_flashlight_on: AUDIO_ASSET_CATALOG.sfx_flashlight_on,
+  sfx_flashlight_off: AUDIO_ASSET_CATALOG.sfx_flashlight_off,
+  sfx_interaction_search: AUDIO_ASSET_CATALOG.sfx_interaction_search,
+  sfx_item_pickup: AUDIO_ASSET_CATALOG.sfx_item_pickup,
+  sfx_key_pickup: AUDIO_ASSET_CATALOG.sfx_key_pickup,
+  sfx_player_hurt_1: AUDIO_ASSET_CATALOG.sfx_player_hurt_1,
+  sfx_player_hurt_2: AUDIO_ASSET_CATALOG.sfx_player_hurt_2,
+  sfx_jumpscare_hit: AUDIO_ASSET_CATALOG.sfx_jumpscare_hit,
+  sfx_stalker_hunt: AUDIO_ASSET_CATALOG.sfx_stalker_hunt,
+};
