@@ -101,6 +101,15 @@ const ALL_CLUES: Clue[] = [
   },
 ];
 
+/** Stable presentation lookup for deterministic floor-generated clue IDs. */
+export function getAuthoredClueForSearchId(id: string): Clue | null {
+  const match = /^clue_(\d+)_([0-9]+)_([0-9]+)$/.exec(id);
+  if (!match) return null;
+  const [, floor, room, item] = match;
+  const index = (Number(floor) + Number(room) + Number(item)) % ALL_CLUES.length;
+  return { ...ALL_CLUES[index] };
+}
+
 export class ClueManager {
   private rng: SeededRng;
   private availableClues: Clue[];

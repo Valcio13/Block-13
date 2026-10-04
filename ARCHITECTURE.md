@@ -30,7 +30,7 @@ After a terminal tick, the game projects selected authoritative fields into Fina
 
 ### Deterministic gameplay
 
-`src/core/authoritativeSimulation.ts` owns player/enemy movement, tile and moving-wall collision, detection and attacks, interactions, searches and loot, resources, scare lockouts, floor progression, score, and terminal outcome. It has no Phaser, DOM, or wall-clock dependency. `SimulationEngine` schedules its fixed 60 Hz ticks and carries pending tick backlog across render updates.
+`src/core/authoritativeSimulation.ts` owns player/enemy movement, static tile collision, detection and attacks, interactions, searches and loot, resources, scare lockouts, floor progression, score, and terminal outcome. It has no Phaser, DOM, or wall-clock dependency. `SimulationEngine` schedules its fixed 60 Hz ticks and carries pending tick backlog across render updates.
 
 Gameplay positions and resources use integer fixed-point values (256 subpixels per world pixel). Movement uses integer remainders and documented truncation. Deterministic PCG32 streams are domain separated for world/economy/event and gameplay subsystems.
 
@@ -38,13 +38,15 @@ Gameplay positions and resources use integer fixed-point values (256 subpixels p
 
 `src/game/scenes/FloorScene.ts` is the input and presentation adapter. It samples live keyboard input, advances the simulation through the shared input pipeline, and renders its snapshots as sprites, HUD, lighting, audio, camera movement, and effects. It does not use Arcade Physics to decide gameplay movement or collisions. Visual animation and wall-clock effects do not feed back into authoritative state.
 
+The HUD formats resource percentages to the nearest whole number, with exact halves rounded up. This is presentation formatting only; fixed-point resource state is unchanged.
+
 ### Cosmetic systems
 
 Scare overlays, sprite movement/twitch, lighting, audio, camera shake, and corruption visuals are presentation-only. Their gameplay triggers and lockouts are determined by simulation state/ticks. Cosmetic activity cannot consume gameplay RNG streams.
 
 ### Blockchain layer
 
-`src/web3/` connects a wallet to Hemi Testnet and starts a TX1 Run Manifest using multi-chain public entropy. Seed derivation uses canonical domain-separated Keccak-256 hashing and preserves the Solidity `uint256` run ID as a JavaScript `bigint`.
+`src/web3/` connects a wallet to Hemi Testnet and starts a TX1 Run Manifest using multi-chain public entropy. The current values are game version `0.2.0` and rules identifier `classic-static-walls`. The frozen TX1 structure is unchanged; these values bind runs to the static-wall rules. Seed derivation uses canonical domain-separated Keccak-256 hashing and preserves the Solidity `uint256` run ID as a JavaScript `bigint`.
 
 The app currently does not submit a score, input hash, or final-state hash. The legacy `submitScore(runId, score, actionHash)` method remains in the current Solidity contract and frontend ABI, but the game does not call it. The future verified TX2 flow requires the independent verifier and is not implemented.
 

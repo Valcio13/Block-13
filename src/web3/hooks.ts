@@ -40,9 +40,9 @@ export function useWallet() {
 /**
  * Game configuration constants
  */
-const GAME_VERSION = '0.1.0';
+const GAME_VERSION = '0.2.0';
 const DEFAULT_CHARACTER = 'survivor';
-const DEFAULT_RULES = 'classic';
+const DEFAULT_RULES = 'classic-static-walls';
 
 // Convert strings to bytes32 format for contract
 function stringToBytes32(str: string): `0x${string}` {

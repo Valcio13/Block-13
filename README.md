@@ -10,7 +10,7 @@ The route is:
 
 **Floor 4 → Floor 3 → Floor 2 → Floor 1 → Block 13 → Outside**
 
-On each floor, explore the maze, search containers for supplies and score, find the key, and reach the stairs. Enemies, traps, and shifting walls make the return route dangerous. Progression, loot, damage, resources, score, and the ending are decided by the authoritative simulation.
+On each floor, explore the maze, search containers for supplies and score, find the key, and reach the stairs. Enemies, traps, and gameplay scares make the return route dangerous. Progression, loot, damage, resources, score, and the ending are decided by the authoritative simulation.
 
 ### Controls
 
@@ -24,13 +24,15 @@ On each floor, explore the maze, search containers for supplies and score, find 
 - Procedurally generated connected floor layouts and deterministic search results
 - Health, battery, curse, invulnerability, and score systems
 - Stalker pursuit, Crawler chase/contact, Watcher curse, Ambusher warnings, and Mimic encounters
-- Moving walls, corruption events, and gameplay scare lockouts
+- Corruption events and gameplay scare lockouts
 - Key and stair progression from Floor 4 through Block 13 to Outside
 - Phaser lighting, enemy sprites, HUD, audio, camera effects, and scare visuals
 
 ## Deterministic architecture
 
-`AuthoritativeSimulation` is a pure TypeScript gameplay layer that does not construct Phaser. It owns movement, collisions, interactions, enemies, resources, loot, progression, score, and terminal state. Gameplay advances on a **fixed 60 Hz tick**. Gameplay-critical positions and resources use integer fixed-point values: 256 subpixels per world pixel, with integer movement remainders and documented truncation rules. The simulation engine carries tick backlog rather than discarding simulation time.
+`AuthoritativeSimulation` is a pure TypeScript gameplay layer that does not construct Phaser. It owns movement, static tile collisions, interactions, enemies, resources, loot, progression, score, and terminal state. Gameplay advances on a **fixed 60 Hz tick**. Gameplay-critical positions and resources use integer fixed-point values: 256 subpixels per world pixel, with integer movement remainders and documented truncation rules. The simulation engine carries tick backlog rather than discarding simulation time.
+
+Resource values remain exact in simulation state. The HUD and transition rewards display percentages rounded to the nearest whole number, with exact halves rounded up; display formatting never changes authoritative battery or curse.
 
 World generation, economy, events, and gameplay subsystems use separated deterministic PCG32 streams. Cosmetic effects are presentation-only and do not decide gameplay. Phaser samples live keyboard input through `InputSource`, sends the resulting inputs into the simulation, and renders simulation snapshots. Replay uses `InputReplayer` as the same input source for the same simulation path.
 
@@ -38,7 +40,7 @@ World generation, economy, events, and gameplay subsystems use separated determi
 
 ## Web3 status
 
-- **TX1 — Run Manifest:** Implemented for starting a Hemi Testnet run. The manifest binds player/run identity, game/rules version, and selected multi-chain entropy sources. Seed derivation uses domain-separated Keccak-256 digests for WORLD, ECONOMY, and EVENT streams.
+- **TX1 — Run Manifest:** Implemented for starting a Hemi Testnet run. The manifest binds player/run identity, game version `0.2.0`, rules identifier `classic-static-walls`, and selected multi-chain entropy sources. Seed derivation uses domain-separated Keccak-256 digests for WORLD, ECONOMY, and EVENT streams. Only the field values changed for this gameplay rules update; the frozen manifest structure and encoding did not change.
 - **Gameplay and replay:** Implemented locally in the game and covered by deterministic tests. The input log and FinalStateV1 can be used as inputs/results for a future verifier.
 - **Independent verifier:** **Not implemented.** No verifier currently independently attests to submitted results.
 - **TX2 — verified result submission:** **Planned, not implemented.** The game does not submit score, `inputHash`, or `finalStateHash` on-chain. The existing Solidity contract and frontend ABI retain a legacy `submitScore(runId, score, actionHash)` method; the app does not call it and it is not the future verified TX2 flow.
@@ -79,7 +81,7 @@ Tests use Vitest. The production build runs TypeScript project checks and Vite.
 - `tests/` and `src/core/*.test.ts` — replay, determinism, and core tests
 - `docs/` — gameplay, art, audio, and design notes
 
-Current protocol and architecture documentation is indexed in [ARCHITECTURE.md](ARCHITECTURE.md). Older audit and implementation reports are retained as historical records and are marked accordingly.
+Current protocol and architecture documentation is indexed in [ARCHITECTURE.md](ARCHITECTURE.md). Older audit and implementation reports are retained as historical records; their headings identify reports that describe superseded behavior.
 
 ## License
 

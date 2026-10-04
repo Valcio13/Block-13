@@ -1,8 +1,8 @@
 # Block 13 Audio Assets
 
-This directory contains all audio assets for Block 13, organized by category.
+This directory is reserved for Block 13 audio assets, organized by category.
 
-**IMPORTANT**: The audio system is designed to handle missing assets gracefully. The game will not break if audio files are not present - it will simply log warnings and continue without sound.
+**Current state:** no audio files are checked in. Audio is optional presentation only, and missing files do not block gameplay. `src/core/audioAssetManifest.ts` is the allowlist used by BootScene; add a key and its file path there when a real, decodable asset is added. This keeps the browser from requesting absent files.
 
 ## Directory Structure
 
@@ -81,7 +81,6 @@ Phaser 3 supports: MP3, OGG, WAV, M4A (browser-dependent)
 | `amb_environment_creak_3.ogg` | Building creak variant 3 | AMB | ~1-2s |
 | `amb_environment_distant_impact.ogg` | Distant impact/bang | AMB | ~0.5-1s |
 | `amb_environment_dripping_water.ogg` | Dripping water | AMB | Loopable |
-| `sfx_environment_moving_wall.ogg` | Wall reconfiguration | SFX | Grinding, mechanical |
 
 **Status**: All missing
 
@@ -240,13 +239,13 @@ Phaser 3 supports: MP3, OGG, WAV, M4A (browser-dependent)
 
 ## Integration
 
-Audio assets are loaded in `BootScene` and managed by `AudioDirector`.
+Audio assets listed in `src/core/audioAssetManifest.ts` are loaded in `BootScene` and managed by `AudioDirector`. Playback failures are caught and skipped.
 
 See `src/core/audioDirector.ts` for audio key constants and `AUDIO_KEYS` reference.
 
 ## Status
 
-**Current**: All placeholders - system functional but silent  
+**Current**: No audio files present; game runs silently
 **Priority**: Ambusher scream, stalker footsteps, jumpscare stingers, player footsteps  
 **Next**: Environment ambience, container sounds, flashlight  
 

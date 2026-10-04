@@ -2,7 +2,7 @@
 
 Complete list of all audio files required for Block 13, organized by priority.
 
-**Total**: 61 audio files  
+**Total**: 60 audio files
 **Format**: OGG or MP3 (OGG recommended)  
 **Sample Rate**: 44.1kHz or 48kHz  
 **Status**: All missing - system ready, awaiting assets  
@@ -141,7 +141,6 @@ Creates atmosphere and world feel.
 | `amb_environment_creak_3.ogg` | Building creak 3 | 1-2s | Variation |
 | `amb_environment_distant_impact.ogg` | Distant bang | 0.5-1s | Far-off crash, echo |
 | `amb_environment_dripping_water.ogg` | Water drips | 2-3s loop | Slow drips, **LOOPABLE** |
-| `sfx_environment_moving_wall.ogg` | Wall moves | 1-2s | Grinding, mechanical |
 
 **Path**: `assets/audio/environment/`
 

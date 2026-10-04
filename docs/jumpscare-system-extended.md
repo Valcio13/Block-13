@@ -113,7 +113,7 @@ Ambushers reveal when:
 ### Problem Solved
 
 Prevents overlapping major scares creating jarring experience:
-- Box scare + ambusher + false stalker + moving wall all at once
+- Box scare + ambusher + false stalker all at once
 
 ### Solution: `activeMajorScare` Flag
 

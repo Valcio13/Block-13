@@ -10,6 +10,7 @@
  */
 
 import Phaser from 'phaser';
+import { AUDIO_ASSET_MANIFEST } from './audioAssetManifest';
 import { SeededRng } from './rng';
 
 export type AudioCategory = 'master' | 'sfx' | 'ambience' | 'music';
@@ -63,6 +64,7 @@ export class AudioDirector {
   
   // Active sounds tracking
   private activeSounds: Map<string, Phaser.Sound.BaseSound> = new Map();
+  private static warnedUnavailableAudio = new Set<string>();
   
   // Cooldown tracking for audio events
   private cooldowns: Map<string, AudioCooldown> = new Map();
@@ -198,9 +200,7 @@ export class AudioDirector {
     config?: Phaser.Types.Sound.SoundConfig
   ): Phaser.Sound.BaseSound | null {
     // Check if asset exists
-    if (!this.scene.cache.audio.exists(key)) {
-      // Gracefully handle missing asset
-      console.warn(`[AudioDirector] Missing audio asset: ${key}`);
+    if (!this.isAudioAvailable(key)) {
       return null;
     }
     
@@ -216,12 +216,14 @@ export class AudioDirector {
     
     const volume = this.calculateVolume(category, config?.volume);
     
-    const sound = this.scene.sound.add(key, {
-      ...config,
-      volume,
-    });
-    
-    sound.play();
+    let sound: Phaser.Sound.BaseSound;
+    try {
+      sound = this.scene.sound.add(key, { ...config, volume });
+      sound.play();
+    } catch (error) {
+      this.warnUnavailableAudio(key, error);
+      return null;
+    }
     
     // Track active sound
     this.activeSounds.set(key, sound);
@@ -235,8 +237,7 @@ export class AudioDirector {
   
   public playPositional(config: PositionalAudioConfig, playerX: number, playerY: number): Phaser.Sound.BaseSound | null {
     // Check if asset exists
-    if (!this.scene.cache.audio.exists(config.key)) {
-      console.warn(`[AudioDirector] Missing positional audio asset: ${config.key}`);
+    if (!this.isAudioAvailable(config.key)) {
       return null;
     }
     
@@ -265,17 +266,23 @@ export class AudioDirector {
     const panRange = 400; // Distance from player at which pan reaches max
     const pan = Phaser.Math.Clamp(dx / panRange, -1, 1);
     
-    const sound = this.scene.sound.add(config.key, {
-      volume,
-      loop: config.loop || false,
-    });
-    
-    // Apply pan if supported (HTML5 Audio supports this)
-    if ('pan' in sound && typeof (sound as any).pan !== 'undefined') {
-      (sound as any).pan = pan;
+    let sound: Phaser.Sound.BaseSound;
+    try {
+      sound = this.scene.sound.add(config.key, {
+        volume,
+        loop: config.loop || false,
+      });
+
+      // Apply pan if supported (HTML5 Audio supports this)
+      if ('pan' in sound && typeof (sound as any).pan !== 'undefined') {
+        (sound as any).pan = pan;
+      }
+
+      sound.play();
+    } catch (error) {
+      this.warnUnavailableAudio(config.key, error);
+      return null;
     }
-    
-    sound.play();
     
     // Track active sound
     const trackingKey = `${config.key}_${config.x}_${config.y}`;
@@ -286,6 +293,29 @@ export class AudioDirector {
     });
     
     return sound;
+  }
+
+  private isAudioAvailable(key: string): boolean {
+    // Keys outside the allowlist are intentionally silent (the current
+    // manifest is empty until real audio files are checked in).
+    if (!Object.hasOwn(AUDIO_ASSET_MANIFEST, key)) return false;
+
+    try {
+      if (this.scene.cache.audio.exists(key)) return true;
+    } catch (error) {
+      this.warnUnavailableAudio(key, error);
+      return false;
+    }
+
+    this.warnUnavailableAudio(key);
+    return false;
+  }
+
+  private warnUnavailableAudio(key: string, error?: unknown) {
+    if (AudioDirector.warnedUnavailableAudio.has(key)) return;
+    AudioDirector.warnedUnavailableAudio.add(key);
+    if (error) console.warn(`[AudioDirector] Skipping unavailable audio: ${key}`, error);
+    else console.warn(`[AudioDirector] Skipping unavailable audio: ${key}`);
   }
   
   public playVariant(baseKey: string, variantCount: number, category: AudioCategory = 'sfx', config?: Phaser.Types.Sound.SoundConfig): Phaser.Sound.BaseSound | null {
@@ -412,7 +442,6 @@ export const AUDIO_KEYS = {
     creakVariants: 3,
     distantImpact: 'amb_environment_distant_impact',
     drippingWater: 'amb_environment_dripping_water',
-    movingWall: 'sfx_environment_moving_wall',
   },
   
   // STALKER

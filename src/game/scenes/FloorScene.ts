@@ -8,6 +8,8 @@ import type { Floor, Searchable } from '../../core/floor';
 import type { RunState } from '../../core/run';
 import { AuthoritativeSimulation, FIXED_SCALE, type AuthoritativeState } from '../../core/authoritativeSimulation';
 import { encodeFinalStateV1, finalStateV1FromSimulation, hashFinalStateV1 } from '../../core/finalStateV1';
+import { getAuthoredClueForSearchId } from '../../core/clues';
+import { formatFixedPointPercent, formatWholePercent } from '../../core/uiFormatting';
 
 interface FloorSceneData {
   runState: RunState;
@@ -62,7 +64,6 @@ export class FloorScene extends Phaser.Scene {
   private ambusherSprites: Phaser.GameObjects.Sprite[] = [];
   private crawlerSprites: Phaser.GameObjects.Sprite[] = [];
   private watcherSprites: Phaser.GameObjects.Sprite[] = [];
-  private authoritativeWallSprites = new Map<string, Phaser.GameObjects.Rectangle>();
   private isPaused = false; // Track pause state
   private pauseKey!: Phaser.Input.Keyboard.Key;
   private isTransitioning = false; // Track floor transitions
@@ -86,6 +87,17 @@ export class FloorScene extends Phaser.Scene {
     this.searchableSprites = [];
     this.isTransitioning = false;
     this.storyPopupOpen = false;
+    // Phaser restarts this Scene instance. Clear every presentation reference
+    // here so create() cannot accidentally touch a destroyed floor's objects.
+    this.statusText = undefined as unknown as Phaser.GameObjects.Text;
+    this.dangerIndicator = undefined;
+    this.healthBarBg = undefined as unknown as Phaser.GameObjects.Rectangle;
+    this.healthBarFill = undefined as unknown as Phaser.GameObjects.Graphics;
+    this.healthBarText = undefined as unknown as Phaser.GameObjects.Text;
+    this.uiCamera = undefined as unknown as Phaser.Cameras.Scene2D.Camera;
+    this.lightmapTexture = undefined as unknown as Phaser.GameObjects.RenderTexture;
+    this.lightmapGraphics = undefined as unknown as Phaser.GameObjects.Graphics;
+    this.mimicTwitchStates.clear();
 
     // Initialize simulation engine and input recorder
     this.simulationEngine = this.registry.get('simulationEngine') as SimulationEngine | undefined ?? new SimulationEngine();
@@ -109,6 +121,11 @@ export class FloorScene extends Phaser.Scene {
   }
 
   create() {
+    // Scene class methods are not lifecycle hooks unless subscribed explicitly.
+    // Register per run so custom audio and detached presentation resources are
+    // released on restart as well as when the scene is stopped.
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
+
     const { width, height, tiles, start, key, exit, doors, searchables } = this.floorData;
 
     // Calculate camera bounds
@@ -198,7 +215,6 @@ export class FloorScene extends Phaser.Scene {
 
     // Floor info with run state
     const dangerLevel = this.runState.curse;
-    const dangerColor = dangerLevel < 20 ? '#70d4c6' : dangerLevel < 40 ? '#ffd700' : '#ff4444';
 
     this.statusText = this.add.text(16, 16, '', {
       fontFamily: 'monospace',
@@ -209,17 +225,15 @@ export class FloorScene extends Phaser.Scene {
       lineSpacing: 2,
     }).setScrollFactor(0).setDepth(100);
 
-    this.updateStatusText();
-
     // Danger indicator
-    if (dangerLevel > 0) {
-      this.dangerIndicator = this.add.text(this.cameras.main.width - 16, 16, `ÃƒÂ¢Ã…Â¡Ã‚Â  DANGER: ${dangerLevel}`, {
+    {
+      this.dangerIndicator = this.add.text(this.cameras.main.width - 16, 16, '', {
         fontFamily: 'monospace',
         fontSize: '13px',
-        color: dangerColor,
+        color: '#70d4c6',
         backgroundColor: '#07090d',
         padding: { x: 8, y: 4 },
-      }).setOrigin(1, 0).setScrollFactor(0).setDepth(100);
+      }).setOrigin(1, 0).setScrollFactor(0).setDepth(100).setVisible(dangerLevel > 0);
     }
 
     // Interaction prompt (hidden initially)
@@ -293,6 +307,10 @@ export class FloorScene extends Phaser.Scene {
     if (this.dangerIndicator) {
       this.cameras.main.ignore(this.dangerIndicator);
     }
+
+    // All lifecycle-owned HUD objects must be recreated before any updater
+    // touches them. updateStatusText also updates the health bar.
+    this.updateStatusText();
   }
 
   update(time: number, delta: number) {
@@ -326,7 +344,8 @@ export class FloorScene extends Phaser.Scene {
     this.inputPipeline.step(tick, inputs => {
       const before = this.authoritativeSimulation.state;
       const previousFloor = before.floor;
-      const state = this.authoritativeSimulation.step(inputs);
+      const result = this.authoritativeSimulation.stepWithEvents(inputs);
+      const state = result.state;
       this.player.setPosition(state.x / FIXED_SCALE, state.y / FIXED_SCALE);
       this.flashlightOn = state.flashlightOn;
       this.runState.floor = state.floor;
@@ -343,16 +362,44 @@ export class FloorScene extends Phaser.Scene {
         this.registry.set('finalStateV1Bytes', encodeFinalStateV1(finalState));
         this.registry.set('finalStateHash', hashFinalStateV1(finalState));
       }
-      this.updateLighting();
-      this.renderAuthoritativeState(before, state);
+
+      // Progression has already happened in the simulation. Start the scene
+      // presentation timer immediately and do not let an event/tween/render
+      // adapter run before it or become a gate for loading the next floor.
       if (state.floor !== previousFloor && state.status === 'playing') {
         this.completeFloor(before, state);
-      } else if (state.status === 'won') {
+        return;
+      }
+
+      this.updateLighting();
+      this.renderAuthoritativeState(before, state);
+      this.presentSimulationEvents(result.events);
+      if (state.status === 'won') {
         this.showVictoryScreen(this.runState);
       } else if (state.status === 'lost') {
         this.playerDeath();
       }
     });
+  }
+
+  private presentSimulationEvents(events: ReturnType<AuthoritativeSimulation['stepWithEvents']>['events']) {
+    for (const event of events) {
+      if (event.type === 'key_collected') this.showTemporaryMessage('KEY FOUND', '#ffd700');
+      else if (event.type === 'damage') this.showTemporaryMessage(`HURT -${event.amount} HP`, '#ff6666');
+      else if (event.type === 'loot_searched') {
+        const result = event.result;
+        if (result.type === 'battery') this.showTemporaryMessage(`BATTERY +${result.amount}%`, '#70d4c6');
+        else if (result.type === 'health') this.showTemporaryMessage(`HEALTH +${result.amount} HP`, '#70d4c6');
+        else if (result.type === 'collectible') this.showTemporaryMessage(`${result.item.toUpperCase()} +${result.score} POINTS`, '#ffd700');
+        else if (result.type === 'clue') {
+          const clue = getAuthoredClueForSearchId(result.id);
+          this.showTemporaryMessage(clue ? `${clue.title}\n${clue.content}` : 'CLUE FOUND', '#c4a7e7', 4200);
+        } else if (result.type === 'nothing') this.showTemporaryMessage('EMPTY', '#a5b6b5');
+        else this.showTemporaryMessage('SOMETHING MOVED INSIDE', '#ff6666');
+      } else if (event.type === 'floor_transition' && event.toFloor >= 0) {
+        this.showTemporaryMessage(`FLOOR ${event.toFloor} UNLOCKED`, '#ffd700');
+      }
+    }
   }
 
   /** Presentation adapter: every moving enemy/object comes from an immutable sim snapshot. */
@@ -395,19 +442,6 @@ export class FloorScene extends Phaser.Scene {
       sprite?.setPosition(enemy.x / FIXED_SCALE, enemy.y / FIXED_SCALE);
       sprite?.setAlpha(enemy.state === 'warning' ? 0.2 : 0);
     });
-    const activeWallCells = new Set<string>();
-    for (const wall of state.movingWalls) if (wall.active) for (const [x, y] of wall.cells) {
-      const key = `${x},${y}`;
-      activeWallCells.add(key);
-      let sprite = this.authoritativeWallSprites.get(key);
-      if (!sprite) {
-        sprite = this.add.rectangle(x * 32 + 16, y * 32 + 16, 32, 32, 0x161616, 1).setDepth(6);
-        this.authoritativeWallSprites.set(key, sprite);
-      }
-      sprite.setVisible(true);
-    }
-    for (const [key, sprite] of this.authoritativeWallSprites) if (!activeWallCells.has(key)) sprite.setVisible(false);
-
     this.updateAuthoritativePrompt(state);
     if (state.hp !== previous.hp) this.updateHealthBar();
     if (state.damageEventId !== previous.damageEventId) {
@@ -563,6 +597,7 @@ export class FloorScene extends Phaser.Scene {
         backgroundColor: '#000000',
         padding: { x: 8, y: 6 },
         align: 'center',
+        wordWrap: { width: Math.max(240, this.cameras.main.width - 48), useAdvancedWrap: true },
       }
     ).setOrigin(0.5).setScrollFactor(0).setDepth(200).setAlpha(0);
 
@@ -589,7 +624,7 @@ export class FloorScene extends Phaser.Scene {
   private showPauseMenu() {
     this.isPaused = true;
 
-    // Pause physics and game logic
+    // Pause the scene's simulation update and input capture.
 
     // Dark overlay
     const overlay = this.add.rectangle(
@@ -718,7 +753,7 @@ export class FloorScene extends Phaser.Scene {
   private updateStatusText() {
     const batteryColor = this.runState.battery > 50 ? '#70d4c6' : this.runState.battery > 20 ? '#ffd700' : '#ff4444';
     const hpColor = this.runState.hp > 50 ? '#70d4c6' : this.runState.hp > 25 ? '#ffd700' : '#ff4444';
-    const flashStatus = this.flashlightOn ? 'ÃƒÂ¢Ã¢â‚¬â€œÃ‚Â ' : 'ÃƒÂ¢Ã¢â‚¬â€œÃ‚Â¡';
+    const flashStatus = this.flashlightOn ? 'ON' : 'OFF';
 
     // Display floor name
     const floorDisplay = this.runState.floor === 0 ? 'BLOCK 13' : `FLOOR ${this.runState.floor}/4`;
@@ -726,12 +761,19 @@ export class FloorScene extends Phaser.Scene {
     const lines = [
       floorDisplay,
       `HP: ${Math.floor(this.runState.hp)}/100`,
-      `CURSE: ${Math.floor(this.runState.curse)}%`,
-      `BATTERY: ${Math.floor(this.runState.battery)}%`,
+      `CURSE: ${formatWholePercent(this.runState.curse)}%`,
+      `BATTERY: ${formatWholePercent(this.runState.battery)}%`,
       `SCORE: ${this.runState.score}`,
       `LIGHT: ${flashStatus}`,
     ];
     this.statusText.setText(lines.join('\n'));
+
+    if (this.dangerIndicator) {
+      const danger = formatWholePercent(this.runState.curse);
+      this.dangerIndicator.setText(`DANGER: ${danger}%`);
+      this.dangerIndicator.setColor(danger < 20 ? '#70d4c6' : danger < 40 ? '#ffd700' : '#ff4444');
+      this.dangerIndicator.setVisible(danger > 0);
+    }
 
     // Update color based on most critical resource
     if (this.runState.hp <= 25) {
@@ -963,8 +1005,12 @@ export class FloorScene extends Phaser.Scene {
   private completeFloor(previous: AuthoritativeState, current: AuthoritativeState) {
     this.isTransitioning = true; // Block scares and damage during transition
 
-    // Play floor transition sound
-    this.audioDirector.play(AUDIO_KEYS.interaction.floorTransition, 'sfx', { volume: 0.6 });
+    // Schedule the renderer restart before optional presentation work. The sim
+    // already owns the next floor; this timer only swaps what the scene renders.
+    this.time.delayedCall(2800, () => this.scene.restart({ runState: this.runState }));
+
+    // The simulation has already advanced. Optional audio cannot stop the next floor.
+    try { this.audioDirector?.play(AUDIO_KEYS.interaction.floorTransition, 'sfx', { volume: 0.6 }); } catch { /* optional audio */ }
 
     // Disable player movemen
     this.input.keyboard?.enabled && (this.input.keyboard.enabled = false);
@@ -992,7 +1038,7 @@ export class FloorScene extends Phaser.Scene {
 
     // Show score gain and battery bonus
     const scoreGain = current.score - previous.score;
-    const batteryGain = (current.battery - previous.battery) / FIXED_SCALE;
+    const batteryGain = formatFixedPointPercent(current.battery - previous.battery);
     const scoreText = this.add.text(
       this.cameras.main.width / 2,
       this.cameras.main.height / 2 + 60,
@@ -1011,19 +1057,9 @@ export class FloorScene extends Phaser.Scene {
     // UI camera only
     this.cameras.main.ignore(scoreText);
 
-    this.tweens.add({
-      targets: [completionText, scoreText],
-      alpha: 1,
-      duration: 300,
-    });
-
-    // Fade to black and transition
-    this.time.delayedCall(2500, () => {
-      this.cameras.main.fadeOut(500);
-      this.cameras.main.once('camerafadeoutcomplete', () => {
-        this.scene.restart({ runState: this.runState });
-      });
-    });
+    try {
+      this.tweens.add({ targets: [completionText, scoreText], alpha: 1, duration: 300 });
+    } catch { /* presentation failure cannot hold floor progression */ }
   }
 
   private showVictoryScreen(finalState: RunState) {
@@ -1331,8 +1367,6 @@ export class FloorScene extends Phaser.Scene {
     if (this.input.keyboard) {
       this.input.keyboard.enabled = false;
     }
-
-    this.runState.status = 'lost';
 
     // Death animation
     this.tweens.add({
@@ -1797,6 +1831,13 @@ export class FloorScene extends Phaser.Scene {
     // Shutdown audio director
     if (this.audioDirector) {
       this.audioDirector.shutdown();
+    }
+
+    // make.graphics(..., false) is not on the Display List, so Phaser does not
+    // destroy it when the scene restarts. Explicitly release this scene-owned
+    // presentation resource before its reference is replaced in init().
+    if (this.lightmapGraphics) {
+      this.lightmapGraphics.destroy();
     }
 
     this.crawlerSprites = [];

@@ -1,5 +1,7 @@
 # Block 13 Gameplay Audit Report
 
+> **Historical audit.** Its moving-wall design recommendations describe a superseded version of gameplay. The current game uses static tile walls; see [../README.md](../README.md) and [../ARCHITECTURE.md](../ARCHITECTURE.md).
+
 ## Executive Summary
 
 Comprehensive audit of Block 13 gameplay systems completed. Testing revealed a solid core game loop with good difficulty escalation, but several balance and technical issues need addressing.

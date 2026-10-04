@@ -1,5 +1,7 @@
 # Audio Asset Loading Audit
 
+> **Historical audit.** This report predates the current static-wall game design. Moving-wall audio references describe a removed feature. See [../README.md](../README.md) and [../ARCHITECTURE.md](../ARCHITECTURE.md) for current project behavior.
+
 ## Current Status: ❌ INCOMPLETE
 
 ### Issue Identified

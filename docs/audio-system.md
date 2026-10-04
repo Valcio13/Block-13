@@ -6,7 +6,7 @@ Block 13 now features a comprehensive audio system built on a centralized `Audio
 
 **Status**: ✅ Implemented and tested  
 **Build**: Successful (1,739 kB)  
-**Assets**: All placeholders - system functional but awaiting real audio files  
+**Assets**: No audio files are currently checked in. BootScene only queues entries from `src/core/audioAssetManifest.ts`, which is currently empty, so missing-file and placeholder decode errors are avoided.
 
 ---
 
@@ -84,7 +84,6 @@ this.audioDirector.play(AUDIO_KEYS.ambusher.scream, 'sfx', { volume: 1.0 });
 | Creak (variants 1-3) | `amb_environment_creak_1-3` | Random intervals | Hook ready, needs impl |
 | Distant impact | `amb_environment_distant_impact` | Random scare event | Hook ready, needs impl |
 | Dripping water | `amb_environment_dripping_water` | Looping ambient | Hook ready, needs impl |
-| Moving wall | `sfx_environment_moving_wall` | Wall reconfigures | Hook ready, needs impl |
 
 ### Stalker
 
@@ -190,7 +189,6 @@ this.audioDirector.playPositional({
 - Crawler sounds: 300-400 pixels
 - Watcher drone: 500-700 pixels
 - Environmental sounds: 200-400 pixels
-- Moving walls: 300-500 pixels
 
 ---
 
@@ -277,20 +275,7 @@ See `public/assets/audio/_README.md` for complete asset list.
 
 ### Graceful Missing Asset Handling
 
-**Current Behavior**:
-```typescript
-if (!this.scene.cache.audio.exists(key)) {
-  console.warn(`[AudioDirector] Missing audio asset: ${key}`);
-  return null; // Game continues without sound
-}
-```
-
-The game will NOT crash or break if audio files are missing. It will:
-1. Log a warning to console
-2. Return null from play method
-3. Continue gameplay silently
-
-This allows development to proceed with placeholder assets.
+BootScene queues only the real files listed in `src/core/audioAssetManifest.ts`. AudioDirector checks the cache before playback and catches sound creation or playback failures. It returns `null` and emits at most one warning per unavailable key for that scene, so audio failure cannot interrupt simulation or progression.
 
 ---
 
@@ -380,7 +365,6 @@ audioDirector.setVolume('master', sliderValue);
 **Environmental**:
 - Building creaks (3 variants)
 - Dripping water
-- Moving wall mechanism
 
 ### Priority 4: Polish
 

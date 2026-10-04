@@ -9,9 +9,10 @@ import {
 } from '../src/core/inputRecorder';
 import { getPlayerVelocity, nextFlashlightState } from '../src/core/inputSimulation';
 import { SimulationEngine } from '../src/core/simulationEngine';
-import { AuthoritativeSimulation, FIXED_SCALE, floorSeedFromCanonicalSeed } from '../src/core/authoritativeSimulation';
+import { AuthoritativeSimulation, FIXED_SCALE, PLAYER_COLLISION_HALF_EXTENT_SUBPIXELS, floorSeedFromCanonicalSeed } from '../src/core/authoritativeSimulation';
 import { finalStateV1FromSimulation, hashFinalStateV1 } from '../src/core/finalStateV1';
 import type { RunManifest } from '../src/core/seedDerivation';
+import { getAuthoredClueForSearchId } from '../src/core/clues';
 
 interface GameplayState {
   x: number;
@@ -193,6 +194,73 @@ describe('authoritative deterministic simulation', () => {
     expect(moving.state.tick).toBe(60);
   });
 
+  it('keeps the entire player footprint inside walkable cells across generated floors', () => {
+    for (let seed = 0n; seed < 12n; seed++) {
+      const sim = new AuthoritativeSimulation(seed * 7919n + 1n);
+      for (let tick = 0; tick < 1800; tick++) {
+        // Repeatable collision-heavy sequence, including diagonals and wall scrapes.
+        const phase = Math.floor(tick / 90) % 4;
+        const input = phase === 0 ? { ...emptyInput, left: true, up: true }
+          : phase === 1 ? { ...emptyInput, right: true, up: true }
+            : phase === 2 ? { ...emptyInput, right: true, down: true }
+              : { ...emptyInput, left: true, down: true };
+        const state = sim.step(input);
+        const floor = sim.floor;
+        const half = PLAYER_COLLISION_HALF_EXTENT_SUBPIXELS, tile = 32 * FIXED_SCALE;
+        const minX = Math.floor((state.x - half) / tile), maxX = Math.floor((state.x + half - 1) / tile);
+        const minY = Math.floor((state.y - half) / tile), maxY = Math.floor((state.y + half - 1) / tile);
+        for (let y = minY; y <= maxY; y++) for (let x = minX; x <= maxX; x++) {
+          expect(floor.tiles[y]?.[x]).toBe(true);
+        }
+        if (state.status !== 'playing') break;
+      }
+    }
+  });
+
+  it.each([
+    [4, 3], [3, 2], [2, 1], [1, 0], [0, -1],
+  ])('advances authoritatively from floor %i to %i while preserving run state', (floor, nextFloor) => {
+    const seed = 0xabcde123n;
+    const probe = new AuthoritativeSimulation(seed, { floor });
+    const [exitX, exitY] = probe.floor.exit;
+    const x = (exitX * 32 + 16) * FIXED_SCALE, y = (exitY * 32 + 16) * FIXED_SCALE;
+    const createSimulation = () => new AuthoritativeSimulation(seed, {
+      floor, x, y, tick: 0, hp: 73,
+      battery: 55 * FIXED_SCALE + 77,
+      curse: 12 * FIXED_SCALE + 77,
+      score: 432, floorsCompleted: 4 - floor, hasKey: true,
+      stalker: { state: 'dormant', x, y, targetX: x, targetY: y, ticksRemaining: 100_000, chaseStartTick: 0, lastChaseEndTick: 0, visible: false, moveRemainder: 0 },
+      crawlers: [], watchers: [], ambushers: [], mimics: [],
+    });
+    const sim = createSimulation();
+    const twin = createSimulation();
+    const recorder = new InputRecorder();
+    const input = { ...emptyInput, interact: true };
+    recorder.recordTick(sim.state.tick, input);
+    const result = sim.stepWithEvents(input);
+    twin.stepWithEvents(input);
+
+    // Simulate a presentation adapter throwing while consuming its transition event.
+    expect(() => { throw new Error('presentation animation failed'); }).toThrow('presentation animation failed');
+    expect(twin.snapshot()).toEqual(sim.snapshot());
+    expect(result.events).toContainEqual({ type: 'floor_transition', fromFloor: floor, toFloor: nextFloor, floorsCompleted: 5 - floor });
+    expect(result.state.floor).toBe(nextFloor);
+    expect(result.state.status).toBe(nextFloor < 0 ? 'won' : 'playing');
+    expect(result.state.tick).toBe(1);
+    expect(result.state.hp).toBe(73);
+    expect(result.state.battery).toBe(Math.min(100 * FIXED_SCALE, 55 * FIXED_SCALE + 77 + 20 * FIXED_SCALE));
+    expect(result.state.curse).toBe(22 * FIXED_SCALE + 77);
+    expect(result.state.score).toBe(432 + 100 * floor);
+    expect(result.state.floorsCompleted).toBe(5 - floor);
+    if (nextFloor >= 0) {
+      expect([result.state.x, result.state.y]).toEqual([(sim.floor.start[0] * 32 + 16) * FIXED_SCALE, (sim.floor.start[1] * 32 + 16) * FIXED_SCALE]);
+    }
+    recorder.setTerminalTick(sim.state.tick);
+    const replay = InputReplayer.fromBinary(recorder.encodeBinary());
+    expect(replay.terminalTick).toBe(sim.state.tick);
+    expect(replay.getStateAtTick(0)).toEqual(input);
+  });
+
   it('owns enemy contact damage and deterministic search results', () => {
     const seed = 777n;
     const reference = new AuthoritativeSimulation(seed);
@@ -200,7 +268,8 @@ describe('authoritative deterministic simulation', () => {
     const px = (start[0] * 32 + 16) * FIXED_SCALE, py = (start[1] * 32 + 16) * FIXED_SCALE;
     const stalker = { state: 'hunting' as const, x: px + 10 * FIXED_SCALE, y: py, targetX: px, targetY: py, ticksRemaining: 0, chaseStartTick: 0, lastChaseEndTick: -600, visible: true, moveRemainder: 0 };
     const atExit = new AuthoritativeSimulation(seed, { x: px, y: py, stalker });
-    atExit.step(emptyInput);
+    const damageTick = atExit.stepWithEvents(emptyInput);
+    expect(damageTick.events).toContainEqual({ type: 'damage', amount: 35, hp: 65 });
     expect(atExit.state.hp).toBe(65);
     expect(atExit.state.curse).toBe(30 * FIXED_SCALE);
     expect(atExit.state.invulnerableUntilTick).toBe(90);
@@ -213,11 +282,20 @@ describe('authoritative deterministic simulation', () => {
       stalker: { state: 'dormant', x: 0, y: 0, targetX: 0, targetY: 0, ticksRemaining: 10000, chaseStartTick: 0, lastChaseEndTick: 0, visible: false, moveRemainder: 0 },
     });
     const expected = loot.floor.searchables[0].result;
-    searched.step({ ...emptyInput, interact: true });
+    const firstResult = searched.stepWithEvents({ ...emptyInput, interact: true });
+    expect(firstResult.events).toContainEqual({ type: 'loot_searched', index: 0, result: expected });
     expect(searched.state.searched[0]).toBe(true);
     if (expected.type === 'collectible') expect(searched.state.score).toBe(expected.score);
     if (expected.type === 'health') expect(searched.state.hp).toBe(100);
     if (expected.type === 'battery') expect(searched.state.battery).toBeGreaterThan(100 * FIXED_SCALE - 9);
+    const secondResult = searched.stepWithEvents({ ...emptyInput, interact: true });
+    expect(secondResult.events.filter(event => event.type === 'loot_searched' && event.index === 0)).toHaveLength(0);
+  });
+
+  it('maps generated clue outcomes to authored story text deterministically', () => {
+    expect(getAuthoredClueForSearchId('clue_4_2_1')).toEqual(getAuthoredClueForSearchId('clue_4_2_1'));
+    expect(getAuthoredClueForSearchId('clue_4_2_1')?.content.length).toBeGreaterThan(20);
+    expect(getAuthoredClueForSearchId('not-a-clue')).toBeNull();
   });
 
   it('advances Watcher curse, Ambusher warning/damage, Mimic chase, and corruption on ticks', () => {
@@ -328,7 +406,6 @@ describe('authoritative deterministic simulation', () => {
     const sim = new AuthoritativeSimulation(runSeed, { hp: 1000 });
     const recorder = new InputRecorder();
     const recordedStates: InputState[] = [];
-    let movingWallWasActive = false;
     let crawlerChaseSeen = false, watcherCurseSeen = false, ambusherSeen = false, mimicSeen = false;
     const step = (input: InputState) => {
       const before = sim.state;
@@ -339,7 +416,13 @@ describe('authoritative deterministic simulation', () => {
       recorder.recordTick(before.tick, actual);
       sim.step(actual);
       const after = sim.state;
-      movingWallWasActive ||= after.movingWallClosed;
+      const floorMap = sim.floor;
+      const half = PLAYER_COLLISION_HALF_EXTENT_SUBPIXELS, tileSize = 32 * FIXED_SCALE;
+      const minTileX = Math.floor((after.x - half) / tileSize), maxTileX = Math.floor((after.x + half - 1) / tileSize);
+      const minTileY = Math.floor((after.y - half) / tileSize), maxTileY = Math.floor((after.y + half - 1) / tileSize);
+      for (let y = minTileY; y <= maxTileY; y++) for (let x = minTileX; x <= maxTileX; x++) {
+        expect(floorMap.tiles[y]?.[x], `player overlaps static wall at floor ${after.floor}, tick ${after.tick}`).toBe(true);
+      }
       crawlerChaseSeen ||= after.crawlers.some(crawler => crawler.chasing);
       watcherCurseSeen ||= after.watchers.some(watcher => watcher.curseRemainder > 0);
       ambusherSeen ||= after.ambushers.some(ambusher => ambusher.hasTriggered);
@@ -351,7 +434,6 @@ describe('authoritative deterministic simulation', () => {
       while ((Math.abs(sim.state.x / FIXED_SCALE - (target[0] * 32 + 16)) > 1 || Math.abs(sim.state.y / FIXED_SCALE - (target[1] * 32 + 16)) > 1) && guard++ < 20_000) {
         const map = sim.floor;
         const sx = Math.floor(sim.state.x / (32 * FIXED_SCALE)), sy = Math.floor(sim.state.y / (32 * FIXED_SCALE));
-        const blocked = new Set(sim.state.movingWalls.filter(wall => wall.active).flatMap(wall => wall.cells.map(([x, y]) => `${x},${y}`)));
         const queue: Array<[number, number]> = [[sx, sy]];
         const parent = new Map<string, string | null>([[`${sx},${sy}`, null]]);
         for (let i = 0; i < queue.length; i++) {
@@ -359,7 +441,7 @@ describe('authoritative deterministic simulation', () => {
           if (x === target[0] && y === target[1]) break;
           for (const [nx, ny] of [[x, y - 1], [x + 1, y], [x, y + 1], [x - 1, y]] as Array<[number, number]>) {
             const key = `${nx},${ny}`;
-            if (map.tiles[ny]?.[nx] && !blocked.has(key) && !parent.has(key)) { parent.set(key, `${x},${y}`); queue.push([nx, ny]); }
+            if (map.tiles[ny]?.[nx] && !parent.has(key)) { parent.set(key, `${x},${y}`); queue.push([nx, ny]); }
           }
         }
         let key = `${target[0]},${target[1]}`;
@@ -447,8 +529,6 @@ describe('authoritative deterministic simulation', () => {
     for (const fps of [30, 60, 144]) expect(replayAtRenderSchedule(fps)).toEqual(sim.snapshot());
     expect(replayAtRenderSchedule(60, 5000)).toEqual(sim.snapshot());
     expect(replayAtRenderSchedule(60)).toEqual(sim.snapshot());
-    expect(sim.snapshot().state.movingWalls.length).toBeGreaterThan(0);
-    expect(movingWallWasActive).toBe(true);
     expect(crawlerChaseSeen).toBe(true);
     expect(ambusherSeen).toBe(true);
     expect(mimicSeen).toBe(true);

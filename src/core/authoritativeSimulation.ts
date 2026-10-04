@@ -8,6 +8,15 @@ export const SIMULATION_HZ = 60;
 export const PLAYER_SPEED_SUBPIXELS_PER_SECOND = 160 * FIXED_SCALE;
 export const INTERACTION_RANGE_SUBPIXELS = 48 * FIXED_SCALE;
 export const PLAYER_RADIUS_SUBPIXELS = 7 * FIXED_SCALE;
+export const PLAYER_COLLISION_HALF_EXTENT_SUBPIXELS = PLAYER_RADIUS_SUBPIXELS;
+
+export type SimulationEvent =
+  | { type: 'loot_searched'; index: number; result: Floor['searchables'][number]['result'] }
+  | { type: 'key_collected' }
+  | { type: 'floor_transition'; fromFloor: number; toFloor: number; floorsCompleted: number }
+  | { type: 'damage'; amount: number; hp: number }
+  | { type: 'mimic_revealed'; index: number };
+export interface SimulationTickResult { state: AuthoritativeState; events: SimulationEvent[] }
 
 /** Floor generator input: low 32 bits of the unsigned canonical seed. The
  * generator itself applies its existing floor-specific XOR domain mix. */
@@ -33,11 +42,6 @@ export interface AuthoritativeState {
   searched: boolean[];
   invulnerableUntilTick: number;
   scareLockoutUntilTick: number;
-  movingWallClosed: boolean;
-  movingWallTileX: number;
-  movingWallTileY: number;
-  movingWalls: Array<{ cells: Array<[number, number]>; active: boolean }>;
-  lastMovingWallTick: number;
   facingX: number;
   facingY: number;
   stalker: StalkerSnapshot;
@@ -72,7 +76,7 @@ export interface SimulationSnapshot {
 }
 
 const cloneState = (s: AuthoritativeState): AuthoritativeState => ({
-  ...s, searched: [...s.searched], movingWalls: s.movingWalls.map(w => ({ active: w.active, cells: w.cells.map(c => [...c] as [number, number]) })), stalker: { ...s.stalker }, crawlers: s.crawlers.map(e => ({ ...e })),
+  ...s, searched: [...s.searched], stalker: { ...s.stalker }, crawlers: s.crawlers.map(e => ({ ...e })),
   watchers: s.watchers.map(e => ({ ...e })), ambushers: s.ambushers.map(e => ({ ...e })),
   mimics: s.mimics.map(e => ({ ...e })), corruption: { ...s.corruption }, boxScare: { ...s.boxScare, availableTypes: [...s.boxScare.availableTypes] },
 });
@@ -105,10 +109,8 @@ export class AuthoritativeSimulation {
   private stateValue: AuthoritativeState;
   private floorValue: Floor;
   private readonly seed: bigint;
-  private movingWallCell: [number, number] | null = null;
-  private movingWallCandidates: Array<{ cells: Array<[number, number]>; active: boolean }> = [];
-  private movingWallRng: PCG32;
   private boxScareRng: PCG32;
+  private tickEvents: SimulationEvent[] = [];
 
   constructor(seed: bigint, state?: Partial<AuthoritativeState>) {
     this.seed = seed;
@@ -122,7 +124,6 @@ export class AuthoritativeSimulation {
     this.crawlerRng = new PCG32((seed ^ 0x435241574c4552n) & mask);
     this.watcherRng = new PCG32((seed ^ 0x57415443484552n) & mask);
     this.ambusherRng = new PCG32((seed ^ 0x414d425553484552n) & mask);
-    this.movingWallRng = new PCG32((seed ^ 0x4d4f56494e475741n) & mask);
     this.boxScareRng = new PCG32((seed ^ 0x424f585343415245n) & mask);
     const floorNumber = state?.floor ?? 4;
     this.floorValue = generateFloor(this.floorSeed(), floorNumber, this.economyLootRng());
@@ -134,10 +135,7 @@ export class AuthoritativeSimulation {
       hp: 100, battery: 100 * FIXED_SCALE, curse: 0, score: 0,
       status: 'playing', flashlightOn: false, hasKey: false,
       searched: this.floorValue.searchables.map(() => false),
-      invulnerableUntilTick: 0, scareLockoutUntilTick: 0, movingWallClosed: false,
-      movingWallTileX: 0, movingWallTileY: 0,
-      movingWalls: [],
-      lastMovingWallTick: -1_000_000,
+      invulnerableUntilTick: 0, scareLockoutUntilTick: 0,
       facingX: 0, facingY: 1,
       stalker: { state: 'dormant', x: 0, y: 0, targetX: 0, targetY: 0, ticksRemaining: 0, chaseStartTick: 0, lastChaseEndTick: -600, visible: false, moveRemainder: 0 },
       crawlers: [], watchers: [], ambushers: [],
@@ -147,7 +145,6 @@ export class AuthoritativeSimulation {
       scareEventId: 0, damageEventId: 0, lastDamage: 0,
       ...state,
     };
-    this.chooseMovingWallCell();
     this.resetBoxScares();
     if (!state?.stalker) this.spawnFloorEntities();
   }
@@ -241,7 +238,7 @@ export class AuthoritativeSimulation {
   snapshot(): SimulationSnapshot {
     return { state: this.state, floor: cloneFloor(this.floorValue), rng: {
       world: this.worldRng.snapshot(), economy: this.economyRng.snapshot(), event: this.eventRng.snapshot(),
-      stalker: this.stalkerRng.snapshot(), crawler: this.crawlerRng.snapshot(), watcher: this.watcherRng.snapshot(), ambusher: this.ambusherRng.snapshot(), movingWall: this.movingWallRng.snapshot(), boxScare: this.boxScareRng.snapshot(),
+      stalker: this.stalkerRng.snapshot(), crawler: this.crawlerRng.snapshot(), watcher: this.watcherRng.snapshot(), ambusher: this.ambusherRng.snapshot(), boxScare: this.boxScareRng.snapshot(),
     } };
   }
 
@@ -250,10 +247,15 @@ export class AuthoritativeSimulation {
 
   /** Exactly one authoritative tick. Inputs are sampled before this method. */
   step(input: InputState): AuthoritativeState {
+    return this.stepWithEvents(input).state;
+  }
+
+  /** Authoritative tick plus ordered transition events for presentation adapters. */
+  stepWithEvents(input: InputState): SimulationTickResult {
+    this.tickEvents = [];
     const s = this.stateValue;
-    if (s.status !== 'playing') return this.state;
+    if (s.status !== 'playing') return { state: this.state, events: [] };
     const tick = s.tick;
-    this.updateMovingWall(tick);
     if (tick >= s.scareLockoutUntilTick) this.movePlayer(input);
     if (input.right !== input.left && (input.right || input.left)) { s.facingX = input.right ? 1 : -1; s.facingY = 0; }
     if (input.down !== input.up && (input.down || input.up)) { s.facingX = 0; s.facingY = input.down ? 1 : -1; }
@@ -272,7 +274,7 @@ export class AuthoritativeSimulation {
     if (input.interact) this.interact();
     if (s.curse >= 100 * FIXED_SCALE) s.status = 'lost';
     s.tick++;
-    return this.state;
+    return { state: this.state, events: [...this.tickEvents] };
   }
 
   private movePlayer(input: InputState) {
@@ -291,54 +293,29 @@ export class AuthoritativeSimulation {
   private moveAxis(amount: number, horizontal: boolean) {
     if (!amount) return;
     const s = this.stateValue;
-    const candidate = horizontal ? s.x + amount : s.y + amount;
-    const radius = PLAYER_RADIUS_SUBPIXELS;
-    const points: Array<[number, number]> = horizontal
-      ? [[candidate - Math.sign(amount) * radius, s.y - radius], [candidate + Math.sign(amount) * radius, s.y + radius]]
-      : [[s.x - radius, candidate - Math.sign(amount) * radius], [s.x + radius, candidate + Math.sign(amount) * radius]];
-    if (points.some(([x, y]) => !this.isWalkable(x, y))) return;
-    if (horizontal) s.x = candidate; else s.y = candidate;
+    const steps = Math.ceil(Math.abs(amount) / FIXED_SCALE);
+    let moved = 0;
+    for (let i = 0; i < steps; i++) {
+      const remaining = amount - moved;
+      const increment = Math.sign(remaining) * Math.min(FIXED_SCALE, Math.abs(remaining));
+      const x = horizontal ? s.x + increment : s.x;
+      const y = horizontal ? s.y : s.y + increment;
+      if (!this.isPlayerFootprintWalkable(x, y)) break;
+      if (horizontal) s.x = x; else s.y = y;
+      moved += increment;
+    }
   }
 
-  private isWalkable(x: number, y: number): boolean {
-    const tx = Math.floor(x / (32 * FIXED_SCALE));
-    const ty = Math.floor(y / (32 * FIXED_SCALE));
-    if (this.isMovingWallBlocked(tx, ty)) return false;
-    return this.floorValue.tiles[ty]?.[tx] === true;
-  }
-
-  private chooseMovingWallCell() {
-    const tiles = this.floorValue.tiles;
-    const walls: Array<{ cells: Array<[number, number]>; active: boolean }> = [];
-    for (let y = 2; y < this.floorValue.height - 2; y++) for (let x = 2; x < this.floorValue.width - 2; x++) {
-      if (!tiles[y][x]) continue;
-      if (!tiles[y - 1][x] && !tiles[y + 1][x] && tiles[y][x - 1] && tiles[y][x + 1]) {
-        const cells: Array<[number, number]> = [];
-        while (x + cells.length < this.floorValue.width && tiles[y][x + cells.length] && !tiles[y - 1][x + cells.length] && !tiles[y + 1][x + cells.length]) cells.push([x + cells.length, y]);
-        if (cells.length >= 2) { walls.push({ cells, active: false }); x += cells.length - 1; }
-      }
-      if (!tiles[y][x - 1] && !tiles[y][x + 1] && tiles[y - 1][x] && tiles[y + 1][x]) {
-        const cells: Array<[number, number]> = [];
-        while (y + cells.length < this.floorValue.height && tiles[y + cells.length][x] && !tiles[y + cells.length][x - 1] && !tiles[y + cells.length][x + 1]) cells.push([x, y + cells.length]);
-        if (cells.length >= 2) walls.push({ cells, active: false });
-      }
+  private isPlayerFootprintWalkable(x: number, y: number): boolean {
+    const half = PLAYER_COLLISION_HALF_EXTENT_SUBPIXELS;
+    const minTileX = Math.floor((x - half) / TILE);
+    const maxTileX = Math.floor((x + half - 1) / TILE);
+    const minTileY = Math.floor((y - half) / TILE);
+    const maxTileY = Math.floor((y + half - 1) / TILE);
+    for (let ty = minTileY; ty <= maxTileY; ty++) for (let tx = minTileX; tx <= maxTileX; tx++) {
+      if (this.floorValue.tiles[ty]?.[tx] !== true) return false;
     }
-    // Some generated floor layouts have no corridor with two consecutive
-    // single-width tiles. Keep moving-wall gameplay present on those maps by
-    // using deterministic one-tile corridor gates as safe candidates.
-    if (walls.length === 0) {
-      const objectives = new Set([`${this.floorValue.start}`, `${this.floorValue.key}`, `${this.floorValue.exit}`]);
-      for (let y = 1; y < this.floorValue.height - 1; y++) for (let x = 1; x < this.floorValue.width - 1; x++) {
-        if (tiles[y][x] && !objectives.has(`${x},${y}`)) walls.push({ cells: [[x, y]], active: false });
-      }
-    }
-    this.movingWallCandidates = walls;
-    const initial = walls[0]?.cells[0] ?? null;
-    this.movingWallCell = initial;
-    this.stateValue.movingWalls = walls.map(w => ({ cells: w.cells.map(c => [...c] as [number, number]), active: w.active }));
-    this.stateValue.movingWallTileX = this.movingWallCell?.[0] ?? 0;
-    this.stateValue.movingWallTileY = this.movingWallCell?.[1] ?? 0;
-    this.stateValue.lastMovingWallTick = -1_000_000;
+    return true;
   }
 
   private resetBoxScares() {
@@ -368,54 +345,6 @@ export class AuthoritativeSimulation {
     }
   }
 
-  private updateMovingWall(tick: number) {
-    const s = this.stateValue;
-    const cooldown = s.floor === 4 ? 3600 : s.floor === 3 ? 1800 : s.floor === 2 ? 1260 : s.floor === 1 ? 900 : 540;
-    if (tick - s.lastMovingWallTick < cooldown || this.movingWallCandidates.length === 0) return;
-    const floorChancePermille = s.floor === 4 ? 300 : s.floor === 2 ? 1200 : s.floor === 1 ? 1500 : s.floor === 0 ? 2000 : 1000;
-    const chancePerMillion = Math.trunc((s.hasKey ? 150_000 : 80_000) * floorChancePermille / 1000);
-    if (this.movingWallRng.nextRange(0, 999_999) >= chancePerMillion) return;
-    const wall = this.movingWallCandidates[this.movingWallRng.nextRange(0, this.movingWallCandidates.length - 1)];
-    const closing = !wall.active;
-    if (closing) {
-      if (wall.cells.some(([x, y]) => square(s.x - (x * 32 + 16) * FIXED_SCALE) + square(s.y - (y * 32 + 16) * FIXED_SCALE) < square(100 * FIXED_SCALE))) return;
-      wall.active = true;
-      if (!this.canReachObjectives()) { wall.active = false; return; }
-    } else wall.active = false;
-    s.lastMovingWallTick = tick;
-    s.movingWalls = this.movingWallCandidates.map(w => ({ cells: w.cells.map(c => [...c] as [number, number]), active: w.active }));
-    s.movingWallClosed = this.movingWallCandidates.some(w => w.active);
-    const representative = this.movingWallCandidates.find(w => w.active)?.cells[0] ?? this.movingWallCandidates[this.movingWallRng.nextRange(0, this.movingWallCandidates.length - 1)].cells[0];
-    this.movingWallCell = representative;
-    s.movingWallTileX = representative[0]; s.movingWallTileY = representative[1];
-  }
-
-  private isMovingWallBlocked(x: number, y: number): boolean {
-    return this.movingWallCandidates.some(w => w.active && w.cells.some(cell => cell[0] === x && cell[1] === y));
-  }
-
-  private canReachObjectives(): boolean {
-    const start: [number, number] = [Math.floor(this.stateValue.x / TILE), Math.floor(this.stateValue.y / TILE)];
-    const targets = this.stateValue.hasKey ? [this.floorValue.exit] : [this.floorValue.key, this.floorValue.exit];
-    return targets.every(([tx, ty]) => this.hasPath(start[0], start[1], tx, ty));
-  }
-
-  private hasPath(sx: number, sy: number, gx: number, gy: number): boolean {
-    const width = this.floorValue.width, height = this.floorValue.height;
-    const seen = new Uint8Array(width * height), queue: number[] = [sy * width + sx];
-    seen[queue[0]] = 1;
-    const dirs: Array<[number, number]> = [[0, 1], [1, 0], [0, -1], [-1, 0]];
-    for (let head = 0; head < queue.length; head++) {
-      const cell = queue[head], x = cell % width, y = Math.floor(cell / width);
-      if (x === gx && y === gy) return true;
-      for (const [dx, dy] of dirs) { const nx = x + dx, ny = y + dy, next = ny * width + nx;
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height || seen[next] || !this.isTileWalkable(nx, ny)) continue;
-        seen[next] = 1; queue.push(next);
-      }
-    }
-    return false;
-  }
-
   private applyDamage(amount: number, tick: number, curseSubunits = 0): boolean {
     const s = this.stateValue;
     if (tick < s.invulnerableUntilTick || s.status !== 'playing') return false;
@@ -424,6 +353,7 @@ export class AuthoritativeSimulation {
     s.invulnerableUntilTick = tick + 90;
     s.lastDamage = amount;
     s.damageEventId++;
+    this.tickEvents.push({ type: 'damage', amount, hp: s.hp });
     if (s.hp === 0 || s.curse >= 100 * FIXED_SCALE) s.status = 'lost';
     return true;
   }
@@ -631,7 +561,7 @@ export class AuthoritativeSimulation {
   }
 
   private isTileWalkable(x: number, y: number): boolean {
-    return this.floorValue.tiles[y]?.[x] === true && !this.isMovingWallBlocked(x, y);
+    return this.floorValue.tiles[y]?.[x] === true;
   }
 
   private actorReached(actor: { x: number; y: number; targetX: number; targetY: number }, pixels: number): boolean {
@@ -660,6 +590,7 @@ export class AuthoritativeSimulation {
     const keyY = (this.floorValue.key[1] * 32 + 16) * FIXED_SCALE;
     if (!s.hasKey && this.inRange(keyX, keyY)) {
       s.hasKey = true;
+      this.tickEvents.push({ type: 'key_collected' });
       if (s.stalker.state === 'dormant') { s.stalker.state = 'roaming'; this.pickStalkerRoamTarget(); }
       else if (s.stalker.state === 'roaming') { s.stalker.state = 'investigating'; s.stalker.targetX = s.x; s.stalker.targetY = s.y; s.stalker.ticksRemaining = (STALKER_SPECS[s.floor as keyof typeof STALKER_SPECS] ?? STALKER_SPECS[4]).investigate; }
     }
@@ -668,6 +599,7 @@ export class AuthoritativeSimulation {
       const item = this.floorValue.searchables[i];
       if (!this.inRange((item.x * 32 + 16) * FIXED_SCALE, (item.y * 32 + 16) * FIXED_SCALE)) continue;
       s.searched[i] = true;
+      this.tickEvents.push({ type: 'loot_searched', index: i, result: { ...item.result } });
       if (item.result.type !== 'mimic_reveal') this.maybeTriggerBoxScare(s.tick);
       if (s.stalker.state === 'dormant' && this.stalkerRng.nextRange(0, 999) < 300) {
         s.stalker.state = 'investigating'; s.stalker.targetX = s.x; s.stalker.targetY = s.y;
@@ -681,6 +613,7 @@ export class AuthoritativeSimulation {
       const mimic = s.mimics.find(m => m.searchableIndex === i);
       if (mimic?.active) {
         mimic.revealed = true; mimic.chaseUntilTick = s.tick + 120; s.scareEventId++;
+        this.tickEvents.push({ type: 'mimic_revealed', index: i });
         mimic.targetX = s.x; mimic.targetY = s.y;
         this.applyDamage(15, s.tick);
       }
@@ -693,11 +626,13 @@ export class AuthoritativeSimulation {
     }
     const [ex, ey] = this.floorValue.exit;
     if (s.hasKey && this.inRange((ex * 32 + 16) * FIXED_SCALE, (ey * 32 + 16) * FIXED_SCALE)) {
+      const fromFloor = s.floor;
       s.score += 100 * Math.max(0, s.floor);
       s.curse += 10 * FIXED_SCALE;
       s.battery = Math.min(100 * FIXED_SCALE, s.battery + 20 * FIXED_SCALE);
       s.floor--;
       s.floorsCompleted++;
+      this.tickEvents.push({ type: 'floor_transition', fromFloor, toFloor: s.floor, floorsCompleted: s.floorsCompleted });
       if (s.floor < 0) { s.status = 'won'; return; }
       this.floorValue = generateFloor(this.floorSeed(), s.floor, this.economyLootRng());
       s.x = (this.floorValue.start[0] * 32 + 16) * FIXED_SCALE;
@@ -705,8 +640,6 @@ export class AuthoritativeSimulation {
       s.hasKey = false;
       s.searched = this.floorValue.searchables.map(() => false);
       s.mimics = this.floorValue.searchables.flatMap((item, searchableIndex) => item.isMimic ? [{ searchableIndex, x: (item.x * 32 + 16) * FIXED_SCALE, y: (item.y * 32 + 16) * FIXED_SCALE, targetX: (item.x * 32 + 16) * FIXED_SCALE, targetY: (item.y * 32 + 16) * FIXED_SCALE, moveRemainder: 0, revealed: false, chaseUntilTick: 0, active: true }] : []);
-      this.stateValue.movingWallClosed = false;
-      this.chooseMovingWallCell();
       this.stateValue.corruption.lastTriggerTick = -1_000_000;
       this.resetBoxScares();
       s.playerMoveRemainderX = 0; s.playerMoveRemainderY = 0;
