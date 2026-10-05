@@ -1,5 +1,6 @@
 import { deriveSeeds, type RunManifest } from './seedDerivation';
 import { START_FLOOR, nextProgressionFloor, isOutsideFloor, isBlock13Arrival } from './progression';
+import { BLOCK13_ENTRY_CURSE_CAP, FLOOR_TRANSITION_CURSE, FIXED_SCALE } from './authoritativeSimulation';
 
 export type RunState = {
   floor: number;
@@ -59,8 +60,10 @@ export const createRun = (manifest?: RunManifest): RunState => {
 
 export const completeFloor = (state: RunState): RunState => {
   const nextFloor = nextProgressionFloor(state.floor);
-  const curseWithBonus = state.curse + 10;
-  const curse = isBlock13Arrival(state.floor) ? Math.max(state.curse, Math.min(99, curseWithBonus)) : curseWithBonus;
+  const curseWithBonus = state.curse + FLOOR_TRANSITION_CURSE / FIXED_SCALE;
+  const curse = isBlock13Arrival(state.floor)
+    ? Math.min(BLOCK13_ENTRY_CURSE_CAP / FIXED_SCALE, curseWithBonus)
+    : curseWithBonus;
   return {
     ...state,
     floor: nextFloor,

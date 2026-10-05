@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateFloor } from './floor';
+import { generateFloor, LOOT_PROBABILITIES, LOOT_THRESHOLDS } from './floor';
 
 describe('Floor Generation', () => {
   it('generates a deterministic floor from a seed', () => {
@@ -13,6 +13,26 @@ describe('Floor Generation', () => {
     expect(floor1.key).toEqual(floor2.key);
     expect(floor1.exit).toEqual(floor2.exit);
     expect(floor1.rooms.length).toBe(floor2.rooms.length);
+    expect(floor1.searchables).toEqual(floor2.searchables);
+  });
+
+  it('uses the exact 100% loot table and keeps RNG draw count independent of loot outcomes', () => {
+    expect(LOOT_PROBABILITIES).toEqual({ battery: 24, health: 18, collectible: 25, clue: 8, empty: 25 });
+    expect(Object.values(LOOT_PROBABILITIES).reduce((sum, value) => sum + value, 0)).toBe(100);
+    expect(LOOT_THRESHOLDS).toEqual({ battery: 24, health: 42, collectible: 67, clue: 75 });
+
+    const runWithLootRoll = (roll: number) => {
+      let draws = 0;
+      const floor = generateFloor(0x13579, 2, {
+        next: () => { draws++; return roll; },
+        int: () => { draws++; return 0; },
+      });
+      return { draws, floor };
+    };
+    const mostlyMimicsOrBattery = runWithLootRoll(0.1);
+    const mostlyEmpty = runWithLootRoll(0.99);
+    expect(mostlyMimicsOrBattery.floor.searchables).not.toEqual(mostlyEmpty.floor.searchables);
+    expect(mostlyMimicsOrBattery.draws).toBe(mostlyEmpty.draws);
   });
 
   it('ensures start, key, and exit are walkable', () => {
@@ -74,5 +94,34 @@ describe('Floor Generation', () => {
         expect(new Set(positions).size, `duplicate searchable on seed ${seed}, floor ${floorNumber}`).toBe(positions.length);
       }
     }
+  });
+
+  it('gives Block 13 a deterministic hub with connected arrival, key and escape branches', () => {
+    const reachable = (floor: ReturnType<typeof generateFloor>, target: [number, number]) => {
+      const pending: [number, number][] = [floor.start];
+      const seen = new Set([`${floor.start[0]},${floor.start[1]}`]);
+      for (let i = 0; i < pending.length; i++) {
+        const [x, y] = pending[i];
+        for (const [nx, ny] of [[x, y - 1], [x + 1, y], [x, y + 1], [x - 1, y]] as [number, number][]) {
+          const id = `${nx},${ny}`;
+          if (floor.tiles[ny]?.[nx] && !seen.has(id)) { seen.add(id); pending.push([nx, ny]); }
+        }
+      }
+      return seen.has(`${target[0]},${target[1]}`);
+    };
+
+    for (const seed of [1, 7, 42, 54321, 0xabcde123]) {
+      const floor = generateFloor(seed, 0);
+      const repeated = generateFloor(seed, 0);
+      expect(floor).toEqual(repeated);
+      expect(floor.block13Hub).toEqual([Math.floor(floor.width / 2), Math.floor(floor.height / 2)]);
+      const [hx, hy] = floor.block13Hub!;
+      for (let y = hy - 3; y <= hy + 3; y++) {
+        for (let x = hx - 4; x <= hx + 4; x++) expect(floor.tiles[y][x]).toBe(true);
+      }
+      expect(reachable(floor, floor.key)).toBe(true);
+      expect(reachable(floor, floor.exit)).toBe(true);
+    }
+    expect(generateFloor(42, 1).block13Hub).toBeUndefined();
   });
 });

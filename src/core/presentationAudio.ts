@@ -47,8 +47,10 @@ export function audioCuesForStateChange(previous: AuthoritativeState, current: A
   if (previous.corruption.effectId !== current.corruption.effectId) cues.push(cue('sfx_corruption_pulse', 1200));
   if (!previous.stalker.visible && current.stalker.visible) cues.push(cue('sfx_stalker_presence', 5000, { x: current.stalker.x, y: current.stalker.y }));
   if (previous.stalker.state !== 'hunting' && current.stalker.state === 'hunting') {
-    cues.push(cue('sfx_danger_stinger', 5000));
-    cues.push(cue(isBlock13Floor(current.floor) ? 'sfx_final_chase_stinger' : 'sfx_stalker_hunt', 5000, { x: current.stalker.x, y: current.stalker.y }));
+    if (!isBlock13Floor(current.floor)) cues.push(cue('sfx_danger_stinger', 5000));
+    // Block 13 currently has no dedicated stinger asset; use its real, loaded
+    // Stalker cue rather than queueing an unavailable catalog key.
+    cues.push(cue('sfx_stalker_hunt', 5000, { x: current.stalker.x, y: current.stalker.y }));
     specificScare = true;
   }
 

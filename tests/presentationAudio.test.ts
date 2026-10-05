@@ -54,8 +54,9 @@ describe('presentation audio mapping', () => {
     };
     expect(audioCuesForStateChange(base, changed).map(({ key }) => key)).toEqual([
       'sfx_flashlight_on', 'sfx_battery_warning', 'sfx_corruption_pulse',
-      'sfx_stalker_presence', 'sfx_danger_stinger', 'sfx_final_chase_stinger', 'sfx_escape',
+      'sfx_stalker_presence', 'sfx_stalker_hunt', 'sfx_escape',
     ]);
+    expect(Object.keys(AUDIO_ASSET_MANIFEST)).toContain('sfx_stalker_hunt');
   });
 
   it('maps enemy state changes and floor/death events without scene-owned gameplay decisions', () => {

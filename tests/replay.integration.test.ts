@@ -9,7 +9,7 @@ import {
 } from '../src/core/inputRecorder';
 import { getPlayerVelocity, nextFlashlightState } from '../src/core/inputSimulation';
 import { SimulationEngine } from '../src/core/simulationEngine';
-import { AuthoritativeSimulation, FIXED_SCALE, PLAYER_COLLISION_HALF_EXTENT_SUBPIXELS, floorSeedFromCanonicalSeed } from '../src/core/authoritativeSimulation';
+import { AuthoritativeSimulation, FIXED_SCALE, MIMIC_REVEAL_TICKS, MIMIC_CHASE_DURATION_TICKS, STALKER_RECOVERY_COOLDOWN_TICKS, PLAYER_COLLISION_HALF_EXTENT_SUBPIXELS, floorSeedFromCanonicalSeed, type AuthoritativeState } from '../src/core/authoritativeSimulation';
 import { finalStateV1FromSimulation, hashFinalStateV1 } from '../src/core/finalStateV1';
 import type { RunManifest } from '../src/core/seedDerivation';
 import { getAuthoredClueForSearchId } from '../src/core/clues';
@@ -197,7 +197,7 @@ describe('authoritative deterministic simulation', () => {
     const makeInitialState = () => ({
       x: (batteryItem.x * 32 + 16) * FIXED_SCALE,
       y: (batteryItem.y * 32 + 16) * FIXED_SCALE,
-      battery: 9,
+      battery: 8,
       flashlightOn: true,
       hasKey: true,
       searched: probe.floor.searchables.map((_, index) => index !== batteryIndex),
@@ -208,7 +208,7 @@ describe('authoritative deterministic simulation', () => {
     const live = new AuthoritativeSimulation(seed, makeInitialState());
     const recorder = new InputRecorder();
     const inputs: InputState[] = [
-      emptyInput, // 9 subpercent drain reaches exactly zero.
+      emptyInput, // 8 subpercent drain reaches exactly zero.
       { ...emptyInput, flashlight: true }, // Zero battery cannot toggle it on.
       { ...emptyInput, interact: true }, // Restore charge from the searchable battery.
       { ...emptyInput, flashlight: true }, // It works again after recharge.
@@ -304,7 +304,7 @@ describe('authoritative deterministic simulation', () => {
     expect(result.state.tick).toBe(1);
     expect(result.state.hp).toBe(73);
     expect(result.state.battery).toBe(Math.min(100 * FIXED_SCALE, 55 * FIXED_SCALE + 77 + 20 * FIXED_SCALE));
-    expect(result.state.curse).toBe(22 * FIXED_SCALE + 77);
+    expect(result.state.curse).toBe(20 * FIXED_SCALE + 77);
     expect(result.state.score).toBe(432 + 100 * floor);
     expect(result.state.floorsCompleted).toBe(5 - floor);
     if (nextFloor >= 0) {
@@ -316,6 +316,30 @@ describe('authoritative deterministic simulation', () => {
     expect(replay.getStateAtTick(0)).toEqual(input);
   });
 
+  it('keeps ordinary floor transitions uncapped so curse can continue toward and reach 100', () => {
+    const seed = 0x8484n;
+    const probe = new AuthoritativeSimulation(seed, { floor: 2 });
+    const [exitX, exitY] = probe.floor.exit;
+    const x = (exitX * 32 + 16) * FIXED_SCALE, y = (exitY * 32 + 16) * FIXED_SCALE;
+    const create = (curse: number) => new AuthoritativeSimulation(seed, {
+      floor: 2, x, y, hasKey: true, curse,
+      searched: probe.floor.searchables.map(() => true),
+      stalker: { state: 'dormant', x: 0, y: 0, targetX: 0, targetY: 0, ticksRemaining: 100_000, chaseStartTick: 0, lastChaseEndTick: 0, visible: false, moveRemainder: 0 },
+      crawlers: [], watchers: [], ambushers: [], mimics: [],
+    });
+    const progressing = create(84 * FIXED_SCALE);
+    progressing.step({ ...emptyInput, interact: true });
+    expect(progressing.state.floor).toBe(1);
+    expect(progressing.state.curse).toBe(92 * FIXED_SCALE);
+    expect(progressing.state.status).toBe('playing');
+
+    const terminal = create(96 * FIXED_SCALE);
+    terminal.step({ ...emptyInput, interact: true });
+    expect(terminal.state.floor).toBe(1);
+    expect(terminal.state.curse).toBe(104 * FIXED_SCALE);
+    expect(terminal.state.status).toBe('lost');
+  });
+
   it('owns enemy contact damage and deterministic search results', () => {
     const seed = 777n;
     const reference = new AuthoritativeSimulation(seed);
@@ -324,9 +348,9 @@ describe('authoritative deterministic simulation', () => {
     const stalker = { state: 'hunting' as const, x: px + 10 * FIXED_SCALE, y: py, targetX: px, targetY: py, ticksRemaining: 0, chaseStartTick: 0, lastChaseEndTick: -600, visible: true, moveRemainder: 0 };
     const atExit = new AuthoritativeSimulation(seed, { x: px, y: py, stalker });
     const damageTick = atExit.stepWithEvents(emptyInput);
-    expect(damageTick.events).toContainEqual({ type: 'damage', amount: 35, hp: 65 });
-    expect(atExit.state.hp).toBe(65);
-    expect(atExit.state.curse).toBe(30 * FIXED_SCALE);
+    expect(damageTick.events).toContainEqual({ type: 'damage', amount: 30, hp: 70 });
+    expect(atExit.state.hp).toBe(70);
+    expect(atExit.state.curse).toBe(20 * FIXED_SCALE);
     expect(atExit.state.invulnerableUntilTick).toBe(90);
 
     const loot = new AuthoritativeSimulation(seed);
@@ -342,7 +366,7 @@ describe('authoritative deterministic simulation', () => {
     expect(searched.state.searched[0]).toBe(true);
     if (expected.type === 'collectible') expect(searched.state.score).toBe(expected.score);
     if (expected.type === 'health') expect(searched.state.hp).toBe(100);
-    if (expected.type === 'battery') expect(searched.state.battery).toBeGreaterThan(100 * FIXED_SCALE - 9);
+    if (expected.type === 'battery') expect(searched.state.battery).toBeGreaterThan(100 * FIXED_SCALE - 8);
     const secondResult = searched.stepWithEvents({ ...emptyInput, interact: true });
     expect(secondResult.events.filter(event => event.type === 'loot_searched' && event.index === 0)).toHaveLength(0);
   });
@@ -362,6 +386,13 @@ describe('authoritative deterministic simulation', () => {
     const watcher = { id: 0, x: x + 80 * FIXED_SCALE, y, active: true, illuminatedTicks: 0, decayRemainder: 0, curseRemainder: 0 };
     const ambusher = { id: 0, x, y, state: 'warning' as const, warningTicks: 1, damageAtTick: -1, damage: 7, hasTriggered: false };
     const sim = new AuthoritativeSimulation(seed, { x, y, facingX: 1, facingY: 0, stalker: dormantStalker, crawlers: [], watchers: [watcher], ambushers: [ambusher], mimics: [] });
+    const warningSim = new AuthoritativeSimulation(seed, { x, y, stalker: dormantStalker, crawlers: [], watchers: [], ambushers: [
+      { ...ambusher, state: 'hidden', warningTicks: 0, x: x + 20 * FIXED_SCALE },
+    ], mimics: [] });
+    warningSim.step(emptyInput);
+    expect(warningSim.state.ambushers[0].warningTicks).toBeGreaterThanOrEqual(24);
+    expect(warningSim.state.ambushers[0].warningTicks).toBeLessThanOrEqual(36);
+
     sim.step({ ...emptyInput, flashlight: true });
     expect(sim.state.watchers[0].illuminatedTicks).toBe(1);
     expect(sim.state.ambushers[0].hasTriggered).toBe(true);
@@ -375,7 +406,7 @@ describe('authoritative deterministic simulation', () => {
     expect(corrupt.state.corruption.effectId).toBeGreaterThan(0);
   });
 
-  it('resolves Crawler contact damage and Mimic reveal, chase, damage, and expiry authoritatively', () => {
+  it('resolves Crawler contact and gives a revealed Mimic a deterministic reaction window before chase', () => {
     const seed = 0x987654321n;
     const base = new AuthoritativeSimulation(seed, { floor: 2 });
     const start = base.floor.start;
@@ -396,14 +427,47 @@ describe('authoritative deterministic simulation', () => {
     const targetIndex = mimicWorld.floor.searchables.findIndex(item => item.isMimic);
     const target = mimicWorld.floor.searchables[targetIndex];
     const mx = (target.x * 32 + 16) * FIXED_SCALE, my = (target.y * 32 + 16) * FIXED_SCALE;
-    const mimic = new AuthoritativeSimulation(mimicSeed!, { floor: 0, x: mx, y: my, stalker: dormantStalker, crawlers: [], watchers: [], ambushers: [] });
-    mimic.step({ ...emptyInput, interact: true });
-    expect(mimic.state.mimics.find(value => value.searchableIndex === targetIndex)?.revealed).toBe(true);
-    expect(mimic.state.hp).toBe(85);
-    for (let i = 0; i < 91; i++) mimic.step(emptyInput);
-    expect(mimic.state.damageEventId).toBeGreaterThan(1);
-    for (let i = 0; i < 30; i++) mimic.step(emptyInput);
-    expect(mimic.state.mimics.find(value => value.searchableIndex === targetIndex)?.active).toBe(false);
+    const makeInitialState = (): Partial<AuthoritativeState> => ({
+      floor: 0, x: mx - 40 * FIXED_SCALE, y: my,
+      searched: mimicWorld.floor.searchables.map((_, index) => index !== targetIndex),
+      stalker: { ...dormantStalker, x: mx + 600 * FIXED_SCALE, y: my },
+      crawlers: [], watchers: [], ambushers: [],
+    });
+    const mimic = new AuthoritativeSimulation(mimicSeed!, makeInitialState());
+    const recorder = new InputRecorder();
+    const recordAndStep = (input: InputState) => {
+      recorder.recordTick(mimic.state.tick, input);
+      mimic.step(input);
+    };
+    recordAndStep({ ...emptyInput, interact: true });
+    let revealed = mimic.state.mimics.find(value => value.searchableIndex === targetIndex)!;
+    const revealPosition = [revealed.x, revealed.y];
+    expect(revealed.revealed).toBe(true);
+    expect(revealed.revealUntilTick).toBe(MIMIC_REVEAL_TICKS);
+    expect(revealed.chaseUntilTick).toBe(MIMIC_REVEAL_TICKS + MIMIC_CHASE_DURATION_TICKS);
+    expect(mimic.state.hp).toBe(100);
+    expect(mimic.state.damageEventId).toBe(0);
+
+    for (let i = 0; i < MIMIC_REVEAL_TICKS - 1; i++) recordAndStep(emptyInput);
+    revealed = mimic.state.mimics.find(value => value.searchableIndex === targetIndex)!;
+    expect(mimic.state.tick).toBe(MIMIC_REVEAL_TICKS);
+    expect([revealed.x, revealed.y]).toEqual(revealPosition);
+    expect(mimic.state.hp).toBe(100);
+    expect(mimic.state.damageEventId).toBe(0);
+
+    recordAndStep(emptyInput); // Tick 36: chase begins only after reveal duration.
+    revealed = mimic.state.mimics.find(value => value.searchableIndex === targetIndex)!;
+    expect([revealed.x, revealed.y]).not.toEqual(revealPosition);
+    expect(mimic.state.hp).toBe(100);
+    for (let i = 0; i < 20 && mimic.state.damageEventId === 0; i++) recordAndStep(emptyInput);
+    expect(mimic.state.hp).toBe(90);
+    expect(mimic.state.damageEventId).toBe(1);
+
+    recorder.setTerminalTick(mimic.state.tick);
+    const replay = new AuthoritativeSimulation(mimicSeed!, makeInitialState());
+    const replayer = InputReplayer.fromBinary(recorder.encodeBinary());
+    while (replay.state.tick < replayer.terminalTick) replay.step(replayer.getStateAtTick(replay.state.tick));
+    expect(replay.snapshot()).toEqual(mimic.snapshot());
   });
 
   it('isolates cosmetic RNG consumption from authoritative RNG streams and state', () => {
@@ -452,7 +516,7 @@ describe('authoritative deterministic simulation', () => {
   it('records and replays a complete Floor 4 to Outside run in the Phaser-free simulation', () => {
     // This fixture seed is selected against the complete Floor 4 -> Block 13
     // progression, whose shared Economy stream differs from direct floor-0 boot.
-    const runSeed = 0x13579bdf2468n;
+    const runSeed = 0x13579bdf2469n;
     const normalSimulation = new AuthoritativeSimulation(runSeed);
     expect(normalSimulation.state.hp).toBe(100);
     // Keep the long traversal alive long enough to exercise every floor's
@@ -614,20 +678,133 @@ describe('authoritative deterministic simulation', () => {
     const probe = new AuthoritativeSimulation(seed, { floor: 1 });
     const [exitX, exitY] = probe.floor.exit;
     const x = (exitX * 32 + 16) * FIXED_SCALE, y = (exitY * 32 + 16) * FIXED_SCALE;
-    const sim = new AuthoritativeSimulation(seed, {
+    const initialState: Partial<AuthoritativeState> = {
       floor: 1, x, y, tick: 500, floorsCompleted: 3, hasKey: true, curse: 90 * FIXED_SCALE,
+      battery: 0,
       searched: probe.floor.searchables.map(() => true),
       corruption: { lastTriggerTick: 500, effectId: 0, effectType: 0, intensityPermille: 0, durationTicks: 0 },
       stalker: { state: 'dormant', x: 0, y: 0, targetX: 0, targetY: 0, ticksRemaining: 100_000, chaseStartTick: 0, lastChaseEndTick: 0, visible: false, moveRemainder: 0 },
       crawlers: [], watchers: [], ambushers: [], mimics: [],
-    });
+    };
+    const sim = new AuthoritativeSimulation(seed, initialState);
     const { events, state } = sim.stepWithEvents({ ...emptyInput, interact: true });
     expect(events).toContainEqual({ type: 'floor_transition', fromFloor: 1, toFloor: 0, floorsCompleted: 4 });
     expect(state.floor).toBe(0);
     expect(state.status).toBe('playing');
-    expect(state.curse).toBe(99 * FIXED_SCALE);
+    expect(state.curse).toBe(85 * FIXED_SCALE);
+    expect(state.battery).toBe(20 * FIXED_SCALE);
     expect(sim.floor.width).toBeGreaterThan(0);
     expect(sim.floor.key.length).toBe(2);
     expect(sim.floor.exit.length).toBe(2);
+    sim.step({ ...emptyInput, flashlight: true });
+    expect(sim.state.flashlightOn).toBe(true);
+    expect(sim.state.status).toBe('playing');
+    for (let i = 0; i < 120; i++) sim.step(emptyInput);
+    const repeat = new AuthoritativeSimulation(seed, initialState);
+    repeat.step({ ...emptyInput, interact: true });
+    repeat.step({ ...emptyInput, flashlight: true });
+    for (let i = 0; i < 120; i++) repeat.step(emptyInput);
+    expect(repeat.snapshot()).toEqual(sim.snapshot());
+  });
+
+  it('uses 8 fixed battery subunits per lit simulation tick', () => {
+    const sim = new AuthoritativeSimulation(0x812n, { crawlers: [], watchers: [], ambushers: [], mimics: [] });
+    sim.step({ ...emptyInput, flashlight: true });
+    expect(sim.state.battery).toBe(100 * FIXED_SCALE - 8);
+  });
+
+  it('allows curse above 85 inside Block 13 and still loses at 100', () => {
+    const sim = new AuthoritativeSimulation(0x8513n, {
+      floor: 0, curse: 85 * FIXED_SCALE, crawlers: [], watchers: [], ambushers: [], mimics: [],
+      stalker: { state: 'dormant', x: 0, y: 0, targetX: 0, targetY: 0, ticksRemaining: 100_000, chaseStartTick: 0, lastChaseEndTick: 0, visible: false, moveRemainder: 0 },
+    });
+    const watcher = { id: 0, x: sim.state.x + 1, y: sim.state.y, active: true, illuminatedTicks: 0, decayRemainder: 0, curseRemainder: 0 };
+    const withWatcher = new AuthoritativeSimulation(0x8513n, {
+      floor: 0, x: sim.state.x, y: sim.state.y, facingX: 1, facingY: 0, curse: 85 * FIXED_SCALE,
+      crawlers: [], watchers: [watcher], ambushers: [], mimics: [],
+      stalker: { ...sim.state.stalker },
+    });
+    for (let i = 0; i < 60; i++) withWatcher.step(emptyInput);
+    expect(withWatcher.state.curse).toBeGreaterThan(85 * FIXED_SCALE);
+    expect(withWatcher.state.curse - 85 * FIXED_SCALE).toBe(383);
+
+    const terminal = new AuthoritativeSimulation(0x8514n, {
+      curse: 100 * FIXED_SCALE, crawlers: [], watchers: [], ambushers: [], mimics: [],
+    });
+    terminal.step(emptyInput);
+    expect(terminal.state.status).toBe('lost');
+  });
+
+  it('reduces the Watcher point-blank peak to approximately 1.5 curse points per second', () => {
+    const seed = 0x15c0n;
+    const probe = new AuthoritativeSimulation(seed, { floor: 0 });
+    const x = probe.state.x, y = probe.state.y;
+    const sim = new AuthoritativeSimulation(seed, {
+      floor: 0, x, y, facingX: 1, facingY: 0,
+      stalker: { ...probe.state.stalker, ticksRemaining: 100_000 },
+      crawlers: [], watchers: [{ id: 0, x: x + FIXED_SCALE, y, active: true, illuminatedTicks: 0, decayRemainder: 0, curseRemainder: 0 }],
+      ambushers: [], mimics: [],
+    });
+    for (let i = 0; i < 60; i++) sim.step(emptyInput);
+    expect(sim.state.curse).toBe(381); // 1.488 percentage points at 1px; peak is 1.5.
+  });
+
+  it('retains the existing Block 13 key-triggered Stalker chase and flashlight retreat', () => {
+    const seed = 0x13f1n;
+    const probe = new AuthoritativeSimulation(seed, { floor: 0 });
+    const [startTileX, startTileY] = probe.floor.start;
+    const x = (startTileX * 32 + 16) * FIXED_SCALE;
+    const y = (startTileY * 32 + 16) * FIXED_SCALE;
+    const sim = new AuthoritativeSimulation(seed, {
+      floor: 0, floorsCompleted: 4, hasKey: true, x, y,
+      stalker: {
+        state: 'investigating', x: x + 40 * FIXED_SCALE, y,
+        targetX: x, targetY: y, ticksRemaining: 120, chaseStartTick: 0,
+        lastChaseEndTick: -STALKER_RECOVERY_COOLDOWN_TICKS, visible: true, moveRemainder: 0,
+      },
+      crawlers: [], watchers: [], ambushers: [], mimics: [],
+    });
+    expect(sim.step(emptyInput).stalker.state).toBe('hunting');
+    expect(sim.step({ ...emptyInput, flashlight: true }).stalker.state).toBe('retreating');
+    expect(sim.state.status).toBe('playing');
+  });
+
+  it('gives the player a deterministic 15-second Stalker recovery window after flashlight deterrence', () => {
+    const seed = 0x900n;
+    const probe = new AuthoritativeSimulation(seed, { floor: 0 });
+    const x = probe.state.x, y = probe.state.y;
+    const makeInitialState = (): Partial<AuthoritativeState> => ({
+      floor: 0, x, y, flashlightOn: false,
+      stalker: {
+        state: 'hunting', x: x + 100 * FIXED_SCALE, y, targetX: x, targetY: y,
+        ticksRemaining: 0, chaseStartTick: 0, lastChaseEndTick: -STALKER_RECOVERY_COOLDOWN_TICKS,
+        visible: true, moveRemainder: 0,
+      },
+      crawlers: [], watchers: [], ambushers: [], mimics: [],
+    });
+    const live = new AuthoritativeSimulation(seed, makeInitialState());
+    const recorder = new InputRecorder();
+    const apply = (input: InputState) => {
+      recorder.recordTick(live.state.tick, input);
+      live.step(input);
+    };
+    apply({ ...emptyInput, flashlight: true });
+    expect(live.state.stalker.state).toBe('retreating');
+    expect(live.state.stalker.lastChaseEndTick).toBe(0);
+
+    for (let tick = 1; tick < STALKER_RECOVERY_COOLDOWN_TICKS; tick++) {
+      apply(emptyInput);
+      expect(['retreating', 'dormant']).toContain(live.state.stalker.state);
+    }
+    expect(live.state.tick).toBe(STALKER_RECOVERY_COOLDOWN_TICKS);
+    expect(live.state.stalker.state).toBe('dormant');
+    apply(emptyInput); // Cooldown ends exactly at tick 900; roaming may resume.
+    expect(live.state.stalker.state).toBe('roaming');
+
+    recorder.setTerminalTick(live.state.tick);
+    const replay = new AuthoritativeSimulation(seed, makeInitialState());
+    const replayer = InputReplayer.fromBinary(recorder.encodeBinary());
+    while (replay.state.tick < replayer.terminalTick) replay.step(replayer.getStateAtTick(replay.state.tick));
+    expect(replay.snapshot()).toEqual(live.snapshot());
   });
 });

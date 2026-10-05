@@ -10,6 +10,8 @@ export type Floor = {
   rooms: Room[];
   doors: [number, number][];
   searchables: Searchable[];
+  /** Block 13's deterministic central landmark; absent on ordinary floors. */
+  block13Hub?: [number, number];
 };
 
 export type Room = {
@@ -41,6 +43,22 @@ export interface FloorLootRng {
   next(): number;
   int(max: number): number;
 }
+
+/** Canonical ordinary loot probabilities in percentage points. These
+ * cumulative boundaries total exactly 100 and are intentionally explicit. */
+export const LOOT_PROBABILITIES = {
+  battery: 24,
+  health: 18,
+  collectible: 25,
+  clue: 8,
+  empty: 25,
+} as const;
+export const LOOT_THRESHOLDS = {
+  battery: LOOT_PROBABILITIES.battery,
+  health: LOOT_PROBABILITIES.battery + LOOT_PROBABILITIES.health,
+  collectible: LOOT_PROBABILITIES.battery + LOOT_PROBABILITIES.health + LOOT_PROBABILITIES.collectible,
+  clue: LOOT_PROBABILITIES.battery + LOOT_PROBABILITIES.health + LOOT_PROBABILITIES.collectible + LOOT_PROBABILITIES.clue,
+} as const;
 
 export function generateFloor(seed: number, floor: number, lootRng?: FloorLootRng): Floor {
   const rng = new SeededRng(seed ^ ((floor + 1) * 0x9e3779b9));
@@ -144,6 +162,13 @@ export function generateFloor(seed: number, floor: number, lootRng?: FloorLootRn
 
   const key = getCenterOfRoom(rooms[keyRoomIndex]);
 
+  // Block 13 keeps the seeded rooms and objectives, but joins them through a
+  // recognizable central chamber with deterministic branches. This changes
+  // only floor 0 and consumes no extra RNG.
+  const block13Hub = floor === 0
+    ? carveBlock13Hub(tiles, width, height, start, key, exit)
+    : undefined;
+
   // Ensure important positions are walkable
   for (const [x, y] of [start, key, exit]) {
     tiles[y][x] = true;
@@ -152,7 +177,37 @@ export function generateFloor(seed: number, floor: number, lootRng?: FloorLootRn
   // Generate searchable objects (more side rooms to explore)
   const searchables = generateSearchables(rooms, lootRng ?? rng, start, keyRoomIndex, floor);
 
-  return { width, height, tiles, start, key, exit, rooms, doors, searchables };
+  return { width, height, tiles, start, key, exit, rooms, doors, searchables, ...(block13Hub ? { block13Hub } : {}) };
+}
+
+/** Create a 9x7 central chamber and H-then-V, one-tile branches to landmarks. */
+function carveBlock13Hub(
+  tiles: boolean[][],
+  width: number,
+  height: number,
+  start: [number, number],
+  key: [number, number],
+  exit: [number, number],
+): [number, number] {
+  const hub: [number, number] = [Math.floor(width / 2), Math.floor(height / 2)];
+  const [cx, cy] = hub;
+  for (let y = cy - 3; y <= cy + 3; y++) {
+    for (let x = cx - 4; x <= cx + 4; x++) {
+      if (x > 0 && x < width - 1 && y > 0 && y < height - 1) tiles[y][x] = true;
+    }
+  }
+  for (const [targetX, targetY] of [start, key, exit]) {
+    let x = cx, y = cy;
+    while (x !== targetX) {
+      x += Math.sign(targetX - x);
+      tiles[y][x] = true;
+    }
+    while (y !== targetY) {
+      y += Math.sign(targetY - y);
+      tiles[y][x] = true;
+    }
+  }
+  return hub;
 }
 
 function generateSearchables(
@@ -187,12 +242,21 @@ function generateSearchables(
       const [x, y] = chooseUniqueSearchablePosition(room, rng, occupiedSearchableTiles);
       occupiedSearchableTiles.add(`${x},${y}`);
 
-      // Determine if this is a mimic
-      const isMimic = numMimics > 0 && rng.next() < 0.08; // 8% chance per container
+      // Consume a fixed six-draw loot budget for every container. Keeping all
+      // outcome-specific rolls unconditional means changing category
+      // thresholds cannot change later RNG positions or draw order.
+      const mimicRoll = rng.next();
+      const roll = rng.next();
+      const objectTypeRoll = rng.int(objectTypes.length);
+      const batteryAmountRoll = rng.int(12);
+      const healthAmountRoll = rng.int(16);
+      const collectRoll = rng.next();
+
+      // Determine if this is a mimic. The roll is consumed even when the
+      // floor has no remaining Mimic slots, preserving fixed cadence.
+      const isMimic = numMimics > 0 && mimicRoll < 0.08;
       if (isMimic) numMimics--;
 
-      // Generate result with rebalanced loot table
-      const roll = rng.next();
       let result: SearchResult;
       let objectType: SearchableType;
 
@@ -201,24 +265,16 @@ function generateSearchables(
         objectType = 'mimic';
         result = { type: 'mimic_reveal' };
       } else {
-        objectType = objectTypes[rng.int(objectTypes.length)];
+        objectType = objectTypes[objectTypeRoll];
 
-        // Rebalanced loot table:
-        // 20% battery
-        // 15% health (increased from 12%)
-        // 25% collectibles (15% eth, 7% btc, 3% hemi)
-        // 8% clue
-        // 32% nothing (reduced from 35%)
-
-        if (roll < 0.20) {
+        if (roll < LOOT_THRESHOLDS.battery / 100) {
           // Battery
-          result = { type: 'battery', amount: 8 + rng.int(12) }; // 8-19%
-        } else if (roll < 0.35) {
+          result = { type: 'battery', amount: 8 + batteryAmountRoll }; // 8-19%
+        } else if (roll < LOOT_THRESHOLDS.health / 100) {
           // Health
-          result = { type: 'health', amount: 10 + rng.int(16) }; // 10-25 HP
-        } else if (roll < 0.60) {
+          result = { type: 'health', amount: 10 + healthAmountRoll }; // 10-25 HP
+        } else if (roll < LOOT_THRESHOLDS.collectible / 100) {
           // Collectibles
-          const collectRoll = rng.next();
           if (collectRoll < 0.60) {
             result = { type: 'collectible', item: 'eth', score: 50 };
           } else if (collectRoll < 0.88) {
@@ -226,7 +282,7 @@ function generateSearchables(
           } else {
             result = { type: 'collectible', item: 'hemi', score: 250 };
           }
-        } else if (roll < 0.68) {
+        } else if (roll < LOOT_THRESHOLDS.clue / 100) {
           // Clue
           result = { type: 'clue', id: `clue_${floor}_${roomIndex}_${i}` };
         } else {

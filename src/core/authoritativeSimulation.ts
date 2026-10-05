@@ -10,6 +10,17 @@ export const PLAYER_SPEED_SUBPIXELS_PER_SECOND = 160 * FIXED_SCALE;
 export const INTERACTION_RANGE_SUBPIXELS = 48 * FIXED_SCALE;
 export const PLAYER_RADIUS_SUBPIXELS = 7 * FIXED_SCALE;
 export const PLAYER_COLLISION_HALF_EXTENT_SUBPIXELS = PLAYER_RADIUS_SUBPIXELS;
+export const STALKER_CONTACT_DAMAGE_HP = 30;
+export const STALKER_CONTACT_CURSE = 20 * FIXED_SCALE;
+export const FLOOR_TRANSITION_CURSE = 8 * FIXED_SCALE;
+export const BLOCK13_ENTRY_CURSE_CAP = 85 * FIXED_SCALE;
+export const AMBUSHER_WARNING_MIN_TICKS = 24;
+export const AMBUSHER_WARNING_MAX_TICKS = 36;
+export const WATCHER_PEAK_CURSE_SUBUNITS_PER_TICK = 384;
+export const FLASHLIGHT_DRAIN_SUBUNITS_PER_TICK = 8;
+export const STALKER_RECOVERY_COOLDOWN_TICKS = 900;
+export const MIMIC_REVEAL_TICKS = 36;
+export const MIMIC_CHASE_DURATION_TICKS = 120;
 
 export type SimulationEvent =
   | { type: 'loot_searched'; index: number; result: Floor['searchables'][number]['result'] }
@@ -66,7 +77,7 @@ export type StalkerSnapshot = {
 export type CrawlerSnapshot = { id: number; x: number; y: number; targetX: number; targetY: number; chasing: boolean; chaseStartTick: number; moveRemainder: number };
 export type WatcherSnapshot = { id: number; x: number; y: number; active: boolean; illuminatedTicks: number; decayRemainder: number; curseRemainder: number };
 export type AmbusherSnapshot = { id: number; x: number; y: number; state: 'hidden' | 'warning' | 'jumpscare' | 'inactive'; warningTicks: number; damageAtTick: number; damage: number; hasTriggered: boolean };
-export type MimicSnapshot = { searchableIndex: number; x: number; y: number; targetX: number; targetY: number; moveRemainder: number; revealed: boolean; chaseUntilTick: number; active: boolean };
+export type MimicSnapshot = { searchableIndex: number; x: number; y: number; targetX: number; targetY: number; moveRemainder: number; revealed: boolean; revealUntilTick: number; chaseUntilTick: number; active: boolean };
 export type CorruptionSnapshot = { lastTriggerTick: number; effectId: number; effectType: number; intensityPermille: number; durationTicks: number };
 export type BoxScareSnapshot = { lastTriggerTick: number; lastType: number; availableTypes: number[] };
 
@@ -84,6 +95,7 @@ const cloneState = (s: AuthoritativeState): AuthoritativeState => ({
 const cloneFloor = (floor: Floor): Floor => ({
   ...floor,
   tiles: floor.tiles.map(row => [...row]), start: [...floor.start], key: [...floor.key], exit: [...floor.exit],
+  ...(floor.block13Hub ? { block13Hub: [...floor.block13Hub] as [number, number] } : {}),
   rooms: floor.rooms.map(room => ({ ...room })), doors: floor.doors.map(door => [...door]),
   searchables: floor.searchables.map(item => ({ ...item, result: { ...item.result } })),
 });
@@ -140,7 +152,7 @@ export class AuthoritativeSimulation {
       facingX: 0, facingY: 1,
       stalker: { state: 'dormant', x: 0, y: 0, targetX: 0, targetY: 0, ticksRemaining: 0, chaseStartTick: 0, lastChaseEndTick: -600, visible: false, moveRemainder: 0 },
       crawlers: [], watchers: [], ambushers: [],
-      mimics: this.floorValue.searchables.flatMap((item, searchableIndex) => item.isMimic ? [{ searchableIndex, x: (item.x * 32 + 16) * FIXED_SCALE, y: (item.y * 32 + 16) * FIXED_SCALE, targetX: (item.x * 32 + 16) * FIXED_SCALE, targetY: (item.y * 32 + 16) * FIXED_SCALE, moveRemainder: 0, revealed: false, chaseUntilTick: 0, active: true }] : []),
+      mimics: this.floorValue.searchables.flatMap((item, searchableIndex) => item.isMimic ? [{ searchableIndex, x: (item.x * 32 + 16) * FIXED_SCALE, y: (item.y * 32 + 16) * FIXED_SCALE, targetX: (item.x * 32 + 16) * FIXED_SCALE, targetY: (item.y * 32 + 16) * FIXED_SCALE, moveRemainder: 0, revealed: false, revealUntilTick: 0, chaseUntilTick: 0, active: true }] : []),
       corruption: { lastTriggerTick: -1_000_000, effectId: 0, effectType: 0, intensityPermille: 0, durationTicks: 0 },
       boxScare: { lastTriggerTick: -1_000_000, lastType: -1, availableTypes: [] },
       scareEventId: 0, damageEventId: 0, lastDamage: 0,
@@ -265,9 +277,9 @@ export class AuthoritativeSimulation {
     // the authoritative drain below to reach the exact zero boundary.
     if (input.flashlight && s.battery > 0) s.flashlightOn = !s.flashlightOn;
     if (s.flashlightOn && s.battery > 0) {
-      // Drain 9/256 percent per tick (0.03515625%), rounded down to the
+      // Drain 8/256 percent per tick (0.03125%), rounded down to the
       // integer subpercent scale; exact integer arithmetic avoids float drift.
-      s.battery = Math.max(0, s.battery - 9);
+      s.battery = Math.max(0, s.battery - FLASHLIGHT_DRAIN_SUBUNITS_PER_TICK);
     }
     if (s.battery === 0) s.flashlightOn = false;
     this.updateStalker(tick);
@@ -367,7 +379,7 @@ export class AuthoritativeSimulation {
     const e = this.stateValue.stalker, s = this.stateValue;
     const spec = STALKER_SPECS[s.floor as keyof typeof STALKER_SPECS] ?? STALKER_SPECS[4];
     const dx = e.x - s.x, dy = e.y - s.y, d2 = square(dx) + square(dy);
-    const cooldown = tick - e.lastChaseEndTick < 600;
+    const cooldown = tick - e.lastChaseEndTick < STALKER_RECOVERY_COOLDOWN_TICKS;
     const distance = integerSqrt(d2);
     switch (e.state) {
       case 'dormant':
@@ -393,7 +405,7 @@ export class AuthoritativeSimulation {
         e.targetX = s.x; e.targetY = s.y;
         this.moveActor(e, spec.hunt);
         if (d2 < square(30 * FIXED_SCALE)) {
-          if (this.applyDamage(35, tick, 30 * FIXED_SCALE)) this.stateValue.scareLockoutUntilTick = Math.max(s.scareLockoutUntilTick, tick + 120);
+          if (this.applyDamage(STALKER_CONTACT_DAMAGE_HP, tick, STALKER_CONTACT_CURSE)) this.stateValue.scareLockoutUntilTick = Math.max(s.scareLockoutUntilTick, tick + 120);
           this.beginStalkerRetreat(tick);
         } else if (s.flashlightOn || tick - e.chaseStartTick > 900) this.beginStalkerRetreat(tick);
         break;
@@ -464,9 +476,9 @@ export class AuthoritativeSimulation {
       const range = 150 * FIXED_SCALE;
       if (facing && d2 < square(range)) {
         const dist = integerSqrt(d2);
-        // 2 curse/sec at point blank, linearly falling to zero at 150px.
+        // 1.5 curse/sec at point blank, linearly falling to zero at 150px.
         const denominator = range * SIMULATION_HZ;
-        e.curseRemainder += 512 * (range - dist);
+        e.curseRemainder += WATCHER_PEAK_CURSE_SUBUNITS_PER_TICK * (range - dist);
         const gain = Math.floor(e.curseRemainder / denominator);
         if (gain) { s.curse = Math.min(100 * FIXED_SCALE, s.curse + gain); e.curseRemainder %= denominator; }
       }
@@ -478,7 +490,7 @@ export class AuthoritativeSimulation {
     const s = this.stateValue;
     for (const e of s.ambushers) {
       if (e.state === 'hidden' && square(e.x - s.x) + square(e.y - s.y) < square(120 * FIXED_SCALE)) {
-        e.state = 'warning'; e.warningTicks = 9 + this.ambusherRng.nextRange(0, 15);
+        e.state = 'warning'; e.warningTicks = this.ambusherRng.nextRange(AMBUSHER_WARNING_MIN_TICKS, AMBUSHER_WARNING_MAX_TICKS);
       } else if (e.state === 'warning') {
         e.warningTicks--;
         if (e.warningTicks <= 0) {
@@ -496,6 +508,7 @@ export class AuthoritativeSimulation {
     for (const e of s.mimics) {
       if (!e.active || !e.revealed) continue;
       if (tick >= e.chaseUntilTick) { e.active = false; continue; }
+      if (tick < e.revealUntilTick) continue;
       e.targetX = s.x; e.targetY = s.y;
       const d2 = square(e.x - s.x) + square(e.y - s.y);
       this.moveActor(e, 180);
@@ -612,15 +625,17 @@ export class AuthoritativeSimulation {
       }
       for (const ambusher of s.ambushers) {
         if (ambusher.state === 'hidden' && square(ambusher.x - (item.x * 32 + 16) * FIXED_SCALE) + square(ambusher.y - (item.y * 32 + 16) * FIXED_SCALE) < square(150 * FIXED_SCALE)) {
-          ambusher.state = 'warning'; ambusher.warningTicks = 9 + this.ambusherRng.nextRange(0, 15);
+          ambusher.state = 'warning'; ambusher.warningTicks = this.ambusherRng.nextRange(AMBUSHER_WARNING_MIN_TICKS, AMBUSHER_WARNING_MAX_TICKS);
         }
       }
       const mimic = s.mimics.find(m => m.searchableIndex === i);
       if (mimic?.active) {
-        mimic.revealed = true; mimic.chaseUntilTick = s.tick + 120; s.scareEventId++;
+        mimic.revealed = true;
+        mimic.revealUntilTick = s.tick + MIMIC_REVEAL_TICKS;
+        mimic.chaseUntilTick = mimic.revealUntilTick + MIMIC_CHASE_DURATION_TICKS;
+        s.scareEventId++;
         this.tickEvents.push({ type: 'mimic_revealed', index: i });
         mimic.targetX = s.x; mimic.targetY = s.y;
-        this.applyDamage(15, s.tick);
       }
       switch (item.result.type) {
         case 'battery': s.battery = Math.min(100 * FIXED_SCALE, s.battery + item.result.amount * FIXED_SCALE); break;
@@ -635,9 +650,9 @@ export class AuthoritativeSimulation {
       s.score += 100 * Math.max(0, s.floor);
       // The transition's danger bonus must not make arrival in Block 13
       // terminal. Curse can still reach its normal loss threshold during play.
-      const curseWithBonus = s.curse + 10 * FIXED_SCALE;
+      const curseWithBonus = s.curse + FLOOR_TRANSITION_CURSE;
       s.curse = isBlock13Arrival(s.floor)
-        ? Math.max(s.curse, Math.min(99 * FIXED_SCALE, curseWithBonus))
+        ? Math.min(BLOCK13_ENTRY_CURSE_CAP, curseWithBonus)
         : curseWithBonus;
       s.battery = Math.min(100 * FIXED_SCALE, s.battery + 20 * FIXED_SCALE);
       s.floor = nextProgressionFloor(s.floor);
@@ -649,7 +664,7 @@ export class AuthoritativeSimulation {
       s.y = (this.floorValue.start[1] * 32 + 16) * FIXED_SCALE;
       s.hasKey = false;
       s.searched = this.floorValue.searchables.map(() => false);
-      s.mimics = this.floorValue.searchables.flatMap((item, searchableIndex) => item.isMimic ? [{ searchableIndex, x: (item.x * 32 + 16) * FIXED_SCALE, y: (item.y * 32 + 16) * FIXED_SCALE, targetX: (item.x * 32 + 16) * FIXED_SCALE, targetY: (item.y * 32 + 16) * FIXED_SCALE, moveRemainder: 0, revealed: false, chaseUntilTick: 0, active: true }] : []);
+      s.mimics = this.floorValue.searchables.flatMap((item, searchableIndex) => item.isMimic ? [{ searchableIndex, x: (item.x * 32 + 16) * FIXED_SCALE, y: (item.y * 32 + 16) * FIXED_SCALE, targetX: (item.x * 32 + 16) * FIXED_SCALE, targetY: (item.y * 32 + 16) * FIXED_SCALE, moveRemainder: 0, revealed: false, revealUntilTick: 0, chaseUntilTick: 0, active: true }] : []);
       this.stateValue.corruption.lastTriggerTick = -1_000_000;
       this.resetBoxScares();
       s.playerMoveRemainderX = 0; s.playerMoveRemainderY = 0;

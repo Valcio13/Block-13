@@ -40,7 +40,7 @@ World generation, economy, events, and gameplay subsystems use separated determi
 
 ## Web3 status
 
-- **TX1 — Run Manifest:** Implemented for starting a Hemi Testnet run. The manifest binds player/run identity, game version `0.2.0`, rules identifier `classic-static-walls`, and selected multi-chain entropy sources. Seed derivation uses domain-separated Keccak-256 digests for WORLD, ECONOMY, and EVENT streams. Only the field values changed for this gameplay rules update; the frozen manifest structure and encoding did not change.
+- **TX1 — Run Manifest:** Implemented for starting a Hemi Testnet run. New manifests bind player/run identity, game version `0.4.0`, rules identifier `classic-static-walls-balance-v1-stalker-mimic-v1`, and selected multi-chain entropy sources. Seed derivation uses domain-separated Keccak-256 digests for WORLD, ECONOMY, and EVENT streams. The frozen manifest structure and encoding did not change.
 - **Gameplay and replay:** Implemented locally in the game and covered by deterministic tests. InputLogV2 and FinalStateV1 are committed by TX2.
 - **TX2 — completion/result commitment:** The contract accepts canonical score, outcome, terminal tick, InputLogV2 hash, and FinalStateV1 hash after an explicit player action. This commitment is deterministic and auditable, but does not independently prove honest execution.
 - **Independent verifier/backend/signing:** Not implemented and not part of the current contest flow.

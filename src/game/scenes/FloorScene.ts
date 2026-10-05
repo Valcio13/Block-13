@@ -14,7 +14,7 @@ import { getAuthoredClueForSearchId } from '../../core/clues';
 import { formatFixedPointPercent, formatWholePercent } from '../../core/uiFormatting';
 import { corruptionVisualStrength, floorVisualProfile, flashlightVisualFactor, tileDressingAt } from '../../core/visualAtmosphere';
 import { isBlock13Floor, progressionName, START_FLOOR } from '../../core/progression';
-import { enemyPresentationExposure } from '../presentationVisibility';
+import { enemyPresentationExposure, hasPresentationLineOfSight } from '../presentationVisibility';
 
 interface FloorSceneData {
   runState: RunState;
@@ -39,7 +39,9 @@ export class FloorScene extends Phaser.Scene {
   private flashlightKey!: Phaser.Input.Keyboard.Key;
   private interactKey!: Phaser.Input.Keyboard.Key;
   private keySprite!: Phaser.GameObjects.Sprite;
+  private keyLabel!: Phaser.GameObjects.Text;
   private stairsSprite!: Phaser.GameObjects.Sprite;
+  private stairsLabel!: Phaser.GameObjects.Text;
   private keyHalo!: Phaser.GameObjects.Arc;
   private stairsHalo!: Phaser.GameObjects.Arc;
   private searchableSprites: SearchableSprite[] = [];
@@ -77,6 +79,7 @@ export class FloorScene extends Phaser.Scene {
   private isPaused = false; // Track pause state
   private pauseKey!: Phaser.Input.Keyboard.Key;
   private isTransitioning = false; // Track floor transitions
+  private block13ObjectiveStatus = '';
   private storyPopupOpen = false; // Track if story popup is displayed
   private closeStoryPopup?: () => void;
   private storyCloseKey?: Phaser.Input.Keyboard.Key;
@@ -97,12 +100,15 @@ export class FloorScene extends Phaser.Scene {
     this.flashlightOn = false;
     this.searchableSprites = [];
     this.isTransitioning = false;
+    this.block13ObjectiveStatus = '';
     this.storyPopupOpen = false;
     this.closeStoryPopup = undefined;
     this.storyCloseKey = undefined;
     // Phaser restarts this Scene instance. Clear every presentation reference
     // here so create() cannot accidentally touch a destroyed floor's objects.
     this.statusText = undefined as unknown as Phaser.GameObjects.Text;
+    this.keyLabel = undefined as unknown as Phaser.GameObjects.Text;
+    this.stairsLabel = undefined as unknown as Phaser.GameObjects.Text;
     this.dangerIndicator = undefined;
     this.healthBarBg = undefined as unknown as Phaser.GameObjects.Rectangle;
     this.healthBarFill = undefined as unknown as Phaser.GameObjects.Graphics;
@@ -163,6 +169,7 @@ export class FloorScene extends Phaser.Scene {
 
     // Create player at start position
     this.player = this.createPlayer(start[0], start[1]);
+    this.updateObjectiveVisibility(this.authoritativeSimulation.state);
 
     // Create stalker
     this.createStalker(worldWidth, worldHeight);
@@ -175,10 +182,6 @@ export class FloorScene extends Phaser.Scene {
     for (const key of floorAmbienceKeys(this.authoritativeSimulation.state.floor)) {
       this.audioDirector.play(key, 'ambience', { loop: true, volume: 0.32 });
     }
-    if (isBlock13Floor(this.authoritativeSimulation.state.floor)) {
-      this.audioDirector.playWithCooldown('sfx_block13_reveal', 'sfx', 5000, { volume: 0.8 });
-    }
-
     // Legacy managers are not constructed: AuthoritativeSimulation owns all AI,
     // random decisions, movement, damage, searches, and progression.
     this.createSecondaryEnemySprites();
@@ -420,7 +423,9 @@ export class FloorScene extends Phaser.Scene {
   private presentSimulationEvents(events: ReturnType<AuthoritativeSimulation['stepWithEvents']>['events']) {
     for (const audioCue of audioCuesForEvents(events)) this.playAudioCue(audioCue);
     for (const event of events) {
-      if (event.type === 'key_collected') this.showTemporaryMessage('KEY FOUND', '#ffd700');
+      if (event.type === 'key_collected') {
+        this.showTemporaryMessage(isBlock13Floor(this.authoritativeSimulation.state.floor) ? 'EXIT OPEN — GET OUT' : 'KEY FOUND', '#ffd700');
+      }
       else if (event.type === 'damage') this.showTemporaryMessage(`HURT -${event.amount} HP`, '#ff6666');
       else if (event.type === 'loot_searched') {
         const result = event.result;
@@ -461,10 +466,16 @@ export class FloorScene extends Phaser.Scene {
 
   /** Presentation adapter: every moving enemy/object comes from an immutable sim snapshot. */
   private renderAuthoritativeState(previous: AuthoritativeState, state: AuthoritativeState, events: ReturnType<AuthoritativeSimulation['stepWithEvents']>['events']) {
+    this.block13ObjectiveStatus = isBlock13Floor(state.floor)
+      ? state.hasKey
+        ? state.stalker.state === 'hunting' ? 'GET OUT NOW' : 'OBJECTIVE: GET OUT'
+        : 'OBJECTIVE: FIND THE KEY'
+      : '';
     if (state.facingX !== 0 || state.facingY !== 0) this.playerFacingAngle = Math.atan2(state.facingY, state.facingX);
     this.hasKey = state.hasKey;
     this.stairsUnlocked = state.hasKey;
-    this.keySprite.setVisible(!state.hasKey);
+    const block13 = isBlock13Floor(state.floor);
+    this.updateObjectiveVisibility(state);
     this.stairsSprite.setTexture(state.hasKey ? 'stairs_unlocked' : 'stairs_locked');
     this.searchableSprites.forEach((entry, index) => {
       entry.searched = state.searched[index] ?? true;
@@ -492,7 +503,8 @@ export class FloorScene extends Phaser.Scene {
     const stalkerExposure = enemyPresentationExposure(this.floorData, state, stalker.x, stalker.y);
     this.stalkerSprite?.setAlpha(stalker.visible ? stalkerExposure * (stalker.state === 'hunting' ? 0.98 : 0.76) : 0);
     this.stalkerSprite?.setTint(stalker.state === 'hunting' && stalkerExposure >= 0.7 ? 0xffb7b0 : stalkerExposure >= 0.7 ? 0xe0d1d8 : 0xffffff);
-    this.stalkerSprite?.setScale(stalker.visible && stalker.state === 'hunting' ? 1.14 : 1);
+    const finalChase = isBlock13Floor(state.floor) && state.hasKey && stalker.state === 'hunting';
+    this.stalkerSprite?.setScale(stalker.visible && stalker.state === 'hunting' ? (finalChase ? 1.3 : 1.14) : 1);
     state.crawlers.forEach((enemy, index) => {
       const sprite = this.crawlerSprites[index];
       const exposure = enemyPresentationExposure(this.floorData, state, enemy.x, enemy.y);
@@ -531,6 +543,7 @@ export class FloorScene extends Phaser.Scene {
       this.flashDamageVignette();
     }
     if (state.scareEventId !== previous.scareEventId) this.cameras.main.shake(220, 0.006);
+    if (finalChase && previous.stalker.state !== 'hunting') this.cameras.main.shake(260, 0.0045);
     if (state.corruption.effectId !== previous.corruption.effectId) {
       const names: CorruptionEffect['type'][] = ['horizontal_shift', 'scanline', 'chromatic', 'hud_flicker', 'static_noise', 'camera_shake', 'visual_glitch'];
       this.executeCorruptionEffect({
@@ -553,17 +566,35 @@ export class FloorScene extends Phaser.Scene {
       else {
         const [ex, ey] = this.floorData.exit;
         const dx = px - (ex * 32 + 16) * FIXED_SCALE, dy = py - (ey * 32 + 16) * FIXED_SCALE;
-        if (dx * dx + dy * dy <= range2) prompt = state.hasKey ? '[E] DESCEND STAIRS' : '[E] STAIRS (LOCKED)';
+        if (dx * dx + dy * dy <= range2) {
+          prompt = isBlock13Floor(state.floor)
+            ? state.hasKey ? '[E] ESCAPE OUTSIDE' : '[E] EXIT (LOCKED)'
+            : state.hasKey ? '[E] DESCEND STAIRS' : '[E] STAIRS (LOCKED)';
+        }
       }
     }
     this.interactPrompt.setText(prompt);
     this.interactPrompt.setVisible(prompt.length > 0);
   }
 
+  private updateObjectiveVisibility(state: AuthoritativeState) {
+    const block13 = isBlock13Floor(state.floor);
+    const playerX = state.x / FIXED_SCALE, playerY = state.y / FIXED_SCALE;
+    const keyX = this.floorData.key[0] * 32 + 16, keyY = this.floorData.key[1] * 32 + 16;
+    const exitX = this.floorData.exit[0] * 32 + 16, exitY = this.floorData.exit[1] * 32 + 16;
+    const keyInSight = !block13 || hasPresentationLineOfSight(this.floorData, playerX, playerY, keyX, keyY);
+    const exitInSight = !block13 || hasPresentationLineOfSight(this.floorData, playerX, playerY, exitX, exitY);
+    this.keySprite.setVisible(!state.hasKey && keyInSight);
+    this.keyLabel.setVisible(!state.hasKey && keyInSight);
+    this.stairsSprite.setVisible(exitInSight);
+    this.stairsLabel.setVisible(exitInSight);
+  }
+
   private updateInteractionFeedback(state: AuthoritativeState) {
     const px = state.x / FIXED_SCALE;
     const py = state.y / FIXED_SCALE;
-    const tickPulse = 0.78 + (Math.sin(state.tick * 0.09) + 1) * 0.11;
+    const block13 = isBlock13Floor(state.floor);
+    const tickPulse = 0.78 + (Math.sin(state.tick * (block13 ? 0.065 : 0.09)) + 1) * (block13 ? 0.14 : 0.11);
     const updateHalo = (halo: Phaser.GameObjects.Arc, x: number, y: number, eligible: boolean) => {
       const dx = px - x, dy = py - y;
       const nearby = dx * dx + dy * dy <= 104 * 104;
@@ -578,6 +609,10 @@ export class FloorScene extends Phaser.Scene {
     const exitX = this.floorData.exit[0] * this.tileSize + this.tileSize / 2;
     const exitY = this.floorData.exit[1] * this.tileSize + this.tileSize / 2;
     updateHalo(this.stairsHalo, exitX, exitY, true);
+    if (block13) {
+      this.stairsHalo.setFillStyle(state.hasKey ? 0xc07883 : 0x8c6e81, state.hasKey ? 0.1 : 0.035);
+      this.stairsHalo.setStrokeStyle(state.hasKey ? 2 : 1, state.hasKey ? 0xf0a0a9 : 0x9b8298, state.hasKey ? 0.72 : 0.36);
+    }
     this.searchableSprites.forEach((entry, index) => {
       const x = entry.data.x * this.tileSize + this.tileSize / 2;
       const y = entry.data.y * this.tileSize + this.tileSize / 2;
@@ -930,6 +965,7 @@ export class FloorScene extends Phaser.Scene {
 
     const lines = [
       floorDisplay,
+      ...(this.block13ObjectiveStatus ? [this.block13ObjectiveStatus] : []),
       `HP: ${Math.floor(this.runState.hp)}/100`,
       `CURSE: ${formatWholePercent(this.runState.curse)}%`,
       `BATTERY: ${formatWholePercent(this.runState.battery)}%`,
@@ -1059,6 +1095,31 @@ export class FloorScene extends Phaser.Scene {
         }
       }
     }
+    if (floor === 0 && this.floorData.block13Hub) this.drawBlock13Landmarks(graphics, this.floorData.block13Hub);
+  }
+
+  /** Static floor markings establish a hub/branch/escape shape without map UI. */
+  private drawBlock13Landmarks(graphics: Phaser.GameObjects.Graphics, hub: [number, number]) {
+    const centerX = hub[0] * this.tileSize + this.tileSize / 2;
+    const centerY = hub[1] * this.tileSize + this.tileSize / 2;
+    const accent = floorVisualProfile(0).accent;
+    graphics.lineStyle(2, accent, 0.16);
+    graphics.strokeCircle(centerX, centerY, 48);
+    graphics.lineStyle(1, accent, 0.24);
+    graphics.strokeCircle(centerX, centerY, 74);
+    graphics.lineStyle(2, accent, 0.12);
+    graphics.lineBetween(centerX - 112, centerY, centerX - 86, centerY);
+    graphics.lineBetween(centerX + 86, centerY, centerX + 112, centerY);
+    graphics.lineBetween(centerX, centerY - 96, centerX, centerY - 72);
+    graphics.lineBetween(centerX, centerY + 72, centerX, centerY + 96);
+
+    const entryX = this.floorData.start[0] * this.tileSize + this.tileSize / 2;
+    const entryY = this.floorData.start[1] * this.tileSize + this.tileSize / 2;
+    graphics.lineStyle(2, 0xb28aa8, 0.22);
+    graphics.lineBetween(entryX - 18, entryY - 16, entryX - 18, entryY + 16);
+    graphics.lineBetween(entryX + 18, entryY - 16, entryX + 18, entryY + 16);
+    graphics.lineBetween(entryX - 18, entryY - 16, entryX + 18, entryY - 16);
+
   }
 
   private setupAtmosphereOverlays() {
@@ -1090,17 +1151,27 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private updateCorruptionAtmosphere(state: AuthoritativeState) {
-    const strength = corruptionVisualStrength(state.floor, state.corruption.intensityPermille);
+    const block13Pressure = isBlock13Floor(state.floor)
+      ? (state.hasKey ? 0.035 : 0) + (state.stalker.state === 'hunting' ? 0.055 : 0)
+      : 0;
+    const pulse = isBlock13Floor(state.floor) && state.hasKey ? (Math.sin(state.tick * 0.045) + 1) * 0.012 : 0;
+    const strength = Math.min(0.3, corruptionVisualStrength(state.floor, state.corruption.intensityPermille) + block13Pressure + pulse);
     if (!this.corruptionVignette) return;
     const profile = floorVisualProfile(state.floor);
     this.drawEdgeVignette(this.corruptionVignette, profile.corruption, Math.min(0.62, strength * 1.8));
   }
 
   private playBlock13Arrival() {
-    const veil = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x140b19, 0.76)
+    const veil = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x140b19, 0.64)
       .setScrollFactor(0).setDepth(92);
     this.cameras.main.ignore(veil);
-    this.tweens.add({ targets: veil, alpha: 0, duration: 1250, ease: 'Sine.easeInOut', onComplete: () => veil.destroy() });
+    const reveal = this.add.text(this.scale.width / 2, this.scale.height / 2, 'BLOCK 13\nFIND THE KEY', {
+      fontFamily: 'monospace', fontSize: '23px', color: '#e5c7d2', align: 'center',
+      backgroundColor: '#100d18', padding: { x: 14, y: 10 },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(93).setAlpha(0);
+    this.cameras.main.ignore(reveal);
+    this.tweens.add({ targets: reveal, alpha: 1, duration: 160, yoyo: true, hold: 720, onComplete: () => reveal.destroy() });
+    this.tweens.add({ targets: veil, alpha: 0, duration: 520, ease: 'Sine.easeInOut', onComplete: () => veil.destroy() });
   }
 
   private playEscapeRelease() {
@@ -1156,7 +1227,7 @@ export class FloorScene extends Phaser.Scene {
     });
 
     // Add label
-    this.add.text(posX, posY - 30, 'KEY', {
+    this.keyLabel = this.add.text(posX, posY - 30, 'KEY', {
       fontFamily: 'monospace',
       fontSize: '10px',
       color: '#ffd700',
@@ -1213,10 +1284,11 @@ export class FloorScene extends Phaser.Scene {
     this.stairsHalo = this.createInteractableHalo(posX, posY, 0x8faeae, 28);
 
     // Add label
-    this.add.text(posX, posY - 30, 'STAIRS', {
+    const block13Exit = isBlock13Floor(this.authoritativeSimulation.state.floor);
+    this.stairsLabel = this.add.text(posX, posY - 30, block13Exit ? 'EXIT' : 'STAIRS', {
       fontFamily: 'monospace',
       fontSize: '10px',
-      color: '#ff4444',
+      color: block13Exit ? '#c07883' : '#ff4444',
       backgroundColor: '#000000',
       padding: { x: 4, y: 2 },
     }).setOrigin(0.5).setDepth(5).setName('stairsLabel');
@@ -1369,13 +1441,13 @@ export class FloorScene extends Phaser.Scene {
     ).setScrollFactor(0).setDepth(298);
 
     // Title with text shadow
-    const titleShadow = this.add.text(width / 2 + 2, height / 2 - 140 + 2, 'ESCAPE COMPLETE!', {
+    const titleShadow = this.add.text(width / 2 + 2, height / 2 - 140 + 2, 'OUTSIDE — YOU MADE IT', {
       fontFamily: 'monospace',
       fontSize: '32px',
       color: '#000000',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(298);
 
-    const title = this.add.text(width / 2, height / 2 - 140, 'ESCAPE COMPLETE!', {
+    const title = this.add.text(width / 2, height / 2 - 140, 'OUTSIDE — YOU MADE IT', {
       fontFamily: 'monospace',
       fontSize: '32px',
       color: '#70d4c6',

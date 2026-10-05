@@ -43,7 +43,7 @@ describe('Run State Management', () => {
     expect(run.floor).toBe(3);
     expect(run.floorsCompleted).toBe(1);
     expect(run.score).toBe(400); // 100 * 4
-    expect(run.curse).toBe(10);
+    expect(run.curse).toBe(8);
     expect(run.status).toBe('playing');
     
     // Floor 3 -> 2
@@ -51,7 +51,7 @@ describe('Run State Management', () => {
     expect(run.floor).toBe(2);
     expect(run.floorsCompleted).toBe(2);
     expect(run.score).toBe(700); // 400 + (100 * 3)
-    expect(run.curse).toBe(20);
+    expect(run.curse).toBe(16);
     expect(run.status).toBe('playing');
     
     // Floor 2 -> 1
@@ -59,7 +59,7 @@ describe('Run State Management', () => {
     expect(run.floor).toBe(1);
     expect(run.floorsCompleted).toBe(3);
     expect(run.score).toBe(900); // 700 + (100 * 2)
-    expect(run.curse).toBe(30);
+    expect(run.curse).toBe(24);
     expect(run.status).toBe('playing');
     
     // Floor 1 -> Block 13 (floor 0)
@@ -75,19 +75,26 @@ describe('Run State Management', () => {
     expect(run.status).toBe('won');
   });
 
-  it('increases danger (curse) with each floor', () => {
+  it('adds 8 curse per transition while normal progression can reach the terminal threshold', () => {
     let run = createRun();
     
     expect(run.curse).toBe(0);
     
     run = completeFloor(run);
-    expect(run.curse).toBe(10);
+    expect(run.curse).toBe(8);
     
     run = completeFloor(run);
-    expect(run.curse).toBe(20);
+    expect(run.curse).toBe(16);
     
     run = completeFloor(run);
-    expect(run.curse).toBe(30);
+    expect(run.curse).toBe(24);
+
+    run.curse = 92;
+    run = completeFloor(run);
+    expect(run.curse).toBe(85); // The Floor 1 -> Block 13 arrival cap only.
+    run.curse = 99;
+    run = completeFloor(run);
+    expect(run.curse).toBe(107); // Block 13 exit is not subject to the entry cap.
   });
 
   it('awards more points for higher floors', () => {
