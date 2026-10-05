@@ -182,6 +182,58 @@ describe('authoritative deterministic simulation', () => {
     expect(floorSeedFromCanonicalSeed(0x0102030405060708n)).toBe(0x05060708);
   });
 
+  it('turns the flashlight off at exact battery zero and replays zero-toggle and recharge behavior', () => {
+    let seed = 1n;
+    let probe = new AuthoritativeSimulation(seed);
+    let batteryIndex = probe.floor.searchables.findIndex(item => item.result.type === 'battery');
+    while (batteryIndex < 0 && seed < 64n) {
+      seed++;
+      probe = new AuthoritativeSimulation(seed);
+      batteryIndex = probe.floor.searchables.findIndex(item => item.result.type === 'battery');
+    }
+    expect(batteryIndex).toBeGreaterThanOrEqual(0);
+    expect(new AuthoritativeSimulation(seed, { battery: 0, flashlightOn: true }).state.flashlightOn).toBe(false);
+    const batteryItem = probe.floor.searchables[batteryIndex];
+    const makeInitialState = () => ({
+      x: (batteryItem.x * 32 + 16) * FIXED_SCALE,
+      y: (batteryItem.y * 32 + 16) * FIXED_SCALE,
+      battery: 9,
+      flashlightOn: true,
+      hasKey: true,
+      searched: probe.floor.searchables.map((_, index) => index !== batteryIndex),
+      stalker: { state: 'dormant' as const, x: 0, y: 0, targetX: 0, targetY: 0, ticksRemaining: 100_000, chaseStartTick: 0, lastChaseEndTick: 0, visible: false, moveRemainder: 0 },
+      crawlers: [], watchers: [], ambushers: [], mimics: [],
+      corruption: { lastTriggerTick: 0, effectId: 0, effectType: 0, intensityPermille: 0, durationTicks: 0 },
+    });
+    const live = new AuthoritativeSimulation(seed, makeInitialState());
+    const recorder = new InputRecorder();
+    const inputs: InputState[] = [
+      emptyInput, // 9 subpercent drain reaches exactly zero.
+      { ...emptyInput, flashlight: true }, // Zero battery cannot toggle it on.
+      { ...emptyInput, interact: true }, // Restore charge from the searchable battery.
+      { ...emptyInput, flashlight: true }, // It works again after recharge.
+    ];
+    inputs.forEach((input, tick) => {
+      recorder.recordTick(tick, input);
+      live.step(input);
+      if (tick === 0) {
+        expect(live.state.battery).toBe(0);
+        expect(live.state.flashlightOn).toBe(false);
+      } else if (tick === 1) {
+        expect(live.state.flashlightOn).toBe(false);
+      } else if (tick === 2) {
+        expect(live.state.battery).toBeGreaterThan(0);
+        expect(live.state.flashlightOn).toBe(false);
+      } else {
+        expect(live.state.flashlightOn).toBe(true);
+      }
+    });
+    const replay = new AuthoritativeSimulation(seed, makeInitialState());
+    const source = InputReplayer.fromBinary(recorder.encodeBinary());
+    while (replay.state.tick < source.terminalTick) replay.step(source.getStateAtTick(replay.state.tick));
+    expect(replay.snapshot()).toEqual(live.snapshot());
+  });
+
   it('uses integer subpixels and changes authoritative position for relevant movement', () => {
     const idle = new AuthoritativeSimulation(123n);
     const moving = new AuthoritativeSimulation(123n);
@@ -229,6 +281,9 @@ describe('authoritative deterministic simulation', () => {
       battery: 55 * FIXED_SCALE + 77,
       curse: 12 * FIXED_SCALE + 77,
       score: 432, floorsCompleted: 4 - floor, hasKey: true,
+      // Isolate the transition assertion from nearby searchables: this case
+      // is about stairs progression, not interaction-priority competition.
+      searched: probe.floor.searchables.map(() => true),
       stalker: { state: 'dormant', x, y, targetX: x, targetY: y, ticksRemaining: 100_000, chaseStartTick: 0, lastChaseEndTick: 0, visible: false, moveRemainder: 0 },
       crawlers: [], watchers: [], ambushers: [], mimics: [],
     });
@@ -395,10 +450,9 @@ describe('authoritative deterministic simulation', () => {
   });
 
   it('records and replays a complete Floor 4 to Outside run in the Phaser-free simulation', () => {
-    const seed = Array.from({ length: 128 }, (_, offset) => 0x13579bdf2468n + BigInt(offset))
-      .find(candidate => new AuthoritativeSimulation(candidate, { floor: 0 }).floor.searchables.some(item => item.isMimic));
-    expect(seed).toBeDefined();
-    const runSeed = seed!;
+    // This fixture seed is selected against the complete Floor 4 -> Block 13
+    // progression, whose shared Economy stream differs from direct floor-0 boot.
+    const runSeed = 0x13579bdf2468n;
     const normalSimulation = new AuthoritativeSimulation(runSeed);
     expect(normalSimulation.state.hp).toBe(100);
     // Keep the long traversal alive long enough to exercise every floor's
@@ -406,6 +460,7 @@ describe('authoritative deterministic simulation', () => {
     const sim = new AuthoritativeSimulation(runSeed, { hp: 1000 });
     const recorder = new InputRecorder();
     const recordedStates: InputState[] = [];
+    let block13EntrySnapshot: ReturnType<typeof sim.snapshot> | undefined;
     let crawlerChaseSeen = false, watcherCurseSeen = false, ambusherSeen = false, mimicSeen = false;
     const step = (input: InputState) => {
       const before = sim.state;
@@ -473,6 +528,7 @@ describe('authoritative deterministic simulation', () => {
       step({ ...emptyInput, interact: true });
       step(emptyInput);
       expect(sim.state.hasKey).toBe(true);
+      if (floor === 0) expect(sim.floor.searchables.some(item => item.isMimic)).toBe(true);
       route(sim.floor.exit);
       let guard = 0;
       while (sim.state.floor === floor && sim.state.status === 'playing' && guard++ < 20) {
@@ -480,20 +536,37 @@ describe('authoritative deterministic simulation', () => {
         if (sim.state.status === 'playing' && sim.state.floor === floor) step(emptyInput);
       }
       expect(sim.state.floor).toBe(floor - 1);
+      if (floor === 1) {
+        expect(sim.state.floor).toBe(0); // Block 13 is a live, non-terminal floor.
+        expect(sim.state.status).toBe('playing');
+        expect(sim.state.floorsCompleted).toBe(4);
+        expect(sim.floor.width).toBeGreaterThan(0);
+        expect(sim.floor.key.length).toBe(2);
+        expect(sim.floor.exit.length).toBe(2);
+        block13EntrySnapshot = sim.snapshot();
+      }
     }
     expect(sim.state.status).toBe('won');
+    expect(sim.state.floor).toBe(-1); // Victory only after the Block 13 exit.
     expect(sim.state.floorsCompleted).toBe(5);
     expect(sim.state.tick).toBeGreaterThan(0);
 
     recorder.setTerminalTick(sim.state.tick);
     const replay = new AuthoritativeSimulation(runSeed, { hp: 1000 });
     const source = InputReplayer.fromBinary(recorder.encodeBinary());
+    let replayMatchedBlock13Entry = false;
     while (replay.state.tick < source.terminalTick) {
       const tick = replay.state.tick;
       const input = source.getStateAtTick(tick);
       expect(input, `input mismatch at tick ${tick}`).toEqual(recordedStates[tick]);
       replay.step(input);
+      if (!replayMatchedBlock13Entry && replay.state.floor === 0 && replay.state.floorsCompleted === 4) {
+        expect(replay.state.status).toBe('playing');
+        expect(replay.snapshot()).toEqual(block13EntrySnapshot);
+        replayMatchedBlock13Entry = true;
+      }
     }
+    expect(replayMatchedBlock13Entry).toBe(true);
     expect(replay.snapshot()).toEqual(sim.snapshot());
     const manifest: RunManifest = {
       runId: 17n,
@@ -518,6 +591,7 @@ describe('authoritative deterministic simulation', () => {
       const update = (delta: number) => engine.update(delta, (_fixed, tick) => {
         scheduledReplay.step(scheduledSource.getStateAtTick(tick));
       });
+
       if (initialStallMs > 0) update(initialStallMs);
       let frames = 0;
       while (scheduledReplay.state.tick < scheduledSource.terminalTick && frames++ < 1_000_000) {
@@ -534,4 +608,26 @@ describe('authoritative deterministic simulation', () => {
     expect(mimicSeen).toBe(true);
     expect(watcherCurseSeen).toBe(true);
   }, 20_000);
+
+  it('keeps Floor 1 to Block 13 arrival playable when its transition bonus reaches the curse threshold', () => {
+    const seed = 0x1313n;
+    const probe = new AuthoritativeSimulation(seed, { floor: 1 });
+    const [exitX, exitY] = probe.floor.exit;
+    const x = (exitX * 32 + 16) * FIXED_SCALE, y = (exitY * 32 + 16) * FIXED_SCALE;
+    const sim = new AuthoritativeSimulation(seed, {
+      floor: 1, x, y, tick: 500, floorsCompleted: 3, hasKey: true, curse: 90 * FIXED_SCALE,
+      searched: probe.floor.searchables.map(() => true),
+      corruption: { lastTriggerTick: 500, effectId: 0, effectType: 0, intensityPermille: 0, durationTicks: 0 },
+      stalker: { state: 'dormant', x: 0, y: 0, targetX: 0, targetY: 0, ticksRemaining: 100_000, chaseStartTick: 0, lastChaseEndTick: 0, visible: false, moveRemainder: 0 },
+      crawlers: [], watchers: [], ambushers: [], mimics: [],
+    });
+    const { events, state } = sim.stepWithEvents({ ...emptyInput, interact: true });
+    expect(events).toContainEqual({ type: 'floor_transition', fromFloor: 1, toFloor: 0, floorsCompleted: 4 });
+    expect(state.floor).toBe(0);
+    expect(state.status).toBe('playing');
+    expect(state.curse).toBe(99 * FIXED_SCALE);
+    expect(sim.floor.width).toBeGreaterThan(0);
+    expect(sim.floor.key.length).toBe(2);
+    expect(sim.floor.exit.length).toBe(2);
+  });
 });

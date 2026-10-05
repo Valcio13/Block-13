@@ -9,6 +9,7 @@ import type { SimulationEvent } from '../src/core/authoritativeSimulation';
 import { finalStateV1FromTerminalState, hashFinalStateV1 } from '../src/core/finalStateV1';
 import type { RunManifest } from '../src/core/seedDerivation';
 import { InputRecorder, InputReplayer } from '../src/core/inputRecorder';
+import { corruptionVisualStrength, floorVisualProfile, flashlightVisualFactor, tileDressingAt } from '../src/core/visualAtmosphere';
 
 const manifest: RunManifest = {
   runId: 1n,
@@ -97,7 +98,7 @@ describe('presentation audio mapping', () => {
     expect(mimicTwitch(7, 240)).not.toEqual(mimicTwitch(8, 240));
   });
 
-  it('does not alter replay state, authoritative RNG state, or final-state projection', () => {
+  it('keeps palette, tile dressing, lighting variation, and effects cosmetic to replay state and hash', () => {
     const recorder = new InputRecorder();
     for (let tick = 0; tick < 600; tick++) {
       const input = { left: tick >= 200 && tick < 300, right: tick < 200, up: false, down: tick >= 300, flashlight: tick === 15, interact: tick === 350 };
@@ -110,7 +111,15 @@ describe('presentation audio mapping', () => {
       const source = InputReplayer.fromBinary(inputLog);
       for (let tick = 0; tick < source.terminalTick; tick++) {
         sim.step(source.getStateAtTick(tick));
-        if (withCosmeticUpdates) for (let id = 0; id < 6; id++) mimicTwitch(id, tick);
+        if (withCosmeticUpdates) {
+          for (let id = 0; id < 6; id++) mimicTwitch(id, tick);
+          for (let floor = 0; floor <= 4; floor++) {
+            floorVisualProfile(floor);
+            tileDressingAt(floor, tick % 53, (tick * 7) % 41, tick % 2 === 0);
+            flashlightVisualFactor(tick, floor);
+            corruptionVisualStrength(floor, (tick * 13) % 1001);
+          }
+        }
       }
       return sim;
     };
@@ -121,5 +130,18 @@ describe('presentation audio mapping', () => {
     const cosmeticTerminal = { ...cosmetic.state, status: 'lost' as const, hp: 0 };
     expect(hashFinalStateV1(finalStateV1FromTerminalState(manifest, cosmeticTerminal)))
       .toBe(hashFinalStateV1(finalStateV1FromTerminalState(manifest, cleanTerminal)));
+  });
+
+  it('uses stable floor palettes and coordinate-only dressing without simulation RNG', () => {
+    expect(floorVisualProfile(0)).not.toEqual(floorVisualProfile(4));
+    expect(tileDressingAt(1, 17, 29, true)).toBe(tileDressingAt(1, 17, 29, true));
+    expect(flashlightVisualFactor(100, 2)).toBe(flashlightVisualFactor(100, 2));
+    expect(corruptionVisualStrength(0, 1000)).toBeGreaterThan(corruptionVisualStrength(4, 0));
+    const sim = new AuthoritativeSimulation(987654321n);
+    const initialSnapshot = sim.snapshot();
+    for (let y = 0; y < sim.floor.height; y++) {
+      for (let x = 0; x < sim.floor.width; x++) tileDressingAt(sim.state.floor, x, y, sim.floor.tiles[y][x]);
+    }
+    expect(sim.snapshot()).toEqual(initialSnapshot);
   });
 });

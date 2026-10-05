@@ -1,6 +1,7 @@
 import { generateFloor, type Floor, type FloorLootRng } from './floor';
 import type { InputState } from './inputRecorder';
 import { PCG32 } from './pcg32';
+import { nextProgressionFloor, isOutsideFloor, isBlock13Arrival } from './progression';
 
 /** Deterministic gameplay world. No Phaser, DOM, timers, or wall clock imports. */
 export const FIXED_SCALE = 256; // one world pixel = 256 subpixels
@@ -145,6 +146,7 @@ export class AuthoritativeSimulation {
       scareEventId: 0, damageEventId: 0, lastDamage: 0,
       ...state,
     };
+    if (this.stateValue.battery === 0) this.stateValue.flashlightOn = false;
     this.resetBoxScares();
     if (!state?.stalker) this.spawnFloorEntities();
   }
@@ -259,12 +261,15 @@ export class AuthoritativeSimulation {
     if (tick >= s.scareLockoutUntilTick) this.movePlayer(input);
     if (input.right !== input.left && (input.right || input.left)) { s.facingX = input.right ? 1 : -1; s.facingY = 0; }
     if (input.down !== input.up && (input.down || input.up)) { s.facingX = 0; s.facingY = input.down ? 1 : -1; }
-    if (input.flashlight) s.flashlightOn = !s.flashlightOn;
+    // Flashlight input cannot switch on without charge. If already on, allow
+    // the authoritative drain below to reach the exact zero boundary.
+    if (input.flashlight && s.battery > 0) s.flashlightOn = !s.flashlightOn;
     if (s.flashlightOn && s.battery > 0) {
       // Drain 9/256 percent per tick (0.03515625%), rounded down to the
       // integer subpercent scale; exact integer arithmetic avoids float drift.
       s.battery = Math.max(0, s.battery - 9);
     }
+    if (s.battery === 0) s.flashlightOn = false;
     this.updateStalker(tick);
     this.updateCrawlers(tick);
     this.updateWatchers(tick);
@@ -628,12 +633,17 @@ export class AuthoritativeSimulation {
     if (s.hasKey && this.inRange((ex * 32 + 16) * FIXED_SCALE, (ey * 32 + 16) * FIXED_SCALE)) {
       const fromFloor = s.floor;
       s.score += 100 * Math.max(0, s.floor);
-      s.curse += 10 * FIXED_SCALE;
+      // The transition's danger bonus must not make arrival in Block 13
+      // terminal. Curse can still reach its normal loss threshold during play.
+      const curseWithBonus = s.curse + 10 * FIXED_SCALE;
+      s.curse = isBlock13Arrival(s.floor)
+        ? Math.max(s.curse, Math.min(99 * FIXED_SCALE, curseWithBonus))
+        : curseWithBonus;
       s.battery = Math.min(100 * FIXED_SCALE, s.battery + 20 * FIXED_SCALE);
-      s.floor--;
+      s.floor = nextProgressionFloor(s.floor);
       s.floorsCompleted++;
       this.tickEvents.push({ type: 'floor_transition', fromFloor, toFloor: s.floor, floorsCompleted: s.floorsCompleted });
-      if (s.floor < 0) { s.status = 'won'; return; }
+      if (isOutsideFloor(s.floor)) { s.status = 'won'; return; }
       this.floorValue = generateFloor(this.floorSeed(), s.floor, this.economyLootRng());
       s.x = (this.floorValue.start[0] * 32 + 16) * FIXED_SCALE;
       s.y = (this.floorValue.start[1] * 32 + 16) * FIXED_SCALE;

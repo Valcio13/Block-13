@@ -40,6 +40,13 @@ function GameApp() {
   const { startRun, isLoading: isStarting, error: startError } = useStartRun();
   const { completeRun } = useCompleteRun();
 
+  const resetCompletionState = () => {
+    setCompletionData(null);
+    setCompletionHash(null);
+    setCompletionPhase('idle');
+    setCompletionError(null);
+  };
+
   // Recover active run from sessionStorage on mount
   useEffect(() => {
     const savedRun = sessionStorage.getItem('activeRun');
@@ -101,6 +108,7 @@ function GameApp() {
       return;
     }
 
+    resetCompletionState();
     setStatus('starting');
     setError(null);
 
@@ -131,6 +139,7 @@ function GameApp() {
   };
 
   const beginLocalRun = () => {
+    resetCompletionState();
     setStatus('playing');
     setError(null);
     
@@ -151,6 +160,9 @@ function GameApp() {
   };
 
   const handleGameComplete = (finalState: RunState, registry: Phaser.Data.DataManager) => {
+    setCompletionHash(null);
+    setCompletionPhase('idle');
+    setCompletionError(null);
     setRunState(finalState);
     setCompletionData({
       inputLogBytes: registry.get('inputLogV2Bytes') as Uint8Array | undefined,
@@ -163,6 +175,7 @@ function GameApp() {
     if (!runState?.manifest) return;
     setCompletionPhase('wallet');
     setCompletionError(null);
+    setCompletionHash(null);
     try {
       await submitRunCompletion({
         manifest: runState.manifest,
@@ -228,11 +241,11 @@ function GameApp() {
     return (
       <main className="app-shell">
         <section className="title-card">
-          <h1>RUN COMPLETE!</h1>
+          <h1>{runState?.status === 'won' ? 'RUN COMPLETE!' : 'RUN OVER'}</h1>
           {isBlockchainRun ? (
-            <p className="premise">Commit this deterministic result and replay hashes to Hemi Testnet.</p>
+            <p className="premise">{runState?.status === 'won' ? 'Commit this deterministic result and replay hashes to Hemi Testnet.' : 'This run ended before the escape. Its result can still be recorded on Hemi Testnet.'}</p>
           ) : (
-            <p className="premise">Local run completed (not recorded on-chain)</p>
+            <p className="premise">{runState?.status === 'won' ? 'Local run completed (not recorded on-chain)' : 'You did not make it outside.'}</p>
           )}
           {runState && (
             <div style={{ marginTop: '2rem', color: '#a5b6b5' }}>

@@ -248,7 +248,7 @@ function generateSearchables(
   return searchables;
 }
 
-/** Choose a normal wall position when possible, retrying only on collisions. */
+/** Choose a normal wall position, preserving the original RNG draw count on collisions. */
 function chooseUniqueSearchablePosition(
   room: Room,
   rng: FloorLootRng,
@@ -263,13 +263,15 @@ function chooseUniqueSearchablePosition(
     }
   };
 
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const candidate = candidateAt(rng.int(4));
-    if (!occupied.has(`${candidate[0]},${candidate[1]}`)) return candidate;
-  }
+  // The original generator consumed exactly one side draw and one position
+  // draw here. Keep that count stable so a placement collision cannot shift
+  // subsequent loot types, Mimic decisions, or floor generation.
+  const candidate = candidateAt(rng.int(4));
+  if (!occupied.has(`${candidate[0]},${candidate[1]}`)) return candidate;
 
   // A room has several valid wall cells even at the minimum generated size.
-  // Enumerate them deterministically if random retries collide.
+  // If the selected cell is already occupied, pick the nearest free wall cell
+  // with stable enumeration tie-breaking and no additional RNG consumption.
   const candidates: [number, number][] = [];
   for (let x = room.x + 1; x < room.x + room.width - 1; x++) {
     candidates.push([x, room.y], [x, room.y + room.height - 1]);
@@ -279,7 +281,17 @@ function chooseUniqueSearchablePosition(
   }
   const available = candidates.filter(([x, y]) => !occupied.has(`${x},${y}`));
   if (available.length === 0) throw new Error('No unoccupied wall tile available for searchable object');
-  return available[rng.int(available.length)];
+  let nearest = available[0];
+  let nearestDistance = Math.abs(nearest[0] - candidate[0]) + Math.abs(nearest[1] - candidate[1]);
+  for (let i = 1; i < available.length; i++) {
+    const current = available[i];
+    const distance = Math.abs(current[0] - candidate[0]) + Math.abs(current[1] - candidate[1]);
+    if (distance < nearestDistance) {
+      nearest = current;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
 }
 
 function createDeadEnd(

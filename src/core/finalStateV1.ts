@@ -1,6 +1,7 @@
 import { keccak256, toHex } from 'viem';
 import type { RunManifest } from './seedDerivation';
 import type { AuthoritativeSimulation, AuthoritativeState } from './authoritativeSimulation';
+import { floorsCompletedAt, OUTSIDE_FLOOR, START_FLOOR } from './progression';
 
 /** Public verification result. Internal simulation fields are intentionally excluded. */
 export interface FinalStateV1 {
@@ -29,7 +30,7 @@ export interface FinalStateV1 {
  */
 export const FINAL_STATE_V1_BYTES = 135;
 export const FINAL_STATE_V1_VERSION = 1;
-export const FINAL_STATE_V1_MAX_PROGRESS = 5;
+export const FINAL_STATE_V1_MAX_PROGRESS = START_FLOOR - OUTSIDE_FLOOR;
 export const FINAL_STATE_V1_MAX_RESOURCE = 100 * 256;
 
 const MAX_U32 = 0xffff_ffff;
@@ -54,9 +55,9 @@ function validateFinalState(value: FinalStateV1): void {
   if (value.outcome !== 'won' && value.outcome !== 'lost') throw new TypeError('outcome must be won or lost');
   integerInRange(value.score, 0, MAX_U32, 'score');
   integerInRange(value.floorsCompleted, 0, FINAL_STATE_V1_MAX_PROGRESS, 'floorsCompleted');
-  integerInRange(value.finalFloor, -1, 4, 'finalFloor');
-  if (value.floorsCompleted !== 4 - value.finalFloor) throw new RangeError('finalFloor and floorsCompleted are inconsistent');
-  if (value.outcome === 'won' && value.finalFloor !== -1) throw new RangeError('won outcome requires Outside progression');
+  integerInRange(value.finalFloor, OUTSIDE_FLOOR, START_FLOOR, 'finalFloor');
+  if (value.floorsCompleted !== floorsCompletedAt(value.finalFloor)) throw new RangeError('finalFloor and floorsCompleted are inconsistent');
+  if (value.outcome === 'won' && value.finalFloor !== OUTSIDE_FLOOR) throw new RangeError('won outcome requires Outside progression');
   if (value.outcome === 'lost' && value.finalFloor < 0) throw new RangeError('lost outcome requires a floor from 0 through 4');
   integerInRange(value.finalHp, 0, MAX_U16, 'finalHp');
   integerInRange(value.finalBattery, 0, FINAL_STATE_V1_MAX_RESOURCE, 'finalBattery');

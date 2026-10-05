@@ -12,6 +12,9 @@ import { encodeFinalStateV1, finalStateV1FromSimulation, hashFinalStateV1 } from
 import { keccak256, toHex } from 'viem';
 import { getAuthoredClueForSearchId } from '../../core/clues';
 import { formatFixedPointPercent, formatWholePercent } from '../../core/uiFormatting';
+import { corruptionVisualStrength, floorVisualProfile, flashlightVisualFactor, tileDressingAt } from '../../core/visualAtmosphere';
+import { isBlock13Floor, progressionName, START_FLOOR } from '../../core/progression';
+import { enemyPresentationExposure } from '../presentationVisibility';
 
 interface FloorSceneData {
   runState: RunState;
@@ -21,6 +24,7 @@ interface FloorSceneData {
 
 interface SearchableSprite {
   sprite: Phaser.GameObjects.Sprite;
+  halo: Phaser.GameObjects.Arc;
   data: Searchable;
   searched: boolean;
 }
@@ -36,6 +40,8 @@ export class FloorScene extends Phaser.Scene {
   private interactKey!: Phaser.Input.Keyboard.Key;
   private keySprite!: Phaser.GameObjects.Sprite;
   private stairsSprite!: Phaser.GameObjects.Sprite;
+  private keyHalo!: Phaser.GameObjects.Arc;
+  private stairsHalo!: Phaser.GameObjects.Arc;
   private searchableSprites: SearchableSprite[] = [];
   private hasKey = false;
   private stairsUnlocked = false;
@@ -60,6 +66,8 @@ export class FloorScene extends Phaser.Scene {
   private flashlightOn = false;
   private lightmapTexture!: Phaser.GameObjects.RenderTexture;
   private lightmapGraphics!: Phaser.GameObjects.Graphics;
+  private damageVignette!: Phaser.GameObjects.Graphics;
+  private corruptionVignette!: Phaser.GameObjects.Graphics;
   private playerFacingAngle = 0;
   private stalkerSprite!: Phaser.GameObjects.Sprite;
   private audioDirector!: AudioDirector;
@@ -102,6 +110,8 @@ export class FloorScene extends Phaser.Scene {
     this.uiCamera = undefined as unknown as Phaser.Cameras.Scene2D.Camera;
     this.lightmapTexture = undefined as unknown as Phaser.GameObjects.RenderTexture;
     this.lightmapGraphics = undefined as unknown as Phaser.GameObjects.Graphics;
+    this.damageVignette = undefined as unknown as Phaser.GameObjects.Graphics;
+    this.corruptionVignette = undefined as unknown as Phaser.GameObjects.Graphics;
     this.mimicTwitchStates.clear();
 
     // Initialize simulation engine and input recorder
@@ -165,7 +175,7 @@ export class FloorScene extends Phaser.Scene {
     for (const key of floorAmbienceKeys(this.authoritativeSimulation.state.floor)) {
       this.audioDirector.play(key, 'ambience', { loop: true, volume: 0.32 });
     }
-    if (this.authoritativeSimulation.state.floor === 0) {
+    if (isBlock13Floor(this.authoritativeSimulation.state.floor)) {
       this.audioDirector.playWithCooldown('sfx_block13_reveal', 'sfx', 5000, { volume: 0.8 });
     }
 
@@ -188,6 +198,8 @@ export class FloorScene extends Phaser.Scene {
 
     // Setup lighting AFTER world is created
     this.setupLighting(worldWidth, worldHeight);
+    this.setupAtmosphereOverlays();
+    if (isBlock13Floor(this.authoritativeSimulation.state.floor)) this.playBlock13Arrival();
 
     // Make sure UI camera ignores the lightmap (it was added after the initial ignore call)
     this.uiCamera.ignore(this.lightmapTexture);
@@ -459,11 +471,17 @@ export class FloorScene extends Phaser.Scene {
       const mimic = state.mimics.find(m => m.searchableIndex === index);
       if (mimic?.revealed) {
         this.mimicTwitchStates.delete(entry.sprite);
-        entry.sprite.setVisible(mimic.active);
+        const exposure = enemyPresentationExposure(this.floorData, state, mimic.x, mimic.y);
+        entry.sprite.setVisible(mimic.active && exposure > 0);
+        entry.sprite.setTexture('mimic_revealed');
         entry.sprite.setPosition(mimic.x / FIXED_SCALE, mimic.y / FIXED_SCALE);
-        entry.sprite.setTint(0xff4444);
-        entry.sprite.setScale(1.15);
-      } else entry.sprite.setVisible(!entry.searched);
+        entry.sprite.setTint(exposure >= 0.7 ? 0xffe4dc : 0xc5a8ae).setAlpha(exposure);
+        entry.sprite.setScale(1.2);
+      } else {
+        entry.sprite.setTexture(entry.data.isMimic ? `mimic_${entry.data.x}_${entry.data.y}` : `searchable_${entry.data.objectType}`);
+        entry.sprite.setTint(0xffffff).setScale(1);
+        entry.sprite.setVisible(!entry.searched);
+      }
     });
     // Disguised mimics keep their old twitching presentation; it only moves
     // sprites and never feeds position back into authoritative state.
@@ -471,22 +489,37 @@ export class FloorScene extends Phaser.Scene {
 
     const stalker = state.stalker;
     this.stalkerSprite?.setPosition(stalker.x / FIXED_SCALE, stalker.y / FIXED_SCALE);
-    this.stalkerSprite?.setAlpha(stalker.visible ? 0.8 : 0);
+    const stalkerExposure = enemyPresentationExposure(this.floorData, state, stalker.x, stalker.y);
+    this.stalkerSprite?.setAlpha(stalker.visible ? stalkerExposure * (stalker.state === 'hunting' ? 0.98 : 0.76) : 0);
+    this.stalkerSprite?.setTint(stalker.state === 'hunting' && stalkerExposure >= 0.7 ? 0xffb7b0 : stalkerExposure >= 0.7 ? 0xe0d1d8 : 0xffffff);
+    this.stalkerSprite?.setScale(stalker.visible && stalker.state === 'hunting' ? 1.14 : 1);
     state.crawlers.forEach((enemy, index) => {
       const sprite = this.crawlerSprites[index];
+      const exposure = enemyPresentationExposure(this.floorData, state, enemy.x, enemy.y);
       sprite?.setPosition(enemy.x / FIXED_SCALE, enemy.y / FIXED_SCALE);
-      sprite?.setAlpha(enemy.chasing ? 1 : 0.6);
+      sprite?.setAlpha(exposure * (enemy.chasing ? 1 : 0.76));
+      sprite?.setTint(exposure >= 0.7 ? 0xe3d5bd : 0xffffff);
+      sprite?.setScale(enemy.chasing ? 1 + Math.sin(state.tick * 0.16 + enemy.id) * 0.045 : 1);
+      if (sprite) sprite.setFlipX(enemy.targetX < enemy.x);
     });
     state.watchers.forEach((enemy, index) => {
       const sprite = this.watcherSprites[index];
+      const exposure = enemyPresentationExposure(this.floorData, state, enemy.x, enemy.y);
       sprite?.setPosition(enemy.x / FIXED_SCALE, enemy.y / FIXED_SCALE);
-      sprite?.setAlpha(enemy.active ? 0.6 : 0);
+      sprite?.setAlpha(enemy.active ? exposure * (0.76 + Math.sin(state.tick * 0.045 + enemy.id) * 0.07) : 0);
+      sprite?.setTint(exposure >= 0.7 ? 0xd9d4ef : 0xffffff);
     });
     state.ambushers.forEach((enemy, index) => {
       const sprite = this.ambusherSprites[index];
+      const exposure = enemyPresentationExposure(this.floorData, state, enemy.x, enemy.y);
       sprite?.setPosition(enemy.x / FIXED_SCALE, enemy.y / FIXED_SCALE);
-      sprite?.setAlpha(enemy.state === 'warning' ? 0.2 : 0);
+      const activePresentation = enemy.state === 'warning' || enemy.state === 'jumpscare';
+      sprite?.setVisible(activePresentation && exposure > 0);
+      sprite?.setAlpha(enemy.state === 'warning' ? exposure * (0.62 + (Math.sin(state.tick * 0.35 + enemy.id) + 1) * 0.14) : enemy.state === 'jumpscare' ? exposure : 0);
+      sprite?.setTint(enemy.state === 'warning' ? 0xffdca0 : 0xffaaa0);
     });
+    this.updateInteractionFeedback(state);
+    this.updateCorruptionAtmosphere(state);
     this.updateAuthoritativePrompt(state);
     if (state.hp !== previous.hp) this.updateHealthBar();
     if ((state.x !== previous.x || state.y !== previous.y) && state.tick % 15 === 0) {
@@ -494,7 +527,8 @@ export class FloorScene extends Phaser.Scene {
     }
     for (const audioCue of audioCuesForStateChange(previous, state, events)) this.playAudioCue(audioCue);
     if (state.damageEventId !== previous.damageEventId) {
-      this.cameras.main.shake(180, 0.004);
+      this.cameras.main.shake(150, 0.0035);
+      this.flashDamageVignette();
     }
     if (state.scareEventId !== previous.scareEventId) this.cameras.main.shake(220, 0.006);
     if (state.corruption.effectId !== previous.corruption.effectId) {
@@ -524,6 +558,55 @@ export class FloorScene extends Phaser.Scene {
     }
     this.interactPrompt.setText(prompt);
     this.interactPrompt.setVisible(prompt.length > 0);
+  }
+
+  private updateInteractionFeedback(state: AuthoritativeState) {
+    const px = state.x / FIXED_SCALE;
+    const py = state.y / FIXED_SCALE;
+    const tickPulse = 0.78 + (Math.sin(state.tick * 0.09) + 1) * 0.11;
+    const updateHalo = (halo: Phaser.GameObjects.Arc, x: number, y: number, eligible: boolean) => {
+      const dx = px - x, dy = py - y;
+      const nearby = dx * dx + dy * dy <= 104 * 104;
+      const visible = eligible && nearby && this.hasPresentationLineOfSight(px, py, x, y);
+      halo.setVisible(visible);
+      halo.setAlpha(tickPulse);
+    };
+
+    const keyX = this.floorData.key[0] * this.tileSize + this.tileSize / 2;
+    const keyY = this.floorData.key[1] * this.tileSize + this.tileSize / 2;
+    updateHalo(this.keyHalo, keyX, keyY, !state.hasKey);
+    const exitX = this.floorData.exit[0] * this.tileSize + this.tileSize / 2;
+    const exitY = this.floorData.exit[1] * this.tileSize + this.tileSize / 2;
+    updateHalo(this.stairsHalo, exitX, exitY, true);
+    this.searchableSprites.forEach((entry, index) => {
+      const x = entry.data.x * this.tileSize + this.tileSize / 2;
+      const y = entry.data.y * this.tileSize + this.tileSize / 2;
+      updateHalo(entry.halo, x, y, !state.searched[index] && entry.sprite.visible);
+    });
+  }
+
+  /** Visual-only tile ray. It only suppresses accents behind walls; it never changes interaction rules. */
+  private hasPresentationLineOfSight(fromX: number, fromY: number, toX: number, toY: number): boolean {
+    let x0 = Math.floor(fromX / this.tileSize), y0 = Math.floor(fromY / this.tileSize);
+    const x1 = Math.floor(toX / this.tileSize), y1 = Math.floor(toY / this.tileSize);
+    const dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    const dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    let error = dx + dy;
+    while (x0 !== x1 || y0 !== y1) {
+      const twice = error * 2;
+      if (twice >= dy) { error += dy; x0 += sx; }
+      if (twice <= dx) { error += dx; y0 += sy; }
+      if (x0 === x1 && y0 === y1) break; // The target can itself occupy a wall tile.
+      if (!this.floorData.tiles[y0]?.[x0]) return false;
+    }
+    return true;
+  }
+
+  private createInteractableHalo(x: number, y: number, color: number, radius: number) {
+    return this.add.circle(x, y, radius, color, 0.04)
+      .setStrokeStyle(1, color, 0.5)
+      .setDepth(3)
+      .setVisible(false);
   }
 
   /**
@@ -581,44 +664,43 @@ export class FloorScene extends Phaser.Scene {
   private updateLighting() {
     const worldWidth = this.floorData.width * this.tileSize;
     const worldHeight = this.floorData.height * this.tileSize;
+    const state = this.authoritativeSimulation.state;
+    const profile = floorVisualProfile(state.floor);
 
-    // Clear previous frame's drawing
     this.lightmapGraphics.clear();
-
-    // Increased darkness - darker base multiplier
-    this.lightmapGraphics.fillStyle(0x202020, 1); // Much darker: ~12% of original brightness (was 0x404040 = 25%)
+    this.lightmapGraphics.fillStyle(profile.darkness, 1);
     this.lightmapGraphics.fillRect(0, 0, worldWidth, worldHeight);
 
-    // Smaller ambient visibility around the player
-    this.lightmapGraphics.fillStyle(0x909090, 1); // Dimmer ambient (was 0xb8b8b8)
-    this.lightmapGraphics.fillCircle(this.player.x, this.player.y, 56); // Smaller radius (was 72)
-    this.lightmapGraphics.fillStyle(0xe0e0e0, 1); // Slightly dimmer center (was 0xffffff)
-    this.lightmapGraphics.fillCircle(this.player.x, this.player.y, 32); // Smaller center (was 42)
+    // Nested values soften the local visibility falloff without a shader.
+    this.lightmapGraphics.fillStyle(scaleColor(profile.ambient, 0.34), 1);
+    this.lightmapGraphics.fillCircle(this.player.x, this.player.y, 88);
+    this.lightmapGraphics.fillStyle(scaleColor(profile.ambient, 0.48), 1);
+    this.lightmapGraphics.fillCircle(this.player.x, this.player.y, 76);
+    this.lightmapGraphics.fillStyle(scaleColor(profile.ambient, 0.62), 1);
+    this.lightmapGraphics.fillCircle(this.player.x, this.player.y, 62);
+    this.lightmapGraphics.fillStyle(scaleColor(profile.ambient, 0.82), 1);
+    this.lightmapGraphics.fillCircle(this.player.x, this.player.y, 48);
+    this.lightmapGraphics.fillStyle(scaleColor(profile.ambient, 1.08), 1);
+    this.lightmapGraphics.fillCircle(this.player.x, this.player.y, 34);
 
-    // Directional flashligh
     if (this.flashlightOn) {
-      const length = 230;
-      const halfAngle = Phaser.Math.DegToRad(24);
       const startX = this.player.x;
       const startY = this.player.y;
-      const leftX = startX + Math.cos(this.playerFacingAngle - halfAngle) * length;
-      const leftY = startY + Math.sin(this.playerFacingAngle - halfAngle) * length;
-      const rightX = startX + Math.cos(this.playerFacingAngle + halfAngle) * length;
-      const rightY = startY + Math.sin(this.playerFacingAngle + halfAngle) * length;
-
-      // Outer cone
-      const outerLength = 250;
-      const outerHalfAngle = Phaser.Math.DegToRad(30);
-      const outerLeftX = startX + Math.cos(this.playerFacingAngle - outerHalfAngle) * outerLength;
-      const outerLeftY = startY + Math.sin(this.playerFacingAngle - outerHalfAngle) * outerLength;
-      const outerRightX = startX + Math.cos(this.playerFacingAngle + outerHalfAngle) * outerLength;
-      const outerRightY = startY + Math.sin(this.playerFacingAngle + outerHalfAngle) * outerLength;
-
-      this.lightmapGraphics.fillStyle(0x707070, 1); // Dimmer outer cone (was 0x8a8a8a)
-      this.lightmapGraphics.fillTriangle(startX, startY, outerLeftX, outerLeftY, outerRightX, outerRightY);
-
-      this.lightmapGraphics.fillStyle(0xffffff, 1);
-      this.lightmapGraphics.fillTriangle(startX, startY, leftX, leftY, rightX, rightY);
+      const factor = flashlightVisualFactor(state.tick, state.floor);
+      const cone = (length: number, halfAngleDegrees: number, color: number) => {
+        const halfAngle = Phaser.Math.DegToRad(halfAngleDegrees);
+        const leftX = startX + Math.cos(this.playerFacingAngle - halfAngle) * length;
+        const leftY = startY + Math.sin(this.playerFacingAngle - halfAngle) * length;
+        const rightX = startX + Math.cos(this.playerFacingAngle + halfAngle) * length;
+        const rightY = startY + Math.sin(this.playerFacingAngle + halfAngle) * length;
+        this.lightmapGraphics.fillStyle(scaleColor(color, factor), 1);
+        this.lightmapGraphics.fillTriangle(startX, startY, leftX, leftY, rightX, rightY);
+      };
+      cone(286, 35, scaleColor(profile.flashlight, 0.3));
+      cone(270, 32, scaleColor(profile.flashlight, 0.42));
+      cone(248, 28, scaleColor(profile.flashlight, 0.62));
+      cone(226, 24, scaleColor(profile.flashlight, 0.82));
+      cone(210, 20, profile.flashlight);
     }
 
     // Draw the finished grayscale lightmap into the RenderTexture
@@ -844,7 +926,7 @@ export class FloorScene extends Phaser.Scene {
     const flashStatus = this.flashlightOn ? 'ON' : 'OFF';
 
     // Display floor name
-    const floorDisplay = this.runState.floor === 0 ? 'BLOCK 13' : `FLOOR ${this.runState.floor}/4`;
+    const floorDisplay = isBlock13Floor(this.runState.floor) ? progressionName(this.runState.floor) : `${progressionName(this.runState.floor)}/${START_FLOOR}`;
 
     const lines = [
       floorDisplay,
@@ -918,28 +1000,114 @@ export class FloorScene extends Phaser.Scene {
 
   private drawFloor(tiles: boolean[][]) {
     const graphics = this.add.graphics();
+    const floor = this.authoritativeSimulation.state.floor;
+    const profile = floorVisualProfile(floor);
 
     for (let y = 0; y < tiles.length; y++) {
       for (let x = 0; x < tiles[y].length; x++) {
         const posX = x * this.tileSize;
         const posY = y * this.tileSize;
+        const walkable = tiles[y][x];
+        const dressing = tileDressingAt(floor, x, y, walkable);
 
-        if (tiles[y][x]) {
-          // Walkable floor - darker tile
-          graphics.fillStyle(0x1a1f26, 1);
+        if (walkable) {
+          graphics.fillStyle(profile.floorBase, 1);
           graphics.fillRect(posX, posY, this.tileSize, this.tileSize);
-          graphics.lineStyle(1, 0x2a2f36, 0.2);
+          graphics.lineStyle(1, profile.grid, 0.24);
           graphics.strokeRect(posX, posY, this.tileSize, this.tileSize);
         } else {
-          // Wall/obstacle - very dark
-          graphics.fillStyle(0x0a0d11, 1);
+          graphics.fillStyle(profile.wallBase, 1);
           graphics.fillRect(posX, posY, this.tileSize, this.tileSize);
-          graphics.lineStyle(1, 0x14181f, 0.8);
+          graphics.lineStyle(1, profile.grid, 0.72);
           graphics.strokeRect(posX, posY, this.tileSize, this.tileSize);
+        }
 
+        // Decorative marks are deterministic functions of immutable tile coords.
+        // They are drawn into the background layer and never create game objects.
+        switch (dressing) {
+          case 'stain':
+            graphics.fillStyle(profile.stain, 0.72);
+            graphics.fillEllipse(posX + 15 + ((x * 7 + y * 3) % 7), posY + 15 + ((x * 2 + y * 5) % 7), 17, 9);
+            break;
+          case 'crack':
+            graphics.lineStyle(1, profile.grime, walkable ? 0.62 : 0.72);
+            graphics.lineBetween(posX + 6, posY + 8, posX + 13, posY + 14);
+            graphics.lineBetween(posX + 13, posY + 14, posX + 10, posY + 22);
+            graphics.lineBetween(posX + 13, posY + 14, posX + 22, posY + 18);
+            break;
+          case 'pipe':
+            graphics.lineStyle(3, profile.grime, 0.72);
+            graphics.lineBetween(posX + 5, posY + 4, posX + 5, posY + 28);
+            graphics.lineStyle(1, profile.accent, 0.25);
+            graphics.lineBetween(posX + 8, posY + 4, posX + 8, posY + 28);
+            break;
+          case 'warning':
+            graphics.fillStyle(profile.accent, 0.48);
+            graphics.fillRect(posX + 5, posY + 6, 20, 3);
+            graphics.fillRect(posX + 5, posY + 23, 20, 3);
+            break;
+          case 'corruption':
+            graphics.lineStyle(2, profile.corruption, 0.64);
+            graphics.lineBetween(posX + 4, posY + 7, posX + 13, posY + 12);
+            graphics.lineBetween(posX + 13, posY + 12, posX + 9, posY + 20);
+            graphics.lineBetween(posX + 9, posY + 20, posX + 27, posY + 25);
+            graphics.fillStyle(profile.corruption, 0.28);
+            graphics.fillCircle(posX + 22, posY + 9, 2);
+            break;
+          case 'none':
+            break;
         }
       }
     }
+  }
+
+  private setupAtmosphereOverlays() {
+    this.damageVignette = this.add.graphics().setScrollFactor(0).setDepth(96).setAlpha(0);
+    this.drawEdgeVignette(this.damageVignette, 0x8b2637, 0.18);
+    this.corruptionVignette = this.add.graphics().setScrollFactor(0).setDepth(94);
+    this.cameras.main.ignore([this.damageVignette, this.corruptionVignette]);
+  }
+
+  private drawEdgeVignette(graphics: Phaser.GameObjects.Graphics, color: number, opacity: number) {
+    const width = this.scale.width;
+    const height = this.scale.height;
+    graphics.clear();
+    for (let band = 0; band < 4; band++) {
+      const inset = band * 18;
+      const bandAlpha = opacity * (1 - band * 0.18);
+      graphics.fillStyle(color, bandAlpha);
+      graphics.fillRect(inset, inset, width - inset * 2, 13);
+      graphics.fillRect(inset, height - inset - 13, width - inset * 2, 13);
+      graphics.fillRect(inset, inset + 13, 13, height - inset * 2 - 26);
+      graphics.fillRect(width - inset - 13, inset + 13, 13, height - inset * 2 - 26);
+    }
+  }
+
+  private flashDamageVignette() {
+    this.damageVignette?.setAlpha(0.9);
+    this.tweens.killTweensOf(this.damageVignette);
+    this.tweens.add({ targets: this.damageVignette, alpha: 0, duration: 460, ease: 'Sine.easeOut' });
+  }
+
+  private updateCorruptionAtmosphere(state: AuthoritativeState) {
+    const strength = corruptionVisualStrength(state.floor, state.corruption.intensityPermille);
+    if (!this.corruptionVignette) return;
+    const profile = floorVisualProfile(state.floor);
+    this.drawEdgeVignette(this.corruptionVignette, profile.corruption, Math.min(0.62, strength * 1.8));
+  }
+
+  private playBlock13Arrival() {
+    const veil = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x140b19, 0.76)
+      .setScrollFactor(0).setDepth(92);
+    this.cameras.main.ignore(veil);
+    this.tweens.add({ targets: veil, alpha: 0, duration: 1250, ease: 'Sine.easeInOut', onComplete: () => veil.destroy() });
+  }
+
+  private playEscapeRelease() {
+    const release = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0xb8d8cf, 0.48)
+      .setScrollFactor(0).setDepth(145);
+    this.cameras.main.ignore(release);
+    this.tweens.add({ targets: release, alpha: 0, duration: 850, ease: 'Sine.easeOut', onComplete: () => release.destroy() });
   }
 
   private createKey(x: number, y: number): Phaser.GameObjects.Sprite {
@@ -965,6 +1133,7 @@ export class FloorScene extends Phaser.Scene {
 
     const keySprite = this.add.sprite(posX, posY, 'key');
     keySprite.setDepth(5);
+    this.keyHalo = this.createInteractableHalo(posX, posY, 0xd7bf78, 24);
 
     // Add floating animation
     this.tweens.add({
@@ -1041,6 +1210,7 @@ export class FloorScene extends Phaser.Scene {
 
     const stairsSprite = this.add.sprite(posX, posY, 'stairs_locked');
     stairsSprite.setDepth(5);
+    this.stairsHalo = this.createInteractableHalo(posX, posY, 0x8faeae, 28);
 
     // Add label
     this.add.text(posX, posY - 30, 'STAIRS', {
@@ -1087,7 +1257,7 @@ export class FloorScene extends Phaser.Scene {
     this.input.keyboard?.enabled && (this.input.keyboard.enabled = false);
 
     // Show completion message with stats
-    const floorName = previous.floor === 0 ? 'BLOCK 13' : `FLOOR ${previous.floor}`;
+    const floorName = progressionName(previous.floor);
     const message = `${floorName} COMPLETE!`;
 
     const completionText = this.add.text(
@@ -1134,6 +1304,7 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private showVictoryScreen(finalState: RunState) {
+    this.playEscapeRelease();
     this.cameras.main.fadeIn(300);
 
     const { width, height } = this.cameras.main;
@@ -1336,14 +1507,34 @@ export class FloorScene extends Phaser.Scene {
   // ====== SEARCHABLE OBJECTS ======
 
   private createSearchables(searchables: Searchable[]) {
+    this.createRevealedMimicTexture();
+    const accent = floorVisualProfile(this.authoritativeSimulation.state.floor).accent;
     searchables.forEach((searchable, index) => {
       const sprite = this.createSearchableSprite(searchable, index);
+      const halo = this.createInteractableHalo(sprite.x, sprite.y, accent, 22);
       this.searchableSprites.push({
         sprite,
+        halo,
         data: searchable,
         searched: false,
       });
     });
+  }
+
+  private createRevealedMimicTexture() {
+    if (this.textures.exists('mimic_revealed')) return;
+    const graphics = this.add.graphics();
+    graphics.fillStyle(0x28202a, 1);
+    graphics.fillEllipse(0, 3, 24, 16);
+    graphics.fillStyle(0x8c3246, 1);
+    graphics.fillEllipse(0, 1, 17, 10);
+    graphics.fillStyle(0xe8d6c4, 1);
+    for (let tooth = -6; tooth <= 6; tooth += 4) graphics.fillTriangle(tooth - 2, -2, tooth + 2, -2, tooth, 3);
+    graphics.fillStyle(0xffd2b3, 1);
+    graphics.fillCircle(-4, -5, 2);
+    graphics.fillCircle(4, -5, 2);
+    graphics.generateTexture('mimic_revealed', 28, 24);
+    graphics.destroy();
   }
 
   private createSearchableSprite(searchable: Searchable, searchableIndex: number): Phaser.GameObjects.Sprite {
@@ -1462,33 +1653,50 @@ export class FloorScene extends Phaser.Scene {
     const state = this.authoritativeSimulation.state;
     state.crawlers.forEach((crawler) => {
       const graphics = this.add.graphics();
-      graphics.fillStyle(0x4a5568, 1); // Dark gray
-      graphics.fillEllipse(0, 0, 12, 8); // Small oval body
-      graphics.fillStyle(0x6b7280, 1);
-      graphics.fillCircle(-3, -2, 2); // Left eye
-      graphics.fillCircle(3, -2, 2); // Right eye
-      graphics.generateTexture(`crawler_${crawler.id}`, 16, 12);
+      graphics.fillStyle(0x41454a, 1);
+      graphics.fillEllipse(0, 1, 23, 12);
+      graphics.fillStyle(0x687078, 1);
+      graphics.fillEllipse(-3, 0, 12, 9);
+      graphics.lineStyle(1, 0x92979a, 0.7);
+      graphics.strokeEllipse(0, -1, 22, 10);
+      graphics.lineStyle(2, 0x686b6c, 1);
+      for (const side of [-1, 1]) {
+        graphics.lineBetween(side * 5, 1, side * 10, -5);
+        graphics.lineBetween(side * 7, 3, side * 12, 8);
+        graphics.lineBetween(side * 1, 4, side * 5, 9);
+      }
+      graphics.fillStyle(0xd5a69a, 0.92);
+      graphics.fillCircle(-5, -2, 1.7);
+      graphics.fillCircle(2, -2, 1.7);
+      graphics.generateTexture(`crawler_${crawler.id}`, 28, 20);
       graphics.destroy();
 
       const sprite = this.add.sprite(crawler.x / FIXED_SCALE, crawler.y / FIXED_SCALE, `crawler_${crawler.id}`);
       sprite.setDepth(8);
+      const exposure = enemyPresentationExposure(this.floorData, state, crawler.x, crawler.y);
+      sprite.setAlpha(exposure * 0.76);
       this.crawlerSprites.push(sprite);
     });
 
     // Create watcher sprites
     state.watchers.forEach((watcher) => {
       const graphics = this.add.graphics();
-      graphics.fillStyle(0x1a1a2e, 0.7); // Dark semi-transparen
-      graphics.fillRect(-12, -16, 24, 32); // Tall shadowy figure
-      graphics.fillStyle(0xff4444, 0.8); // Red eyes
-      graphics.fillCircle(-5, -6, 3);
-      graphics.fillCircle(5, -6, 3);
-      graphics.generateTexture(`watcher_${watcher.id}`, 28, 36);
+      graphics.fillStyle(0x222632, 0.78);
+      graphics.fillEllipse(0, 2, 25, 34);
+      graphics.fillStyle(0x5b6474, 0.38);
+      graphics.fillEllipse(0, -4, 15, 24);
+      graphics.lineStyle(1, 0xaab7c3, 0.52);
+      graphics.strokeEllipse(0, 1, 29, 39);
+      graphics.fillStyle(0xb7a1b5, 0.8);
+      graphics.fillCircle(-4, -7, 1.9);
+      graphics.fillCircle(4, -7, 1.9);
+      graphics.generateTexture(`watcher_${watcher.id}`, 34, 44);
       graphics.destroy();
 
       const sprite = this.add.sprite(watcher.x / FIXED_SCALE, watcher.y / FIXED_SCALE, `watcher_${watcher.id}`);
       sprite.setDepth(8);
-      sprite.setAlpha(0.6);
+      const exposure = enemyPresentationExposure(this.floorData, state, watcher.x, watcher.y);
+      sprite.setAlpha(watcher.active ? exposure * 0.76 : 0);
       this.watcherSprites.push(sprite);
     });
   }
@@ -1497,12 +1705,19 @@ export class FloorScene extends Phaser.Scene {
     this.authoritativeSimulation.state.ambushers.forEach((ambusher) => {
       const graphics = this.add.graphics();
       // Darker, more menacing figure
-      graphics.fillStyle(0x0a0a0a, 0.9); // Almost black
-      graphics.fillRect(-10, -14, 20, 28); // Hunched figure
-      graphics.fillStyle(0xffaa00, 1); // Amber glowing eyes
-      graphics.fillCircle(-4, -8, 3);
-      graphics.fillCircle(4, -8, 3);
-      graphics.generateTexture(`ambusher_${ambusher.id}`, 24, 32);
+      graphics.fillStyle(0x211b20, 1);
+      graphics.fillEllipse(0, -7, 16, 19);
+      graphics.fillStyle(0x33252a, 1);
+      graphics.fillTriangle(-9, -2, 9, -2, 0, 16);
+      graphics.lineStyle(1, 0x987c78, 0.72);
+      graphics.strokeEllipse(0, -7, 17, 20);
+      graphics.fillStyle(0xd28b69, 0.95);
+      graphics.fillCircle(-4, -8, 2.4);
+      graphics.fillCircle(4, -8, 2.4);
+      graphics.lineStyle(1, 0xc1977d, 0.62);
+      graphics.lineBetween(-5, 3, -9, 12);
+      graphics.lineBetween(5, 3, 9, 12);
+      graphics.generateTexture(`ambusher_${ambusher.id}`, 28, 38);
       graphics.destroy();
 
       const sprite = this.add.sprite(ambusher.x / FIXED_SCALE, ambusher.y / FIXED_SCALE, `ambusher_${ambusher.id}`);
@@ -1659,17 +1874,30 @@ export class FloorScene extends Phaser.Scene {
   private createStalker(worldWidth: number, worldHeight: number) {
     void worldWidth; void worldHeight;
     const graphics = this.add.graphics();
-    graphics.fillStyle(0x8b0000, 1); // Dark red
-    graphics.fillRect(-10, -14, 20, 28); // Slightly larger than player
-    graphics.fillStyle(0xff0000, 0.5); // Red glow
-    graphics.fillCircle(0, -8, 8);
-    graphics.generateTexture('stalker', 24, 32);
+    graphics.fillStyle(0x141116, 1);
+    graphics.fillEllipse(0, -10, 14, 16);
+    graphics.fillStyle(0x38232c, 1);
+    graphics.fillTriangle(-9, -7, 9, -7, 0, 18);
+    graphics.lineStyle(1, 0x9b707b, 0.78);
+    graphics.strokeEllipse(0, -10, 15, 17);
+    graphics.lineStyle(3, 0x29212a, 1);
+    graphics.lineBetween(-4, 0, -11, 17);
+    graphics.lineBetween(4, 0, 11, 17);
+    graphics.lineBetween(-2, 11, -4, 24);
+    graphics.lineBetween(2, 11, 5, 24);
+    graphics.lineStyle(2, 0x55404a, 0.9);
+    graphics.lineBetween(-10, 15, -12, 24);
+    graphics.lineBetween(10, 15, 12, 24);
+    graphics.fillStyle(0xe3a1a0, 0.96);
+    graphics.fillCircle(-3.5, -12, 1.8);
+    graphics.fillCircle(3.5, -12, 1.8);
+    graphics.generateTexture('stalker', 32, 52);
     graphics.destroy();
 
     const stalker = this.authoritativeSimulation.state.stalker;
     this.stalkerSprite = this.add.sprite(stalker.x / FIXED_SCALE, stalker.y / FIXED_SCALE, 'stalker');
     this.stalkerSprite.setDepth(9); // Just below player
-    this.stalkerSprite.setAlpha(stalker.visible ? 0.8 : 0);
+    this.stalkerSprite.setAlpha(stalker.visible ? enemyPresentationExposure(this.floorData, this.authoritativeSimulation.state, stalker.x, stalker.y) * 0.76 : 0);
   }
 
   private showGameOver() {
@@ -1922,4 +2150,11 @@ export class FloorScene extends Phaser.Scene {
     // Clear searchable sprites
     this.searchableSprites = [];
   }
+}
+
+function scaleColor(color: number, factor: number): number {
+  const red = Math.max(0, Math.min(255, Math.round(((color >> 16) & 0xff) * factor)));
+  const green = Math.max(0, Math.min(255, Math.round(((color >> 8) & 0xff) * factor)));
+  const blue = Math.max(0, Math.min(255, Math.round((color & 0xff) * factor)));
+  return (red << 16) | (green << 8) | blue;
 }

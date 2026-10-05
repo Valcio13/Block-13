@@ -1,4 +1,5 @@
 import { deriveSeeds, type RunManifest } from './seedDerivation';
+import { START_FLOOR, nextProgressionFloor, isOutsideFloor, isBlock13Arrival } from './progression';
 
 export type RunState = {
   floor: number;
@@ -41,7 +42,7 @@ export const createRun = (manifest?: RunManifest): RunState => {
   }
 
   return {
-    floor: 4, // Starting on Floor 4
+    floor: START_FLOOR,
     battery: 100,
     curse: 0,
     hp: 100, // Start with full health
@@ -56,15 +57,20 @@ export const createRun = (manifest?: RunManifest): RunState => {
   };
 };
 
-export const completeFloor = (state: RunState): RunState => ({
-  ...state,
-  floor: state.floor - 1,
-  floorsCompleted: state.floorsCompleted + 1,
-  score: state.score + 100 * state.floor, // Higher floors worth more points
-  curse: state.curse + 10, // Danger increases
-  battery: Math.min(100, state.battery + 20), // Small battery restoration
-  status: state.floor - 1 < 0 ? 'won' : 'playing', // Win after completing Block 13 (floor 0)
-  // seenStoryIds persists across floors (don't reset)
-  // manifest persists across floors (don't reset)
-  // seed persists across floors (don't reset)
-});
+export const completeFloor = (state: RunState): RunState => {
+  const nextFloor = nextProgressionFloor(state.floor);
+  const curseWithBonus = state.curse + 10;
+  const curse = isBlock13Arrival(state.floor) ? Math.max(state.curse, Math.min(99, curseWithBonus)) : curseWithBonus;
+  return {
+    ...state,
+    floor: nextFloor,
+    floorsCompleted: state.floorsCompleted + 1,
+    score: state.score + 100 * state.floor, // Higher floors worth more points
+    curse,
+    battery: Math.min(100, state.battery + 20), // Small battery restoration
+    status: isOutsideFloor(nextFloor) ? 'won' : 'playing',
+    // seenStoryIds persists across floors (don't reset)
+    // manifest persists across floors (don't reset)
+    // seed persists across floors (don't reset)
+  };
+};

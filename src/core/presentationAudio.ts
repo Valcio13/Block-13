@@ -1,4 +1,5 @@
 import type { SimulationEvent, AuthoritativeState } from './authoritativeSimulation';
+import { isBlock13Floor } from './progression';
 
 export type AudioCue = {
   key: string;
@@ -47,7 +48,7 @@ export function audioCuesForStateChange(previous: AuthoritativeState, current: A
   if (!previous.stalker.visible && current.stalker.visible) cues.push(cue('sfx_stalker_presence', 5000, { x: current.stalker.x, y: current.stalker.y }));
   if (previous.stalker.state !== 'hunting' && current.stalker.state === 'hunting') {
     cues.push(cue('sfx_danger_stinger', 5000));
-    cues.push(cue(current.floor === 0 ? 'sfx_final_chase_stinger' : 'sfx_stalker_hunt', 5000, { x: current.stalker.x, y: current.stalker.y }));
+    cues.push(cue(isBlock13Floor(current.floor) ? 'sfx_final_chase_stinger' : 'sfx_stalker_hunt', 5000, { x: current.stalker.x, y: current.stalker.y }));
     specificScare = true;
   }
 
@@ -77,6 +78,6 @@ export function audioCuesForStateChange(previous: AuthoritativeState, current: A
 }
 
 export function floorAmbienceKeys(floor: number): string[] {
-  const specific = floor === 0 ? 'amb_block13' : floor >= 1 && floor <= 4 ? `amb_floor_${floor}` : undefined;
+  const specific = isBlock13Floor(floor) ? 'amb_block13' : floor >= 1 && floor <= 4 ? `amb_floor_${floor}` : undefined;
   return specific ? [specific] : [];
 }

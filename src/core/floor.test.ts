@@ -65,4 +65,14 @@ describe('Floor Generation', () => {
     expect(floor3.rooms.length).toBeGreaterThan(0);
     expect(floor1.rooms.length).toBeGreaterThanOrEqual(floor3.rooms.length);
   });
+
+  it('places at most one searchable on each tile across generated floors', () => {
+    for (const seed of [1, 7, 42, 54321, 0xabcde123]) {
+      for (const floorNumber of [4, 3, 2, 1, 0]) {
+        const floor = generateFloor(seed, floorNumber);
+        const positions = floor.searchables.map(item => `${item.x},${item.y}`);
+        expect(new Set(positions).size, `duplicate searchable on seed ${seed}, floor ${floorNumber}`).toBe(positions.length);
+      }
+    }
+  });
 });
