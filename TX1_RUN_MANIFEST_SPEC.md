@@ -66,6 +66,23 @@ export interface RunManifest {
 }
 ```
 
+### Current rules identity encoding
+
+The human-readable rules identifier for game version `0.4.0` is
+`classic-static-walls-balance-v1-stalker-mimic-v1`. The manifest's `rulesHash`
+is the 32-byte Keccak-256 digest of the identifier's UTF-8 bytes, with no
+terminator or padding:
+
+```typescript
+rulesHash = keccak256(toBytes('classic-static-walls-balance-v1-stalker-mimic-v1'));
+```
+
+Only this digest is supplied to the TX1 `bytes32 rulesHash` argument, seed
+derivation, and FinalStateV1. The human-readable identifier remains metadata
+and is not itself ABI-encoded as `bytes32`. This clarifies the existing frozen
+field meaning and does not change the manifest schema or seed-derivation
+format.
+
 ---
 
 ## Entropy Source Selection

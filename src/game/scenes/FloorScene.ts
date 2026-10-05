@@ -13,8 +13,10 @@ import { keccak256, toHex } from 'viem';
 import { getAuthoredClueForSearchId } from '../../core/clues';
 import { formatFixedPointPercent, formatWholePercent } from '../../core/uiFormatting';
 import { corruptionVisualStrength, floorVisualProfile, flashlightVisualFactor, tileDressingAt } from '../../core/visualAtmosphere';
-import { isBlock13Floor, progressionName, START_FLOOR } from '../../core/progression';
+import { isBlock13Floor, START_FLOOR } from '../../core/progression';
 import { enemyPresentationExposure, hasPresentationLineOfSight } from '../presentationVisibility';
+import { collectOccludedLightRays, type OccludedRay } from '../lightOcclusion';
+import { blockTransitionBeats, EpilogueAdvanceGate, hudWarningCopy, nextEpilogueBeat, nextOpeningStoryIndex, objectiveCopy, OPENING_STORY_LINES, playerBlockName, shouldBeginVictoryEpilogue, VICTORY_EPILOGUE, watcherIsCausingCurse } from '../contestUx';
 
 interface FloorSceneData {
   runState: RunState;
@@ -28,6 +30,8 @@ interface SearchableSprite {
   data: Searchable;
   searched: boolean;
 }
+
+const FLASHLIGHT_HALF_ANGLES = [35, 32, 28, 24, 20].map(angle => Phaser.Math.DegToRad(angle));
 
 export class FloorScene extends Phaser.Scene {
   private runState!: RunState;
@@ -60,7 +64,6 @@ export class FloorScene extends Phaser.Scene {
   private statusText!: Phaser.GameObjects.Text;
   private interactPrompt!: Phaser.GameObjects.Text;
   private controlsHint!: Phaser.GameObjects.Text;
-  private dangerIndicator?: Phaser.GameObjects.Text;
   private healthBarBg!: Phaser.GameObjects.Rectangle;
   private healthBarFill!: Phaser.GameObjects.Graphics;
   private healthBarText!: Phaser.GameObjects.Text;
@@ -68,6 +71,11 @@ export class FloorScene extends Phaser.Scene {
   private flashlightOn = false;
   private lightmapTexture!: Phaser.GameObjects.RenderTexture;
   private lightmapGraphics!: Phaser.GameObjects.Graphics;
+  private ambientRayAngles: number[] = [];
+  private ambientLightRays: OccludedRay[] = [];
+  private flashlightRayAngles: number[] = [];
+  private flashlightLightRays: OccludedRay[] = [];
+  private flashlightBoundaryAngles: number[] = new Array(FLASHLIGHT_HALF_ANGLES.length * 2).fill(0);
   private damageVignette!: Phaser.GameObjects.Graphics;
   private corruptionVignette!: Phaser.GameObjects.Graphics;
   private playerFacingAngle = 0;
@@ -83,6 +91,22 @@ export class FloorScene extends Phaser.Scene {
   private storyPopupOpen = false; // Track if story popup is displayed
   private closeStoryPopup?: () => void;
   private storyCloseKey?: Phaser.Input.Keyboard.Key;
+  private openingStoryOpen = false;
+  private openingStoryIndex = 0;
+  private openingStoryTimer?: Phaser.Time.TimerEvent;
+  private openingStoryElements: Phaser.GameObjects.GameObject[] = [];
+  private openingStoryText?: Phaser.GameObjects.Text;
+  private openingAdvanceKey?: Phaser.Input.Keyboard.Key;
+  private endingEpilogueOpen = false;
+  private endingEpilogueIndex = 0;
+  private endingEpilogueTimer?: Phaser.Time.TimerEvent;
+  private endingEpilogueElements: Phaser.GameObjects.GameObject[] = [];
+  private endingEpilogueText?: Phaser.GameObjects.Text;
+  private endingEpilogueVeil?: Phaser.GameObjects.Rectangle;
+  private endingExterior?: Phaser.GameObjects.Graphics;
+  private endingAdvanceGate = new EpilogueAdvanceGate();
+  private endingKeyDownHandler?: (event: KeyboardEvent) => void;
+  private endingKeyUpHandler?: (event: KeyboardEvent) => void;
 
   constructor() {
     super({ key: 'FloorScene' });
@@ -104,18 +128,37 @@ export class FloorScene extends Phaser.Scene {
     this.storyPopupOpen = false;
     this.closeStoryPopup = undefined;
     this.storyCloseKey = undefined;
+    this.openingStoryOpen = false;
+    this.openingStoryIndex = 0;
+    this.openingStoryTimer = undefined;
+    this.openingStoryElements = [];
+    this.openingStoryText = undefined;
+    this.endingEpilogueOpen = false;
+    this.endingEpilogueIndex = 0;
+    this.endingEpilogueTimer = undefined;
+    this.endingEpilogueElements = [];
+    this.endingEpilogueText = undefined;
+    this.endingEpilogueVeil = undefined;
+    this.endingExterior = undefined;
+    this.endingAdvanceGate = new EpilogueAdvanceGate();
+    this.endingKeyDownHandler = undefined;
+    this.endingKeyUpHandler = undefined;
     // Phaser restarts this Scene instance. Clear every presentation reference
     // here so create() cannot accidentally touch a destroyed floor's objects.
     this.statusText = undefined as unknown as Phaser.GameObjects.Text;
     this.keyLabel = undefined as unknown as Phaser.GameObjects.Text;
     this.stairsLabel = undefined as unknown as Phaser.GameObjects.Text;
-    this.dangerIndicator = undefined;
     this.healthBarBg = undefined as unknown as Phaser.GameObjects.Rectangle;
     this.healthBarFill = undefined as unknown as Phaser.GameObjects.Graphics;
     this.healthBarText = undefined as unknown as Phaser.GameObjects.Text;
     this.uiCamera = undefined as unknown as Phaser.Cameras.Scene2D.Camera;
     this.lightmapTexture = undefined as unknown as Phaser.GameObjects.RenderTexture;
     this.lightmapGraphics = undefined as unknown as Phaser.GameObjects.Graphics;
+    this.ambientRayAngles = [];
+    this.ambientLightRays = [];
+    this.flashlightRayAngles = [];
+    this.flashlightLightRays = [];
+    this.flashlightBoundaryAngles = new Array(FLASHLIGHT_HALF_ANGLES.length * 2).fill(0);
     this.damageVignette = undefined as unknown as Phaser.GameObjects.Graphics;
     this.corruptionVignette = undefined as unknown as Phaser.GameObjects.Graphics;
     this.mimicTwitchStates.clear();
@@ -226,6 +269,14 @@ export class FloorScene extends Phaser.Scene {
 
     // Setup pause key handler
     this.pauseKey.on('down', () => {
+      if (this.openingStoryOpen) {
+        this.skipOpeningStory();
+        return;
+      }
+      if (this.endingEpilogueOpen) {
+        this.finishVictoryEpilogue();
+        return;
+      }
       if (this.storyPopupOpen) {
         this.closeStoryPopup?.();
         return;
@@ -235,7 +286,14 @@ export class FloorScene extends Phaser.Scene {
       }
     });
     this.storyCloseKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    this.storyCloseKey.on('down', () => this.closeStoryPopup?.());
+    this.storyCloseKey.on('down', () => {
+      if (this.openingStoryOpen) this.advanceOpeningStory();
+      else if (!this.endingEpilogueOpen) this.closeStoryPopup?.();
+    });
+    this.openingAdvanceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+    this.openingAdvanceKey.on('down', () => {
+      if (this.openingStoryOpen) this.advanceOpeningStory();
+    });
 
     // Ensure keyboard is enabled
     if (this.input.keyboard) {
@@ -243,8 +301,6 @@ export class FloorScene extends Phaser.Scene {
     }
 
     // Floor info with run state
-    const dangerLevel = this.runState.curse;
-
     this.statusText = this.add.text(16, 16, '', {
       fontFamily: 'monospace',
       fontSize: '13px',
@@ -254,16 +310,6 @@ export class FloorScene extends Phaser.Scene {
       lineSpacing: 2,
     }).setScrollFactor(0).setDepth(100);
 
-    // Danger indicator
-    {
-      this.dangerIndicator = this.add.text(this.cameras.main.width - 16, 16, '', {
-        fontFamily: 'monospace',
-        fontSize: '13px',
-        color: '#70d4c6',
-        backgroundColor: '#07090d',
-        padding: { x: 8, y: 4 },
-      }).setOrigin(1, 0).setScrollFactor(0).setDepth(100).setVisible(dangerLevel > 0);
-    }
 
     // Interaction prompt (hidden initially)
     this.interactPrompt = this.add.text(
@@ -333,22 +379,26 @@ export class FloorScene extends Phaser.Scene {
       this.healthBarFill,
       this.healthBarText
     ]);
-    if (this.dangerIndicator) {
-      this.cameras.main.ignore(this.dangerIndicator);
-    }
 
     // All lifecycle-owned HUD objects must be recreated before any updater
     // touches them. updateStatusText also updates the health bar.
     this.updateStatusText();
+
+    // FloorScene is only entered after local setup or TX1 confirmation, so the
+    // opening story cannot delay either wallet flow. It is presentation-only.
+    if (this.authoritativeSimulation.state.floor === START_FLOOR
+      && this.registry.get('openingStorySeen') !== true) {
+      this.showOpeningStory();
+    }
   }
 
   update(time: number, delta: number) {
     // Story and pause overlays freeze simulation ticks. Dismissing a note is UI
     // input only, so it is neither recorded nor allowed to consume a gameplay tick.
-    if (!this.storyPopupOpen && !this.isTransitioning && !this.isPaused) {
+    if (!this.storyPopupOpen && !this.openingStoryOpen && !this.endingEpilogueOpen && !this.isTransitioning && !this.isPaused) {
       this.simulationEngine.update(delta, (fixedDelta, tick) => {
         this.fixedUpdate(fixedDelta, tick);
-      }, () => this.storyPopupOpen || this.isTransitioning || this.isPaused);
+      }, () => this.storyPopupOpen || this.openingStoryOpen || this.endingEpilogueOpen || this.isTransitioning || this.isPaused);
     }
 
     // Update UI (can use variable delta/wall-clock timing - cosmetic only)
@@ -361,7 +411,7 @@ export class FloorScene extends Phaser.Scene {
    */
   private fixedUpdate(fixedDelta: number, tick: number) {
     // Don't update during transitions/pauses/popups
-    if (this.isTransitioning || this.isPaused || this.storyPopupOpen) {
+    if (this.isTransitioning || this.isPaused || this.storyPopupOpen || this.openingStoryOpen || this.endingEpilogueOpen) {
       return;
     }
     if (this.authoritativeSimulation.state.status !== 'playing') return;
@@ -394,8 +444,7 @@ export class FloorScene extends Phaser.Scene {
       this.renderAuthoritativeState(before, state, result.events);
       this.presentSimulationEvents(result.events);
       if (state.status === 'won') {
-        this.audioDirector.stopCategory('ambience');
-        this.showVictoryScreen(this.runState);
+        this.beginVictoryEpilogue();
       } else if (state.status === 'lost') {
         this.audioDirector.stopCategory('ambience');
         this.playerDeath();
@@ -424,7 +473,7 @@ export class FloorScene extends Phaser.Scene {
     for (const audioCue of audioCuesForEvents(events)) this.playAudioCue(audioCue);
     for (const event of events) {
       if (event.type === 'key_collected') {
-        this.showTemporaryMessage(isBlock13Floor(this.authoritativeSimulation.state.floor) ? 'EXIT OPEN — GET OUT' : 'KEY FOUND', '#ffd700');
+        this.showTemporaryMessage(isBlock13Floor(this.authoritativeSimulation.state.floor) ? 'EXIT OPEN — GET OUT' : 'KEY FOUND — RETURN TO STAIRS', '#ffd700');
       }
       else if (event.type === 'damage') this.showTemporaryMessage(`HURT -${event.amount} HP`, '#ff6666');
       else if (event.type === 'loot_searched') {
@@ -436,9 +485,9 @@ export class FloorScene extends Phaser.Scene {
           const clue = getAuthoredClueForSearchId(result.id);
           this.showClueModal(clue?.title ?? 'NOTE FOUND', clue?.content ?? 'The writing is too faded to read.');
         } else if (result.type === 'nothing') this.showTemporaryMessage('EMPTY', '#a5b6b5');
-        else this.showTemporaryMessage('SOMETHING MOVED INSIDE', '#ff6666');
+        else this.showTemporaryMessage('MIMIC REVEALED — RUN', '#ff6666');
       } else if (event.type === 'floor_transition' && event.toFloor >= 0) {
-        this.showTemporaryMessage(`FLOOR ${event.toFloor} UNLOCKED`, '#ffd700');
+        this.showTemporaryMessage(`${playerBlockName(event.toFloor)} UNLOCKED`, '#ffd700');
       }
     }
   }
@@ -466,11 +515,22 @@ export class FloorScene extends Phaser.Scene {
 
   /** Presentation adapter: every moving enemy/object comes from an immutable sim snapshot. */
   private renderAuthoritativeState(previous: AuthoritativeState, state: AuthoritativeState, events: ReturnType<AuthoritativeSimulation['stepWithEvents']>['events']) {
-    this.block13ObjectiveStatus = isBlock13Floor(state.floor)
-      ? state.hasKey
-        ? state.stalker.state === 'hunting' ? 'GET OUT NOW' : 'OBJECTIVE: GET OUT'
-        : 'OBJECTIVE: FIND THE KEY'
-      : '';
+    this.block13ObjectiveStatus = objectiveCopy(state.floor, state.hasKey, state.stalker.state === 'hunting');
+    if (this.registry.get('stalkerHintShown') !== true && state.stalker.visible) {
+      this.registry.set('stalkerHintShown', true);
+      this.showTemporaryMessage('FLASHLIGHT CAN REPEL IT', '#ffd700', 2200);
+    }
+    if (previous.stalker.state === 'hunting' && state.stalker.state === 'retreating' && state.flashlightOn) {
+      this.showTemporaryMessage('STALKER REPELLED', '#70d4c6');
+    }
+    if (state.curse > previous.curse && watcherIsCausingCurse(state) && this.registry.get('watcherHintShown') !== true) {
+      this.registry.set('watcherHintShown', true);
+      this.showTemporaryMessage('WATCHER — LOOK AWAY\nCURSE RISING', '#d4c6f0', 1900);
+    }
+    if (state.ambushers.some(enemy => enemy.state === 'warning'
+      && previous.ambushers.find(old => old.id === enemy.id)?.state !== 'warning')) {
+      this.showTemporaryMessage('AMBUSHER WARNING — MOVE!', '#ffaaa0');
+    }
     if (state.facingX !== 0 || state.facingY !== 0) this.playerFacingAngle = Math.atan2(state.facingY, state.facingX);
     this.hasKey = state.hasKey;
     this.stairsUnlocked = state.hasKey;
@@ -706,41 +766,68 @@ export class FloorScene extends Phaser.Scene {
     this.lightmapGraphics.fillStyle(profile.darkness, 1);
     this.lightmapGraphics.fillRect(0, 0, worldWidth, worldHeight);
 
-    // Nested values soften the local visibility falloff without a shader.
-    this.lightmapGraphics.fillStyle(scaleColor(profile.ambient, 0.34), 1);
-    this.lightmapGraphics.fillCircle(this.player.x, this.player.y, 88);
-    this.lightmapGraphics.fillStyle(scaleColor(profile.ambient, 0.48), 1);
-    this.lightmapGraphics.fillCircle(this.player.x, this.player.y, 76);
-    this.lightmapGraphics.fillStyle(scaleColor(profile.ambient, 0.62), 1);
-    this.lightmapGraphics.fillCircle(this.player.x, this.player.y, 62);
-    this.lightmapGraphics.fillStyle(scaleColor(profile.ambient, 0.82), 1);
-    this.lightmapGraphics.fillCircle(this.player.x, this.player.y, 48);
-    this.lightmapGraphics.fillStyle(scaleColor(profile.ambient, 1.08), 1);
-    this.lightmapGraphics.fillCircle(this.player.x, this.player.y, 34);
+    const originX = this.player.x;
+    const originY = this.player.y;
+    const ambientRays = collectOccludedLightRays(
+      this.floorData, originX, originY, 88, -Math.PI, Math.PI, 4,
+      [], this.ambientRayAngles, this.ambientLightRays,
+    );
+    // Concentric clipped polygons preserve soft falloff while respecting walls.
+    this.drawOccludedLightShape(ambientRays, originX, originY, 88, scaleColor(profile.ambient, 0.34));
+    this.drawOccludedLightShape(ambientRays, originX, originY, 76, scaleColor(profile.ambient, 0.48));
+    this.drawOccludedLightShape(ambientRays, originX, originY, 62, scaleColor(profile.ambient, 0.62));
+    this.drawOccludedLightShape(ambientRays, originX, originY, 48, scaleColor(profile.ambient, 0.82));
+    this.drawOccludedLightShape(ambientRays, originX, originY, 34, scaleColor(profile.ambient, 1.08));
 
     if (this.flashlightOn) {
-      const startX = this.player.x;
-      const startY = this.player.y;
       const factor = flashlightVisualFactor(state.tick, state.floor);
-      const cone = (length: number, halfAngleDegrees: number, color: number) => {
-        const halfAngle = Phaser.Math.DegToRad(halfAngleDegrees);
-        const leftX = startX + Math.cos(this.playerFacingAngle - halfAngle) * length;
-        const leftY = startY + Math.sin(this.playerFacingAngle - halfAngle) * length;
-        const rightX = startX + Math.cos(this.playerFacingAngle + halfAngle) * length;
-        const rightY = startY + Math.sin(this.playerFacingAngle + halfAngle) * length;
-        this.lightmapGraphics.fillStyle(scaleColor(color, factor), 1);
-        this.lightmapGraphics.fillTriangle(startX, startY, leftX, leftY, rightX, rightY);
-      };
-      cone(286, 35, scaleColor(profile.flashlight, 0.3));
-      cone(270, 32, scaleColor(profile.flashlight, 0.42));
-      cone(248, 28, scaleColor(profile.flashlight, 0.62));
-      cone(226, 24, scaleColor(profile.flashlight, 0.82));
-      cone(210, 20, profile.flashlight);
+      for (let i = 0; i < FLASHLIGHT_HALF_ANGLES.length; i++) {
+        this.flashlightBoundaryAngles[i * 2] = this.playerFacingAngle - FLASHLIGHT_HALF_ANGLES[i];
+        this.flashlightBoundaryAngles[i * 2 + 1] = this.playerFacingAngle + FLASHLIGHT_HALF_ANGLES[i];
+      }
+      const flashlightRays = collectOccludedLightRays(
+        this.floorData, originX, originY, 286,
+        this.playerFacingAngle - FLASHLIGHT_HALF_ANGLES[0], this.playerFacingAngle + FLASHLIGHT_HALF_ANGLES[0],
+        2, this.flashlightBoundaryAngles, this.flashlightRayAngles, this.flashlightLightRays,
+      );
+      this.drawOccludedLightShape(flashlightRays, originX, originY, 286, scaleColor(profile.flashlight, 0.3 * factor), FLASHLIGHT_HALF_ANGLES[0]);
+      this.drawOccludedLightShape(flashlightRays, originX, originY, 270, scaleColor(profile.flashlight, 0.42 * factor), FLASHLIGHT_HALF_ANGLES[1]);
+      this.drawOccludedLightShape(flashlightRays, originX, originY, 248, scaleColor(profile.flashlight, 0.62 * factor), FLASHLIGHT_HALF_ANGLES[2]);
+      this.drawOccludedLightShape(flashlightRays, originX, originY, 226, scaleColor(profile.flashlight, 0.82 * factor), FLASHLIGHT_HALF_ANGLES[3]);
+      this.drawOccludedLightShape(flashlightRays, originX, originY, 210, scaleColor(profile.flashlight, factor), FLASHLIGHT_HALF_ANGLES[4]);
     }
 
     // Draw the finished grayscale lightmap into the RenderTexture
     this.lightmapTexture.clear();
     this.lightmapTexture.draw(this.lightmapGraphics, 0, 0);
+  }
+
+  private drawOccludedLightShape(
+    rays: OccludedRay[],
+    originX: number,
+    originY: number,
+    radius: number,
+    color: number,
+    halfAngle?: number,
+  ) {
+    if (rays.length < 3) return;
+    const centerAngle = this.playerFacingAngle;
+    const lowerAngle = halfAngle === undefined ? -Infinity : centerAngle - halfAngle - 1e-8;
+    const upperAngle = halfAngle === undefined ? Infinity : centerAngle + halfAngle + 1e-8;
+    const graphics = this.lightmapGraphics;
+    graphics.fillStyle(color, 1);
+    graphics.beginPath();
+    graphics.moveTo(originX, originY);
+    let points = 0;
+    for (const ray of rays) {
+      if (ray.angle < lowerAngle || ray.angle > upperAngle) continue;
+      const distance = Math.min(radius, ray.distance);
+      graphics.lineTo(originX + Math.cos(ray.angle) * distance, originY + Math.sin(ray.angle) * distance);
+      points++;
+    }
+    if (points < 2) return;
+    graphics.closePath();
+    graphics.fillPath();
   }
 
   private createCircleTexture(size: number, fillStyle: any): Phaser.GameObjects.Graphics {
@@ -826,6 +913,66 @@ export class FloorScene extends Phaser.Scene {
     closeButton.on('pointerdown', close);
   }
 
+  private showOpeningStory() {
+    if (this.openingStoryOpen || !this.uiCamera) return;
+    this.openingStoryOpen = true;
+    this.openingStoryIndex = 0;
+
+    const { width, height } = this.cameras.main;
+    const veil = this.add.rectangle(width / 2, height / 2, width, height, 0x030609, 0.96)
+      .setScrollFactor(0).setDepth(500).setInteractive();
+    const timeLabel = this.add.text(width / 2, height / 2 - 74, 'NIGHT SHIFT  //  INCIDENT LOG', {
+      fontFamily: 'monospace', fontSize: '12px', color: '#70817f', letterSpacing: 2,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(501);
+    const storyText = this.add.text(width / 2, height / 2 - 8, '', {
+      fontFamily: 'monospace', fontSize: '20px', color: '#d9e3df', align: 'center',
+      wordWrap: { width: Math.min(560, width - 64), useAdvancedWrap: true },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(501);
+    const hint = this.add.text(width / 2, height / 2 + 84, '[SPACE / ENTER] CONTINUE  ·  [ESC] SKIP', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#80918e', letterSpacing: 1,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(501);
+    this.openingStoryElements = [veil, timeLabel, storyText, hint];
+    this.openingStoryText = storyText;
+    this.cameras.main.ignore(this.openingStoryElements);
+    veil.on('pointerdown', () => this.advanceOpeningStory());
+    this.renderOpeningStoryLine();
+  }
+
+  private renderOpeningStoryLine() {
+    if (!this.openingStoryOpen || !this.openingStoryText) return;
+    this.openingStoryText.setText(OPENING_STORY_LINES[this.openingStoryIndex]);
+    this.openingStoryTimer?.remove(false);
+    this.openingStoryTimer = this.time.delayedCall(1100, () => this.advanceOpeningStory());
+  }
+
+  private advanceOpeningStory() {
+    if (!this.openingStoryOpen) return;
+    const nextIndex = nextOpeningStoryIndex(this.openingStoryIndex);
+    if (nextIndex < 0) {
+      this.closeOpeningStory();
+      return;
+    }
+    this.openingStoryIndex = nextIndex;
+    this.renderOpeningStoryLine();
+  }
+
+  private skipOpeningStory() {
+    if (!this.openingStoryOpen) return;
+    this.openingStoryIndex = nextOpeningStoryIndex(this.openingStoryIndex, true);
+    this.closeOpeningStory();
+  }
+
+  private closeOpeningStory() {
+    if (!this.openingStoryOpen) return;
+    this.openingStoryOpen = false;
+    this.openingStoryTimer?.remove(false);
+    this.openingStoryTimer = undefined;
+    this.openingStoryElements.forEach(element => element.destroy());
+    this.openingStoryElements = [];
+    this.openingStoryText = undefined;
+    this.registry.set('openingStorySeen', true);
+  }
+
   private showPauseMenu() {
     this.isPaused = true;
 
@@ -906,7 +1053,7 @@ export class FloorScene extends Phaser.Scene {
     const instructions = this.add.text(
       this.cameras.main.width / 2,
       this.cameras.main.height / 2 + 110,
-      'Press [ESC] to resume',
+      '[ESC] RESUME  ·  [TAB/↑/↓] SELECT  ·  [ENTER] CONFIRM',
       {
         fontFamily: 'monospace',
         fontSize: '12px',
@@ -915,20 +1062,29 @@ export class FloorScene extends Phaser.Scene {
     ).setOrigin(0.5).setScrollFactor(0).setDepth(302);
 
     const pauseElements = [overlay, menu, border, title, resumeButton, mainMenuButton, instructions];
+    const pauseActions = [resumeButton, mainMenuButton];
+    let selectedAction = 0;
+    const showSelectedAction = () => pauseActions.forEach((button, index) => {
+      const selected = index === selectedAction;
+      button.setStyle({ color: selected ? '#ffd700' : '#d9f3ea', backgroundColor: selected ? '#3a3a0a' : '#2a2a2a' });
+    });
+    showSelectedAction();
 
     // Button hover effects
     resumeButton.on('pointerover', () => {
-      resumeButton.setStyle({ color: '#ffd700' });
+      selectedAction = 0;
+      showSelectedAction();
     });
     resumeButton.on('pointerout', () => {
-      resumeButton.setStyle({ color: '#d9f3ea' });
+      showSelectedAction();
     });
 
     mainMenuButton.on('pointerover', () => {
-      mainMenuButton.setStyle({ color: '#ffd700' });
+      selectedAction = 1;
+      showSelectedAction();
     });
     mainMenuButton.on('pointerout', () => {
-      mainMenuButton.setStyle({ color: '#d9f3ea' });
+      showSelectedAction();
     });
 
     // Close pause menu handler
@@ -936,6 +1092,7 @@ export class FloorScene extends Phaser.Scene {
       this.isPaused = false;
       pauseElements.forEach(el => el.destroy());
       this.pauseKey.off('down', escHandler);
+      this.input.keyboard?.off('keydown', pauseKeyboardHandler);
     };
 
     // Resume button click
@@ -947,6 +1104,20 @@ export class FloorScene extends Phaser.Scene {
     mainMenuButton.on('pointerdown', () => {
       window.location.reload(); // Return to React shell
     });
+
+    const pauseKeyboardHandler = (event: KeyboardEvent) => {
+      if (event.key === 'Tab' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        selectedAction = event.key === 'ArrowUp'
+          ? (selectedAction + pauseActions.length - 1) % pauseActions.length
+          : (selectedAction + 1) % pauseActions.length;
+        showSelectedAction();
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        pauseActions[selectedAction].emit('pointerdown');
+      }
+    };
+    this.input.keyboard?.on('keydown', pauseKeyboardHandler);
 
     // ESC to resume
     const escHandler = () => {
@@ -961,7 +1132,11 @@ export class FloorScene extends Phaser.Scene {
     const flashStatus = this.flashlightOn ? 'ON' : 'OFF';
 
     // Display floor name
-    const floorDisplay = isBlock13Floor(this.runState.floor) ? progressionName(this.runState.floor) : `${progressionName(this.runState.floor)}/${START_FLOOR}`;
+    const floorDisplay = isBlock13Floor(this.runState.floor)
+      ? playerBlockName(this.runState.floor)
+      : `${playerBlockName(this.runState.floor)}/${START_FLOOR}`;
+    const simulationState = this.authoritativeSimulation.state;
+    this.block13ObjectiveStatus = objectiveCopy(simulationState.floor, simulationState.hasKey, simulationState.stalker.state === 'hunting');
 
     const lines = [
       floorDisplay,
@@ -971,21 +1146,20 @@ export class FloorScene extends Phaser.Scene {
       `BATTERY: ${formatWholePercent(this.runState.battery)}%`,
       `SCORE: ${this.runState.score}`,
       `LIGHT: ${flashStatus}`,
+      ...hudWarningCopy({ hp: simulationState.hp, battery: simulationState.battery / FIXED_SCALE, curse: simulationState.curse / FIXED_SCALE }),
+      ...hudWarningCopy({ hp: this.authoritativeSimulation.state.hp, battery: this.authoritativeSimulation.state.battery / FIXED_SCALE, curse: this.authoritativeSimulation.state.curse / FIXED_SCALE }),
     ];
     this.statusText.setText(lines.join('\n'));
-
-    if (this.dangerIndicator) {
-      const danger = formatWholePercent(this.runState.curse);
-      this.dangerIndicator.setText(`DANGER: ${danger}%`);
-      this.dangerIndicator.setColor(danger < 20 ? '#70d4c6' : danger < 40 ? '#ffd700' : '#ff4444');
-      this.dangerIndicator.setVisible(danger > 0);
-    }
 
     // Update color based on most critical resource
     if (this.runState.hp <= 25) {
       this.statusText.setColor(hpColor);
     } else if (this.runState.battery <= 20) {
       this.statusText.setColor(batteryColor);
+    } else if (this.runState.curse >= 85) {
+      this.statusText.setColor('#ff4444');
+    } else if (this.runState.curse > 50) {
+      this.statusText.setColor('#ffd700');
     } else {
       this.statusText.setColor('#70d4c6');
     }
@@ -1329,7 +1503,7 @@ export class FloorScene extends Phaser.Scene {
     this.input.keyboard?.enabled && (this.input.keyboard.enabled = false);
 
     // Show completion message with stats
-    const floorName = progressionName(previous.floor);
+    const floorName = playerBlockName(previous.floor);
     const message = `${floorName} COMPLETE!`;
 
     const completionText = this.add.text(
@@ -1348,6 +1522,31 @@ export class FloorScene extends Phaser.Scene {
 
     // UI camera only
     this.cameras.main.ignore(completionText);
+
+    const fakeoutBeats = blockTransitionBeats(previous.floor, current.floor);
+    if (fakeoutBeats.length > 0) {
+      const veil = this.add.rectangle(
+        this.cameras.main.width / 2,
+        this.cameras.main.height / 2,
+        this.cameras.main.width,
+        this.cameras.main.height,
+        0x020304,
+        0.94,
+      ).setScrollFactor(0).setDepth(199);
+      this.cameras.main.ignore(veil);
+      completionText.setDepth(200).setAlpha(1);
+      fakeoutBeats.forEach((beat, index) => {
+        this.time.delayedCall(index * 360, () => {
+          if (!completionText.active) return;
+          completionText.setText(beat.text);
+          completionText.setColor(beat.glitch ? '#d17a9c' : '#70d4c6');
+          if (beat.glitch) {
+            completionText.setScale(1.04);
+            this.time.delayedCall(55, () => completionText.active && completionText.setScale(1));
+          }
+        });
+      });
+    }
 
     // Show score gain and battery bonus
     const scoreGain = current.score - previous.score;
@@ -1370,12 +1569,156 @@ export class FloorScene extends Phaser.Scene {
     // UI camera only
     this.cameras.main.ignore(scoreText);
 
+    if (fakeoutBeats.length > 0) scoreText.setVisible(false);
+
     try {
       this.tweens.add({ targets: [completionText, scoreText], alpha: 1, duration: 300 });
     } catch { /* presentation failure cannot hold floor progression */ }
   }
 
+  private beginVictoryEpilogue() {
+    if (this.endingEpilogueOpen || !shouldBeginVictoryEpilogue(this.authoritativeSimulation.state.status)) return;
+    this.endingEpilogueOpen = true;
+    this.endingEpilogueIndex = 0;
+    this.endingAdvanceGate.release();
+    try { this.audioDirector.fadeOutCategory('ambience', 800); }
+    catch { this.audioDirector.stopCategory('ambience'); }
+    this.playEscapeRelease();
+
+    const { width, height } = this.cameras.main;
+    const exterior = this.drawEndingExterior(width, height).setScrollFactor(0).setDepth(498).setAlpha(0);
+    const veil = this.add.rectangle(width / 2, height / 2, width, height, 0x020407, 0)
+      .setScrollFactor(0).setDepth(500).setInteractive();
+    const text = this.add.text(width / 2, height / 2 - 14, '', {
+      fontFamily: 'monospace', fontSize: '22px', color: '#d9e3df', align: 'center',
+      wordWrap: { width: Math.min(650, width - 48), useAdvancedWrap: true },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(501).setAlpha(0);
+    const hint = this.add.text(width / 2, height * 0.79, '[SPACE / ENTER / CLICK] CONTINUE  ·  [ESC] SKIP', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#82908e', letterSpacing: 1,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(502);
+    this.endingExterior = exterior;
+    this.endingEpilogueVeil = veil;
+    this.endingEpilogueText = text;
+    this.endingEpilogueElements = [exterior, veil, text, hint];
+    this.cameras.main.ignore(this.endingEpilogueElements);
+    veil.on('pointerdown', () => this.advanceVictoryEpilogue());
+
+    this.endingKeyDownHandler = (event: KeyboardEvent) => {
+      if (!this.endingEpilogueOpen || (event.key !== ' ' && event.key !== 'Enter')) return;
+      event.preventDefault();
+      if (this.endingAdvanceGate.press(event.repeat)) this.advanceVictoryEpilogue();
+    };
+    this.endingKeyUpHandler = (event: KeyboardEvent) => {
+      if (event.key === ' ' || event.key === 'Enter') this.endingAdvanceGate.release();
+    };
+    this.input.keyboard?.on('keydown', this.endingKeyDownHandler);
+    this.input.keyboard?.on('keyup', this.endingKeyUpHandler);
+    this.tweens.add({ targets: veil, alpha: 1, duration: 650, ease: 'Sine.easeInOut' });
+    this.showVictoryEpilogueBeat();
+  }
+
+  private drawEndingExterior(width: number, height: number): Phaser.GameObjects.Graphics {
+    const graphics = this.add.graphics();
+    graphics.fillStyle(0x07111b, 1);
+    graphics.fillRect(0, 0, width, height);
+
+    // Fixed coordinate-derived stars and a quiet moon; no RNG is used.
+    graphics.fillStyle(0x9ba9a8, 0.38);
+    for (let i = 0; i < 22; i++) {
+      const x = (i * 79 + 31) % Math.max(1, width);
+      const y = (i * 43 + 17) % Math.max(1, Math.floor(height * 0.46));
+      graphics.fillRect(x, y, i % 5 === 0 ? 2 : 1, 1);
+    }
+    graphics.fillStyle(0xb7c5c0, 0.38);
+    graphics.fillCircle(width * 0.79, height * 0.2, Math.min(17, width * 0.025));
+
+    const buildingX = width * 0.17;
+    const buildingY = height * 0.25;
+    const buildingWidth = width * 0.44;
+    const buildingHeight = height * 0.58;
+    graphics.fillStyle(0x101820, 1);
+    graphics.fillRect(buildingX, buildingY, buildingWidth, buildingHeight);
+    graphics.fillStyle(0x1b252b, 1);
+    graphics.fillRect(buildingX - 5, buildingY - 7, buildingWidth + 10, 8);
+    graphics.fillStyle(0x151e24, 0.88);
+    const columns = 5;
+    const rows = 5;
+    for (let row = 0; row < rows; row++) {
+      for (let column = 0; column < columns; column++) {
+        const wx = buildingX + 14 + column * ((buildingWidth - 32) / columns);
+        const wy = buildingY + 18 + row * ((buildingHeight - 40) / rows);
+        graphics.fillRect(wx, wy, 15, 21);
+      }
+    }
+    graphics.fillStyle(0x0b1117, 1);
+    graphics.fillRect(0, height * 0.83, width, height * 0.17);
+    graphics.fillStyle(0x263034, 0.9);
+    graphics.fillRect(0, height * 0.82, width, 2);
+
+    // Small still silhouette outside the building, facing back toward it.
+    const playerX = width * 0.73;
+    const groundY = height * 0.82;
+    graphics.fillStyle(0x05090d, 1);
+    graphics.fillEllipse(playerX, groundY + 2, 25, 6);
+    graphics.fillRect(playerX - 6, groundY - 31, 12, 25);
+    graphics.fillCircle(playerX, groundY - 37, 6);
+    graphics.fillRect(playerX - 9, groundY - 27, 4, 17);
+    graphics.fillRect(playerX + 5, groundY - 27, 4, 17);
+    return graphics;
+  }
+
+  private showVictoryEpilogueBeat() {
+    if (!this.endingEpilogueOpen || !this.endingEpilogueText) return;
+    const beat = VICTORY_EPILOGUE[this.endingEpilogueIndex];
+    const veil = this.endingEpilogueVeil;
+    const exterior = this.endingExterior;
+    if (beat.visual === 'outside') {
+      this.tweens.add({ targets: exterior, alpha: 1, duration: 900, ease: 'Sine.easeInOut' });
+      this.tweens.add({ targets: veil, alpha: 0.24, duration: 900, ease: 'Sine.easeInOut' });
+    } else if (beat.visual === 'look-back') {
+      this.tweens.add({ targets: veil, alpha: 0.68, duration: 700, ease: 'Sine.easeInOut' });
+    } else if (beat.visual === 'blackout') {
+      this.tweens.add({ targets: veil, alpha: 1, duration: beat.durationMs, ease: 'Sine.easeInOut' });
+    }
+    this.tweens.killTweensOf(this.endingEpilogueText);
+    this.endingEpilogueText.setText(beat.text).setAlpha(0);
+    if (beat.text) this.tweens.add({ targets: this.endingEpilogueText, alpha: 1, duration: 380, ease: 'Sine.easeOut' });
+    this.endingEpilogueTimer?.remove(false);
+    this.endingEpilogueTimer = this.time.delayedCall(beat.durationMs, () => this.advanceVictoryEpilogue());
+  }
+
+  private advanceVictoryEpilogue() {
+    if (!this.endingEpilogueOpen) return;
+    const nextIndex = nextEpilogueBeat(this.endingEpilogueIndex);
+    if (nextIndex < 0) {
+      this.finishVictoryEpilogue();
+      return;
+    }
+    this.endingEpilogueIndex = nextIndex;
+    this.showVictoryEpilogueBeat();
+  }
+
+  private finishVictoryEpilogue() {
+    if (!this.endingEpilogueOpen) return;
+    this.endingEpilogueOpen = false;
+    this.endingEpilogueTimer?.remove(false);
+    this.endingEpilogueTimer = undefined;
+    if (this.endingEpilogueVeil) this.tweens.killTweensOf(this.endingEpilogueVeil);
+    if (this.endingExterior) this.tweens.killTweensOf(this.endingExterior);
+    if (this.endingEpilogueText) this.tweens.killTweensOf(this.endingEpilogueText);
+    this.endingEpilogueText?.setText('');
+    this.endingEpilogueVeil?.setAlpha(1);
+    this.endingAdvanceGate.release();
+    if (this.endingKeyDownHandler) this.input.keyboard?.off('keydown', this.endingKeyDownHandler);
+    if (this.endingKeyUpHandler) this.input.keyboard?.off('keyup', this.endingKeyUpHandler);
+    this.endingKeyDownHandler = undefined;
+    this.endingKeyUpHandler = undefined;
+    this.registry.set('victoryEpilogueComplete', true);
+  }
+
   private showVictoryScreen(finalState: RunState) {
+    // Retained for compatibility with the old Phaser result presentation; the
+    // application result/TX2 flow now takes focus after the epilogue handoff.
     this.playEscapeRelease();
     this.cameras.main.fadeIn(300);
 
@@ -1478,7 +1821,7 @@ export class FloorScene extends Phaser.Scene {
     const stats = this.add.text(width / 2, height / 2 - 15, [
       `FINAL SCORE: ${finalState.score}`,
       `TIME: ${minutes}:${seconds.toString().padStart(2, '0')}`,
-      `FLOORS CLEARED: ${finalState.floorsCompleted}`,
+      `BLOCKS CLEARED: ${finalState.floorsCompleted}`,
     ].join('\n'), {
       fontFamily: 'monospace',
       fontSize: '15px',
@@ -1489,7 +1832,7 @@ export class FloorScene extends Phaser.Scene {
 
     // Button containers
     const retryBg = this.add.rectangle(
-      width / 2 - 90,
+      width / 2,
       height / 2 + 95,
       140,
       42,
@@ -1498,14 +1841,14 @@ export class FloorScene extends Phaser.Scene {
     ).setScrollFactor(0).setDepth(298);
 
     const retryBorder = this.add.rectangle(
-      width / 2 - 90,
+      width / 2,
       height / 2 + 95,
       140,
       42
     ).setScrollFactor(0).setDepth(298).setStrokeStyle(2, 0x70d4c6, 1);
 
     // Retry button
-    const retryButton = this.add.text(width / 2 - 90, height / 2 + 95, '[ RETRY ]', {
+    const retryButton = this.add.text(width / 2, height / 2 + 95, '[ NEW RUN ]', {
       fontFamily: 'monospace',
       fontSize: '16px',
       color: '#70d4c6',
@@ -1527,52 +1870,11 @@ export class FloorScene extends Phaser.Scene {
       window.location.reload();
     });
 
-    // Menu button container
-    const menuBg = this.add.rectangle(
-      width / 2 + 90,
-      height / 2 + 95,
-      140,
-      42,
-      0x0a0a0a,
-      1
-    ).setScrollFactor(0).setDepth(298);
-
-    const menuBorder = this.add.rectangle(
-      width / 2 + 90,
-      height / 2 + 95,
-      140,
-      42
-    ).setScrollFactor(0).setDepth(298).setStrokeStyle(2, 0x666666, 1);
-
-    // Main menu button
-    const menuButton = this.add.text(width / 2 + 90, height / 2 + 95, '[ MAIN MENU ]', {
-      fontFamily: 'monospace',
-      fontSize: '16px',
-      color: '#999999',
-      padding: { x: 16, y: 8 },
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(299).setInteractive({ useHandCursor: true });
-
-    menuButton.on('pointerover', () => {
-      menuButton.setColor('#ffffff');
-      menuBorder.setStrokeStyle(2, 0xaaaaaa, 1);
-      menuBg.setFillStyle(0x1a1a1a, 1);
-    });
-    menuButton.on('pointerout', () => {
-      menuButton.setColor('#999999');
-      menuBorder.setStrokeStyle(2, 0x666666, 1);
-      menuBg.setFillStyle(0x0a0a0a, 1);
-    });
-    menuButton.on('pointerdown', () => {
-      // Reload the page to go back to React main menu
-      window.location.reload();
-    });
-
     // Make main camera ignore these UI elements
     this.cameras.main.ignore([
       overlay, shadow, panel, borderOuter, borderInner, headerBar,
       titleShadow, title, subtitle, divider, stats,
-      retryBg, retryBorder, retryButton,
-      menuBg, menuBorder, menuButton
+      retryBg, retryBorder, retryButton
     ]);
   }
 
@@ -2074,7 +2376,7 @@ export class FloorScene extends Phaser.Scene {
     const stats = this.add.text(width / 2, height / 2 - 15, [
       `FINAL SCORE: ${this.runState.score}`,
       `TIME: ${minutes}:${seconds.toString().padStart(2, '0')}`,
-      `FLOORS CLEARED: ${this.runState.floorsCompleted}`,
+      `BLOCKS CLEARED: ${this.runState.floorsCompleted}`,
     ].join('\n'), {
       fontFamily: 'monospace',
       fontSize: '15px',
@@ -2085,7 +2387,7 @@ export class FloorScene extends Phaser.Scene {
 
     // Button container backgrounds
     const retryBg = this.add.rectangle(
-      width / 2 - 90,
+      width / 2,
       height / 2 + 95,
       140,
       42,
@@ -2094,14 +2396,14 @@ export class FloorScene extends Phaser.Scene {
     ).setScrollFactor(0).setDepth(298);
 
     const retryBorder = this.add.rectangle(
-      width / 2 - 90,
+      width / 2,
       height / 2 + 95,
       140,
       42
     ).setScrollFactor(0).setDepth(298).setStrokeStyle(2, 0xff4444, 1);
 
     // Retry button
-    const retryButton = this.add.text(width / 2 - 90, height / 2 + 95, '[ RETRY ]', {
+    const retryButton = this.add.text(width / 2, height / 2 + 95, '[ NEW RUN ]', {
       fontFamily: 'monospace',
       fontSize: '16px',
       color: '#ff4444',
@@ -2123,52 +2425,11 @@ export class FloorScene extends Phaser.Scene {
       window.location.reload();
     });
 
-    // Menu button container
-    const menuBg = this.add.rectangle(
-      width / 2 + 90,
-      height / 2 + 95,
-      140,
-      42,
-      0x0a0a0a,
-      1
-    ).setScrollFactor(0).setDepth(298);
-
-    const menuBorder = this.add.rectangle(
-      width / 2 + 90,
-      height / 2 + 95,
-      140,
-      42
-    ).setScrollFactor(0).setDepth(298).setStrokeStyle(2, 0x666666, 1);
-
-    // Main menu button
-    const menuButton = this.add.text(width / 2 + 90, height / 2 + 95, '[ MAIN MENU ]', {
-      fontFamily: 'monospace',
-      fontSize: '16px',
-      color: '#999999',
-      padding: { x: 16, y: 8 },
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(299).setInteractive({ useHandCursor: true });
-
-    menuButton.on('pointerover', () => {
-      menuButton.setColor('#ffffff');
-      menuBorder.setStrokeStyle(2, 0xaaaaaa, 1);
-      menuBg.setFillStyle(0x1a1a1a, 1);
-    });
-    menuButton.on('pointerout', () => {
-      menuButton.setColor('#999999');
-      menuBorder.setStrokeStyle(2, 0x666666, 1);
-      menuBg.setFillStyle(0x0a0a0a, 1);
-    });
-    menuButton.on('pointerdown', () => {
-      // Reload the page to go back to React main menu
-      window.location.reload();
-    });
-
     // Make main camera ignore these UI elements
     this.cameras.main.ignore([
       overlay, shadow, panel, borderOuter, borderInner, headerBar,
       titleShadow, title, subtitle, divider, stats,
-      retryBg, retryBorder, retryButton,
-      menuBg, menuBorder, menuButton
+      retryBg, retryBorder, retryButton
     ]);
   }
 
@@ -2192,6 +2453,8 @@ export class FloorScene extends Phaser.Scene {
       this.pauseKey.removeAllListeners();
     }
     this.storyCloseKey?.removeAllListeners();
+    this.openingAdvanceKey?.removeAllListeners();
+    this.closeOpeningStory();
     this.closeStoryPopup?.();
     if (this.interactKey) {
       this.interactKey.removeAllListeners();

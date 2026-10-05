@@ -44,7 +44,7 @@ Scare overlays, sprite movement/twitch, lighting, audio, camera shake, and corru
 
 ### Blockchain layer
 
-`src/web3/` connects the wallet to Hemi Testnet for TX1 run creation and explicit TX2 completion. New TX1 manifests bind player/run identity, game version `0.4.0`, rules identifier `classic-static-walls-balance-v1-stalker-mimic-v1`, and public multi-chain entropy. Seed derivation uses domain-separated Keccak-256 digests and preserves Solidity's `uint256` run ID as a JavaScript `bigint`.
+`src/web3/` connects the wallet to Hemi Testnet for TX1 run creation and explicit TX2 completion. New TX1 manifests bind player/run identity, game version `0.4.0`, `rulesHash = keccak256(UTF-8("classic-static-walls-balance-v1-stalker-mimic-v1"))`, and public multi-chain entropy. The readable rules identifier is never passed directly into its `bytes32` field. Seed derivation uses the same canonical `rulesHash` with domain-separated Keccak-256 digests and preserves Solidity's `uint256` run ID as a JavaScript `bigint`.
 
 TX2 commits the canonical result/replay hashes onchain. It is not an execution proof. Local runs use the same simulation and replay machinery without requesting wallet transactions.
 

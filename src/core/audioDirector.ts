@@ -391,6 +391,33 @@ export class AudioDirector {
       }
     });
   }
+
+  /** Fade a presentation audio category, then stop and release its sound handles. */
+  public fadeOutCategory(category: AudioCategory, durationMs: number) {
+    this.activeSounds.forEach((sound, key) => {
+      if (this.getSoundCategory(key) !== category) return;
+      const fade = Math.max(0, durationMs);
+      if (!sound.isPlaying || fade === 0 || !this.scene.tweens) {
+        sound.stop();
+        this.activeSounds.delete(key);
+        return;
+      }
+      try {
+        this.scene.tweens.add({
+          targets: sound,
+          volume: 0,
+          duration: fade,
+          onComplete: () => {
+            sound.stop();
+            if (this.activeSounds.get(key) === sound) this.activeSounds.delete(key);
+          },
+        });
+      } catch {
+        sound.stop();
+        this.activeSounds.delete(key);
+      }
+    });
+  }
   
   // ====== COOLDOWN SYSTEM ======
   

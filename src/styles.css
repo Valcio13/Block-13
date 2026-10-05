@@ -29,7 +29,31 @@ h1 { margin: .6rem 0 0; color: #d9f3ea; font-size: clamp(3rem, 11vw, 6.5rem); li
 button { cursor: pointer; padding: 1rem 1.3rem; border: 1px solid #70d4c6; background: #102322; color: #d9f3ea; letter-spacing: .12em; }
 button:hover:not(:disabled) { background: #1d4945; }
 button:disabled { cursor: wait; opacity: .7; }
+button:focus-visible { outline: 3px solid #ffd700; outline-offset: 4px; }
 .run-rule { margin-top: 1.4rem; color: #71817c; }
+
+.run-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 2rem auto 0;
+  max-width: 42rem;
+  text-align: left;
+}
+.run-choice { padding: 1rem; border: 1px solid rgba(112, 212, 198, .55); background: rgba(8, 21, 21, .76); }
+.run-choice button { width: 100%; min-height: 3.5rem; }
+.run-choice p { margin: .8rem 0 0; color: #c2c7c3; font-size: .85rem; line-height: 1.5; }
+.run-choice-secondary { border-color: rgba(112, 129, 124, .55); background: rgba(7, 9, 13, .55); }
+.run-choice-secondary button { border-color: #82918e; background: #111719; }
+.run-ready { margin: 1rem auto 0; color: #70d4c6; }
+.run-ready p { margin: .5rem 0; font-weight: bold; letter-spacing: .1em; }
+.connected-wallet, .startup-status, .network-note { margin: .9rem auto 0; font-size: .8rem; letter-spacing: .03em; }
+.menu-error { margin: 1rem auto 0; color: #ff9b91; line-height: 1.5; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 600px) {
+  .run-choices { grid-template-columns: 1fr; }
+}
 
 .game-active {
   padding: 0;

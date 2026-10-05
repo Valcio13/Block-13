@@ -13,9 +13,8 @@ describe('FloorScene restart lifecycle', () => {
 
     const firstStatusUpdate = createBody.indexOf('this.updateStatusText();');
     expect(firstStatusUpdate).toBeGreaterThan(-1);
-    expect(createBody.indexOf('this.dangerIndicator = this.add.text')).toBeLessThan(firstStatusUpdate);
     expect(createBody.indexOf('this.healthBarText = this.add.text')).toBeLessThan(firstStatusUpdate);
-    expect(createBody.indexOf('this.cameras.main.ignore(this.dangerIndicator)')).toBeLessThan(firstStatusUpdate);
+    expect(source).not.toContain('DANGER: ${danger}%');
     expect(createBody).toContain('this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this)');
   });
 
@@ -27,7 +26,6 @@ describe('FloorScene restart lifecycle', () => {
 
     for (const resource of [
       'this.statusText = undefined',
-      'this.dangerIndicator = undefined',
       'this.healthBarFill = undefined',
       'this.healthBarText = undefined',
       'this.lightmapTexture = undefined',
@@ -48,8 +46,8 @@ describe('FloorScene restart lifecycle', () => {
     const terminalStart = source.indexOf("if (state.status === 'won') {");
     const terminalEnd = source.indexOf('\n      }', source.indexOf("} else if (state.status === 'lost')", terminalStart));
     const terminalBody = source.slice(terminalStart, terminalEnd);
-    expect(terminalBody.match(/stopCategory\('ambience'\)/g)).toHaveLength(2);
-    expect(terminalBody).toContain('this.showVictoryScreen(this.runState)');
+    expect(terminalBody.match(/stopCategory\('ambience'\)/g)).toHaveLength(1);
+    expect(terminalBody).toContain('this.beginVictoryEpilogue()');
     expect(terminalBody).toContain('this.playerDeath()');
 
     const shutdownStart = source.indexOf('  shutdown() {');

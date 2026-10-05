@@ -11,10 +11,12 @@ import { submitRunCompletion } from './web3/tx2Completion';
 import type { Hash } from 'viem';
 import { wagmiConfig } from './web3/wagmi';
 import type { RunState } from './core/run';
+import { onchainStartupCopy, resultHandoffReady, runMenuActions, startupErrorCopy, terminalSubmissionStatus } from './game/contestUx';
 
 const queryClient = new QueryClient();
 
-type RunStatus = 'idle' | 'connecting' | 'starting' | 'playing' | 'complete';
+type RunStatus = 'idle' | 'starting' | 'ready' | 'playing' | 'complete';
+type MenuStartPhase = 'idle' | 'entropy' | 'wallet' | 'submitted' | 'confirmed';
 
 const stringifyRunSession = (value: unknown) => JSON.stringify(value, (_key, item) =>
   typeof item === 'bigint' ? { __block13Uint256: item.toString(10) } : item,
@@ -27,6 +29,7 @@ const parseRunSession = (value: string) => JSON.parse(value, (_key, item) =>
 
 function GameApp() {
   const [status, setStatus] = useState<RunStatus>('idle');
+  const [startPhase, setStartPhase] = useState<MenuStartPhase>('idle');
   const [runState, setRunState] = useState<RunState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [completionData, setCompletionData] = useState<{ inputLogBytes?: Uint8Array; finalStateBytes?: Uint8Array } | null>(null);
@@ -35,9 +38,11 @@ function GameApp() {
   const [completionError, setCompletionError] = useState<string | null>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
   const gameContainerRef = useRef<HTMLDivElement>(null);
+  const onchainAttemptRef = useRef(0);
+  const startAbortRef = useRef<AbortController | null>(null);
 
-  const { address, isConnected, isCorrectNetwork, connectWallet, switchToHemi } = useWallet();
-  const { startRun, isLoading: isStarting, error: startError } = useStartRun();
+  const { address, isConnected, isCorrectNetwork, connectWallet, switchToHemi, isConnecting, connectError, isSwitching, switchError } = useWallet();
+  const { startRun, error: startError } = useStartRun();
   const { completeRun } = useCompleteRun();
 
   const resetCompletionState = () => {
@@ -97,24 +102,28 @@ function GameApp() {
 
   const beginRun = async () => {
     if (!isConnected) {
-      setStatus('connecting');
       connectWallet();
       return;
     }
 
     if (!isCorrectNetwork) {
-      setError('Please switch to Hemi Testnet');
+      setError(null);
       switchToHemi();
       return;
     }
 
     resetCompletionState();
     setStatus('starting');
+    setStartPhase('entropy');
     setError(null);
 
+    const attempt = ++onchainAttemptRef.current;
+    const abortController = new AbortController();
+    startAbortRef.current = abortController;
     try {
       console.log('[App] Starting blockchain run...');
-      const result = await startRun();
+      const result = await startRun(0, phase => setStartPhase(phase), abortController.signal);
+      if (attempt !== onchainAttemptRef.current) return;
       console.log('[App] Run started:', result);
       
       // Initialize RNG from manifest
@@ -130,18 +139,30 @@ function GameApp() {
         txHash: result.hash,
       }));
       
-      setStatus('playing');
+      setStartPhase('confirmed');
+      setStatus('ready');
     } catch (err: any) {
       console.error('[App] Failed to start run:', err);
-      setError(err.message || 'Failed to start run');
-      setStatus('idle');
+      if (attempt === onchainAttemptRef.current) {
+        setError(startupErrorCopy(err));
+        setStatus('idle');
+        setStartPhase('idle');
+      }
     }
   };
 
   const beginLocalRun = () => {
+    if (status === 'starting' && (startPhase === 'wallet' || startPhase === 'submitted')) {
+      setError('A Hemi wallet request or transaction is already active. Reject or wait for it, then start Local safely.');
+      return;
+    }
+    startAbortRef.current?.abort();
+    startAbortRef.current = null;
+    onchainAttemptRef.current++;
     resetCompletionState();
     setStatus('playing');
     setError(null);
+    setStartPhase('idle');
     
     console.log('[App] Starting local run...');
     
@@ -158,6 +179,8 @@ function GameApp() {
       txHash: null,
     }));
   };
+
+  const enterConfirmedRun = () => setStatus('playing');
 
   const handleGameComplete = (finalState: RunState, registry: Phaser.Data.DataManager) => {
     setCompletionHash(null);
@@ -203,7 +226,9 @@ function GameApp() {
       if (gameRef.current.registry) {
         const checkCompletion = setInterval(() => {
           const currentState = gameRef.current?.registry.get('runState') as RunState;
-          if (currentState && (currentState.status === 'won' || currentState.status === 'lost')) {
+          const epilogueComplete = gameRef.current?.registry.get('victoryEpilogueComplete') === true;
+          if (currentState && (currentState.status === 'won' || currentState.status === 'lost')
+            && resultHandoffReady(currentState.status, epilogueComplete)) {
             clearInterval(checkCompletion);
             handleGameComplete(currentState, gameRef.current!.registry);
           }
@@ -237,48 +262,59 @@ function GameApp() {
 
   if (status === 'complete') {
     const isBlockchainRun = runState?.manifest !== undefined;
+    const completionStatus = terminalSubmissionStatus(completionPhase);
     
     return (
       <main className="app-shell">
         <section className="title-card">
           <h1>{runState?.status === 'won' ? 'RUN COMPLETE!' : 'RUN OVER'}</h1>
-          {isBlockchainRun ? (
-            <p className="premise">{runState?.status === 'won' ? 'Commit this deterministic result and replay hashes to Hemi Testnet.' : 'This run ended before the escape. Its result can still be recorded on Hemi Testnet.'}</p>
-          ) : (
-            <p className="premise">{runState?.status === 'won' ? 'Local run completed (not recorded on-chain)' : 'You did not make it outside.'}</p>
-          )}
+          {runState?.status === 'won' && <p className="premise">YOU MADE IT OUT. Your nightmare is over. The run remains.</p>}
+          <p className="premise">{isBlockchainRun
+            ? runState?.status === 'won' ? 'Hemi run complete.' : 'This Hemi run ended before the escape.'
+            : 'LOCAL RUN — NO ONCHAIN SUBMISSION REQUIRED'}</p>
           {runState && (
             <div style={{ marginTop: '2rem', color: '#a5b6b5' }}>
               <p>Final Score: {runState.score}</p>
-              <p>Floors Completed: {runState.floorsCompleted}</p>
+              <p>Blocks Completed: {runState.floorsCompleted}</p>
             </div>
           )}
           {isBlockchainRun && runState?.manifest && (
             <div style={{ marginTop: '1rem', color: '#a5b6b5' }}>
               <p>Run ID: {runState.manifest.runId.toString()}</p>
+              <p>Records this run’s result and replay commitment on Hemi.</p>
               {completionPhase === 'confirmed' ? (
                 <>
-                  <p>On-chain completion: Confirmed</p>
+                  <p>CONFIRMED</p>
                   <p>Transaction: {completionHash ? `${completionHash.slice(0, 10)}…${completionHash.slice(-8)}` : 'Confirmed'}</p>
                 </>
               ) : (
                 <>
-                  {completionPhase === 'wallet' && <p>Waiting for wallet confirmation…</p>}
-                  {completionPhase === 'submitted' && <p>Submitting… {completionHash ? `${completionHash.slice(0, 10)}…${completionHash.slice(-8)}` : ''}</p>}
+                  <p>{completionStatus.label}{completionPhase === 'submitted' && completionHash ? ` ${completionHash.slice(0, 10)}…${completionHash.slice(-8)}` : ''}</p>
                   {completionError && <p role="alert">{completionError}</p>}
-                  <button onClick={submitCompletion} disabled={completionPhase === 'wallet' || completionPhase === 'submitted'}>
-                    {completionPhase === 'failed' ? 'Retry Result Submission' : 'Submit Result to Hemi'}
-                  </button>
+                  <button onClick={submitCompletion} disabled={completionStatus.disabled}>{completionStatus.button}</button>
                 </>
               )}
               <p>Final score: {runState.score}</p>
             </div>
           )}
-          <button onClick={() => window.location.reload()}>New Run</button>
+          <button onClick={() => window.location.reload()}>NEW RUN</button>
         </section>
       </main>
     );
   }
+
+  const menuActions = runMenuActions(
+    isConnected,
+    isCorrectNetwork,
+    status === 'starting' || isConnecting || isSwitching || status === 'ready',
+    status === 'ready',
+  );
+  const hemiLabel = status === 'starting' && startPhase !== 'idle'
+    ? onchainStartupCopy(startPhase as Exclude<MenuStartPhase, 'idle'>)
+    : menuActions.hemi === 'enter' ? 'ENTER BLOCK 4'
+      : menuActions.hemi === 'busy' ? isConnecting ? 'CONNECTING WALLET…' : isSwitching ? 'SWITCHING TO HEMI…' : 'STARTING HEMI RUN…'
+        : menuActions.hemi === 'connect' ? 'CONNECT WALLET FOR HEMI'
+          : menuActions.hemi === 'switch-network' ? 'SWITCH TO HEMI TESTNET' : 'PLAY ON HEMI';
 
   return (
     <main className="app-shell">
@@ -286,67 +322,35 @@ function GameApp() {
         <p className="eyebrow">HEMI ARCADE // SURVIVAL HORROR</p>
         <h1 id="game-title">BLOCK 13</h1>
         <p className="subtitle">DESCENT INTO DARKNESS</p>
-        <p className="premise">
-          A transaction opened a door inside the building. Find the keys. Descend through floors. Do not let it see you.
-        </p>
+        <p className="premise">A transaction opened a door inside the building. Find the key, descend, and get out before it finds you.</p>
 
-        {!isConnected ? (
-          <>
-            <button type="button" onClick={connectWallet} disabled={status === 'connecting'}>
-              {status === 'connecting' ? 'CONNECTING...' : 'CONNECT WALLET'}
-            </button>
-            <button 
-              type="button" 
-              onClick={beginLocalRun} 
-              style={{ 
-                marginTop: '1rem',
-                background: 'transparent',
-                border: '1px solid #4a5568',
-                color: '#a5b6b5'
-              }}
-            >
-              PLAY WITHOUT WALLET
-            </button>
-            <p className="run-rule" style={{ marginTop: '1rem', fontSize: '0.8rem', color: '#6b7280' }}>
-              Local mode: score will not be recorded on-chain
-            </p>
-          </>
-        ) : !isCorrectNetwork ? (
-          <button type="button" onClick={switchToHemi}>
-            SWITCH TO HEMI TESTNET
-          </button>
-        ) : (
-          <>
-            <button type="button" onClick={beginRun} disabled={status === 'starting'}>
-              {status === 'starting' ? 'FETCHING ENTROPY...' : 'START RUN (BLOCKCHAIN)'}
-            </button>
-            <button 
-              type="button" 
-              onClick={beginLocalRun} 
-              style={{ 
-                marginTop: '1rem',
-                background: 'transparent',
-                border: '1px solid #4a5568',
-                color: '#a5b6b5'
-              }}
-            >
-              PLAY WITHOUT BLOCKCHAIN
-            </button>
-          </>
+        {status === 'ready' && (
+          <div className="run-ready" role="status">
+            <p>RUN CONFIRMED ON HEMI</p>
+          </div>
         )}
 
-        {isConnected && (
-          <p className="run-rule" style={{ marginTop: '1rem', fontSize: '0.8rem' }}>
-            Connected: {address?.slice(0, 6)}...{address?.slice(-4)}
-          </p>
-        )}
+        <div className="run-choices" aria-label="Choose how to play">
+          <section className="run-choice">
+            <button type="button" className="local-run-button" onClick={beginLocalRun} disabled={!menuActions.localEnabled}>PLAY LOCAL</button>
+            <p>{status === 'ready'
+              ? 'Play without blockchain. The confirmed Hemi run will remain unfinished.'
+              : 'Play now. No wallet or transaction required.'}</p>
+          </section>
+          <section className="run-choice run-choice-secondary">
+            <button type="button" aria-live="polite" onClick={menuActions.hemi === 'enter' ? enterConfirmedRun : beginRun} disabled={menuActions.hemi === 'busy'}>{hemiLabel}</button>
+            <p>{status === 'ready'
+              ? 'Your run is confirmed on Hemi. Enter Block 4 to begin.'
+              : 'Create a run on Hemi, then record your result and replay commitment after the run.'}</p>
+          </section>
+        </div>
 
-        <p className="run-rule">Multi-chain entropy: BTC · Hemi · Ethereum</p>
-        <p className="run-rule">2 transactions: start run · commit result</p>
-
-        {(error || startError) && (
-          <p style={{ color: '#ff4444', marginTop: '1rem' }}>{error || startError}</p>
+        {isConnected && <p className="run-rule connected-wallet">Connected: {address?.slice(0, 6)}…{address?.slice(-4)}</p>}
+        {(error || startError || connectError || switchError) && (
+          <p className="menu-error" role="alert">{error || (startError ? startupErrorCopy(startError) : null) || (connectError ? startupErrorCopy(connectError) : null) || (switchError ? startupErrorCopy(switchError) : null)}</p>
         )}
+        {status === 'starting' && startPhase !== 'idle' && <span className="sr-only" role="status">{onchainStartupCopy(startPhase as Exclude<MenuStartPhase, 'idle'>)}</span>}
+        {isConnected && !isCorrectNetwork && <p className="network-note">PLAY LOCAL is ready now. Hemi runs require Hemi Testnet.</p>}
       </section>
     </main>
   );

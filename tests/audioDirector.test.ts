@@ -98,6 +98,30 @@ describe('AudioDirector optional playback', () => {
     delete mutableAudioManifest.sfx_terminal_test;
   });
 
+  it('fades an ambience category before stopping it', () => {
+    const ambience = { isPlaying: true, volume: 0.3, play: vi.fn(), once: vi.fn(), stop: vi.fn() };
+    const tweenAdd = vi.fn((config: { targets: unknown; volume: number; duration: number; onComplete: () => void }) => {
+      expect(config.targets).toBe(ambience);
+      expect(config.volume).toBe(0);
+      expect(config.duration).toBe(700);
+      config.onComplete();
+    });
+    mutableAudioManifest.amb_epilogue_test = 'assets/audio/amb_epilogue_test.ogg';
+    const director = directorFor({
+      cache: { audio: { exists: () => true } } as unknown as Phaser.Cache.CacheManager,
+      sound: { add: () => ambience } as unknown as Phaser.Sound.BaseSoundManager,
+      tweens: { add: tweenAdd } as unknown as Phaser.Tweens.TweenManager,
+    });
+
+    director.play('amb_epilogue_test', 'ambience', { loop: true, volume: 0.3 });
+    director.fadeOutCategory('ambience', 700);
+
+    expect(tweenAdd).toHaveBeenCalledOnce();
+    expect(ambience.stop).toHaveBeenCalledOnce();
+    director.shutdown();
+    delete mutableAudioManifest.amb_epilogue_test;
+  });
+
   it('catches an audio decode/play failure and returns control to gameplay', () => {
     mutableAudioManifest['broken-audio'] = 'assets/audio/broken-audio.ogg';
     const sound = {

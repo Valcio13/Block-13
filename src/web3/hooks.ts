@@ -2,15 +2,16 @@ import { useAccount, useConnect, useDisconnect, useWriteContract, useWaitForTran
 import { hemiTestnet, CONTRACT_ADDRESS, RUN_REGISTRY_ABI } from './config';
 import { useState, useCallback } from 'react';
 import { type Hash } from 'viem';
+import { RULES_HASH } from './runIdentity';
 import { fetchEntropyBundle, validateEntropyBundle, type EntropyBundle } from './entropyFetcher';
 import type { RunManifest } from '../core/seedDerivation';
 import type { CompleteRunArgs } from './tx2Completion';
 
 export function useWallet() {
   const { address, isConnected, chain } = useAccount();
-  const { connect, connectors } = useConnect();
+  const { connect, connectors, isPending: isConnecting, error: connectError } = useConnect();
   const { disconnect } = useDisconnect();
-  const { switchChain } = useSwitchChain();
+  const { switchChain, isPending: isSwitching, error: switchError } = useSwitchChain();
 
   const isCorrectNetwork = chain?.id === hemiTestnet.id;
 
@@ -35,6 +36,10 @@ export function useWallet() {
     connectWallet,
     disconnect,
     switchToHemi,
+    isConnecting,
+    connectError,
+    isSwitching,
+    switchError,
   };
 }
 
@@ -43,15 +48,17 @@ export function useWallet() {
  */
 const GAME_VERSION = '0.4.0';
 const DEFAULT_CHARACTER = 'survivor';
-const DEFAULT_RULES = 'classic-static-walls-balance-v1-stalker-mimic-v1';
 
-// Convert strings to bytes32 format for contract
-function stringToBytes32(str: string): `0x${string}` {
+// Preserve the existing right-padded encoding for the short gameVersion and character fields.
+function encodeShortTextBytes32(str: string): `0x${string}` {
   const encoder = new TextEncoder();
   const data = encoder.encode(str);
+  if (data.length > 32) throw new RangeError('Text bytes32 fields must be at most 32 UTF-8 bytes');
   const hex = Array.from(data).map(b => b.toString(16).padStart(2, '0')).join('');
   return ('0x' + hex.padEnd(64, '0')) as `0x${string}`;
 }
+
+export type StartRunPhase = 'entropy' | 'wallet' | 'submitted' | 'confirmed';
 
 export function useStartRun() {
   const { writeContractAsync } = useWriteContract();
@@ -65,7 +72,11 @@ export function useStartRun() {
     hash: txHash || undefined,
   });
 
-  const startRun = useCallback(async (gameMode: number = 0): Promise<{ runId: bigint; manifest: RunManifest; hash: Hash }> => {
+  const startRun = useCallback(async (
+    gameMode: number = 0,
+    onPhase?: (phase: StartRunPhase) => void,
+    signal?: AbortSignal,
+  ): Promise<{ runId: bigint; manifest: RunManifest; hash: Hash }> => {
     if (!publicClient || !address) {
       throw new Error('Wallet not connected');
     }
@@ -76,9 +87,11 @@ export function useStartRun() {
 
     try {
       console.log('[useStartRun] Fetching entropy sources...');
+      onPhase?.('entropy');
       
       // Fetch entropy from multiple chains
       const entropy: EntropyBundle = await fetchEntropyBundle(publicClient, address);
+      if (signal?.aborted) throw new Error('Hemi run setup cancelled.');
       
       if (!validateEntropyBundle(entropy)) {
         throw new Error('Failed to fetch valid entropy sources');
@@ -87,11 +100,13 @@ export function useStartRun() {
       console.log('[useStartRun] Entropy bundle complete; requesting wallet TX1');
 
       // Convert game config to bytes32
-      const gameVersion = stringToBytes32(GAME_VERSION);
-      const character = stringToBytes32(DEFAULT_CHARACTER);
-      const rulesHash = stringToBytes32(DEFAULT_RULES);
+      const gameVersion = encodeShortTextBytes32(GAME_VERSION);
+      const character = encodeShortTextBytes32(DEFAULT_CHARACTER);
+      const rulesHash = RULES_HASH;
 
       // Call startRun with all entropy sources
+      if (signal?.aborted) throw new Error('Hemi run setup cancelled.');
+      onPhase?.('wallet');
       const hash = await writeContractAsync({
         address: CONTRACT_ADDRESS,
         abi: RUN_REGISTRY_ABI,
@@ -109,10 +124,13 @@ export function useStartRun() {
       });
 
       setTxHash(hash);
+      onPhase?.('submitted');
       console.log('[useStartRun] Transaction submitted:', hash);
 
       // Wait for confirmation
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== 'success') throw new Error('TX1 transaction reverted on Hemi. Please retry.');
+      onPhase?.('confirmed');
       console.log('[useStartRun] Transaction confirmed');
 
       // Parse RunStarted event to get runId
