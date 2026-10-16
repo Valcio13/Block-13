@@ -75,6 +75,28 @@ export class InputRecorder {
     interact: false,
   };
 
+  /** Restore a canonical log and held-key state for deterministic continuation. */
+  static fromBinary(binary: Uint8Array): InputRecorder {
+    const events = this.decodeBinary(binary) as InputEvent[] & { terminalTick?: number };
+    const recorder = new InputRecorder();
+    recorder.events = events.map(event => ({ ...event }));
+    recorder.terminalTick = events.terminalTick ?? events.reduce((max, event) => Math.max(max, event.tick + 1), 0);
+    for (const event of events) {
+      if (event.tick >= recorder.terminalTick) throw new Error('Input event falls outside the recovery boundary');
+      switch (event.action) {
+        case InputAction.MOVE_LEFT: recorder.previousState.left = event.state; break;
+        case InputAction.MOVE_RIGHT: recorder.previousState.right = event.state; break;
+        case InputAction.MOVE_UP: recorder.previousState.up = event.state; break;
+        case InputAction.MOVE_DOWN: recorder.previousState.down = event.state; break;
+        case InputAction.TOGGLE_FLASHLIGHT:
+        case InputAction.INTERACT:
+          if (!event.state) throw new Error('Momentary input actions must be recorded as active events');
+          break;
+      }
+    }
+    return recorder;
+  }
+
   /**
    * Record input state at current tick
    * Only records when state changes (press/release)

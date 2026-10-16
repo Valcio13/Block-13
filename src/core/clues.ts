@@ -26,7 +26,7 @@ const ALL_CLUES: Clue[] = [
   {
     id: 'previous_resident',
     title: 'RECOVERED NOTE',
-    content: 'If you\'re reading this, you\'re trapped too. The floors go: 4, 3, 2, 1, then Block 13. You can\'t skip it. You have to go through. I tried going back up. The stairs only go down now. Always down.',
+    content: 'If you\'re reading this, you\'re trapped too. The floors go: 4, 3, 2, 1, then Floor 13. You can\'t skip it. You have to go through. I tried going back up. The stairs only go down now. Always down.',
   },
   {
     id: 'contractor_warning',
@@ -41,7 +41,7 @@ const ALL_CLUES: Clue[] = [
   {
     id: 'emergency_exit',
     title: 'BUILDING EVACUATION PLAN',
-    content: 'In case of emergency, proceed to nearest stairwell and exit building. DO NOT use stairs marked "Emergency Exit Only." Those stairs lead to Block 13. Once you enter Block 13, the only exit is through.',
+    content: 'In case of emergency, proceed to nearest stairwell and exit building. DO NOT use stairs marked "Emergency Exit Only." Those stairs lead to Floor 13. Once you enter Floor 13, the only exit is through.',
   },
   {
     id: 'something_below',
@@ -82,12 +82,12 @@ const ALL_CLUES: Clue[] = [
   {
     id: 'corrupted_log',
     title: '█████ PERSONNEL FILE',
-    content: '██/██/20██: Subject exhibited [REDACTED] after 72 hours below Floor 1. Psychological eval: ███████. Recommendation: ████████ ██ ███████ ███. Note: "Block 13" was not part of original design.',
+    content: '██/██/20██: Subject exhibited [REDACTED] after 72 hours below Floor 1. Psychological eval: ███████. Recommendation: ████████ ██ ███████ ███. Note: "Floor 13" was not part of original design.',
   },
   {
     id: 'research_fragment',
     title: 'RESEARCH NOTE',
-    content: 'The building doesn\'t have tenants. It has prisoners. Every floor you descend, you get closer to understanding what this place really is. Block 13 is where',
+    content: 'The building doesn\'t have tenants. It has prisoners. Every floor you descend, you get closer to understanding what this place really is. Floor 13 is where',
   },
   {
     id: 'janitor_recording',

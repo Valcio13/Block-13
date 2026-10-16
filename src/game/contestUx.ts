@@ -1,19 +1,19 @@
 import { BLOCK_13_FLOOR, isBlock13Floor, isOutsideFloor, START_FLOOR } from '../core/progression';
 
-/** Player-facing labels; internal progression IDs and canonical names stay unchanged. */
+/** Player-facing floor labels; internal progression IDs stay unchanged. */
 export function playerBlockName(floor: number): string {
   if (isOutsideFloor(floor)) return 'OUTSIDE';
-  if (isBlock13Floor(floor)) return 'BLOCK 13';
-  if (Number.isInteger(floor) && floor >= 1 && floor <= START_FLOOR) return `BLOCK ${floor}`;
+  if (isBlock13Floor(floor)) return 'FLOOR 13';
+  if (Number.isInteger(floor) && floor >= 1 && floor <= START_FLOOR) return `FLOOR ${floor}`;
   throw new RangeError(`invalid progression floor: ${floor}`);
 }
 
 export const OPENING_STORY_LINES = [
-  '11:47 PM',
-  'Your shift ended seventeen minutes ago.',
-  'The elevator is out again.',
-  "You'll have to take the stairs down from Block 4.",
-  'Just get outside.',
+  'The building disappeared from every official record.',
+  'No demolition. No photographs. No proof it was ever here.',
+  'Then a message arrived from an unknown number.',
+  '“Fourth floor. You need to see this.”',
+  'You came to find out why.',
 ] as const;
 
 /** Returns the next line index, or -1 when the player skips/completes the story. */
@@ -28,15 +28,24 @@ export type BlockTransitionBeat = { text: string; glitch?: boolean };
 
 /** Presentation-only fiction layered over the already-authoritative transition. */
 export function blockTransitionBeats(fromFloor: number, toFloor: number): BlockTransitionBeat[] {
+  if (fromFloor === 4 && toFloor === 3) {
+    return [
+      { text: 'FLOOR 4' },
+      { text: 'THE STAIRWELL IS COLDER.' },
+      { text: 'THE DOOR SHUTS BEHIND YOU.' },
+      { text: 'THE LIGHTS GO OUT.', glitch: true },
+      { text: 'FLOOR 3' },
+    ];
+  }
   if (fromFloor === 1 && toFloor === BLOCK_13_FLOOR) {
     return [
-      { text: 'BLOCK 1 CLEARED' },
+      { text: 'FLOOR 1' },
       { text: 'GROUND FLOOR' },
       { text: '…' },
       { text: 'ROUTE NOT FOUND', glitch: true },
       { text: '…' },
-      { text: 'BLOCK 13' },
-      { text: 'THIS BLOCK DOES NOT EXIST.' },
+      { text: 'FLOOR 13' },
+      { text: 'THIS FLOOR DOES NOT EXIST.' },
     ];
   }
   return [];
@@ -57,20 +66,20 @@ export const VICTORY_EPILOGUE: readonly EpilogueBeat[] = [
   { text: 'Cold air fills your lungs.', durationMs: 1200, visual: 'outside' },
   { text: "You're outside.", durationMs: 2200 },
   { text: '', durationMs: 1200 },
-  { text: 'Four blocks.', durationMs: 900 },
-  { text: 'Four keys.', durationMs: 900 },
+  { text: 'Four floors.', durationMs: 900 },
+  { text: 'One address.', durationMs: 900 },
   { text: 'One way down.', durationMs: 1100 },
-  { text: 'You should have reached the ground floor.', durationMs: 1500 },
+  { text: 'You should have reached the street.', durationMs: 1500 },
   { text: '', durationMs: 1200 },
   { text: 'But you remember the hallway.', durationMs: 1200 },
   { text: 'The thing that followed you.', durationMs: 1200 },
   { text: 'The door marked 13.', durationMs: 1500 },
   { text: 'You look back.', durationMs: 2600, visual: 'look-back' },
   { text: '', durationMs: 1200 },
-  { text: 'Four blocks.', durationMs: 1000 },
+  { text: 'Four floors.', durationMs: 1000 },
   { text: 'Just like there have always been.', durationMs: 1400 },
   { text: '', durationMs: 800, visual: 'blackout' },
-  { text: 'There is no Block 13.', durationMs: 3000 },
+  { text: 'There is no Floor 13.', durationMs: 3000 },
   { text: '', durationMs: 1000 },
 ];
 
@@ -114,7 +123,7 @@ export interface HudWarningState {
   curse: number;
 }
 
-interface WatcherExposureState extends HudWarningState {
+export interface WatcherExposureState extends HudWarningState {
   x: number;
   y: number;
   facingX: number;
@@ -122,12 +131,24 @@ interface WatcherExposureState extends HudWarningState {
   watchers: Array<{ x: number; y: number; active: boolean }>;
 }
 
-export function objectiveCopy(floor: number, hasKey: boolean, stalkerHunting = false): string {
+export function objectiveCopy(
+  floor: number, hasKey: boolean, stalkerHunting = false,
+  objectiveComplete = hasKey, progress = 0, total = 0,
+): string {
+  const ordinaryObjective: Record<number, string> = {
+    4: 'OPEN THE MAINTENANCE LOCKBOX',
+    3: 'IDENTIFY THE MISSING RESIDENT',
+    2: 'RESTORE THE ARCHIVE CIRCUIT',
+    1: 'RECONSTRUCT THE ERASED RECORDS',
+  };
   if (isBlock13Floor(floor)) {
-    if (hasKey && stalkerHunting) return 'OBJECTIVE: GET OUT NOW';
-    return hasKey ? 'OBJECTIVE: GET OUT' : 'OBJECTIVE: FIND THE KEY';
+    if (objectiveComplete && hasKey && stalkerHunting) return 'OBJECTIVE: GET OUT NOW';
+    if (objectiveComplete && !hasKey) return 'OBJECTIVE: FIND THE EXIT KEY';
+    if (objectiveComplete && hasKey) return 'OBJECTIVE: GET OUT';
+    return `OBJECTIVE: RECOVER THE FINAL MEMORY${total ? ` (${progress}/${total})` : ''}`;
   }
-  return hasKey ? 'OBJECTIVE: RETURN TO STAIRS' : 'OBJECTIVE: FIND THE KEY';
+  if (objectiveComplete) return floor === 1 ? 'OBJECTIVE: REACH THE EXIT' : 'OBJECTIVE: RETURN TO STAIRS';
+  return `OBJECTIVE: ${ordinaryObjective[floor] ?? 'INVESTIGATE THE BUILDING'}${total ? ` (${progress}/${total})` : ''}`;
 }
 
 /** Presentation-only resource warnings; thresholds do not feed into simulation. */
@@ -143,18 +164,24 @@ export function hudWarningCopy(state: HudWarningState): string[] {
 
 /** Mirrors the authoritative Watcher cone/range test for presentation feedback. */
 export function watcherIsCausingCurse(state: WatcherExposureState): boolean {
+  return state.watchers.some(watcher => watcherIndividuallyCausingCurse(state, watcher));
+}
+
+/** Per-entity form for localized presentation; shares the aggregate rule exactly. */
+export function watcherIndividuallyCausingCurse(
+  state: WatcherExposureState,
+  watcher: WatcherExposureState['watchers'][number],
+): boolean {
   const range = 150 * 256;
   const rangeSquared = range * range;
-  return state.watchers.some(watcher => {
-    if (!watcher.active) return false;
-    const dx = watcher.x - state.x;
-    const dy = watcher.y - state.y;
-    const distanceSquared = dx * dx + dy * dy;
-    const facingDot = dx * state.facingX + dy * state.facingY;
-    const facing = facingDot > 0
-      && 4 * facingDot * facingDot >= distanceSquared * (state.facingX * state.facingX + state.facingY * state.facingY);
-    return facing && distanceSquared < rangeSquared;
-  });
+  if (!watcher.active) return false;
+  const dx = watcher.x - state.x;
+  const dy = watcher.y - state.y;
+  const distanceSquared = dx * dx + dy * dy;
+  const facingDot = dx * state.facingX + dy * state.facingY;
+  const facing = facingDot > 0
+    && 4 * facingDot * facingDot >= distanceSquared * (state.facingX * state.facingX + state.facingY * state.facingY);
+  return facing && distanceSquared < rangeSquared;
 }
 
 export type HemiAction = 'connect' | 'switch-network' | 'start' | 'busy' | 'enter';

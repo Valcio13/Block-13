@@ -13,6 +13,8 @@ import { AuthoritativeSimulation, FIXED_SCALE, MIMIC_REVEAL_TICKS, MIMIC_CHASE_D
 import { finalStateV1FromSimulation, hashFinalStateV1 } from '../src/core/finalStateV1';
 import type { RunManifest } from '../src/core/seedDerivation';
 import { getAuthoredClueForSearchId } from '../src/core/clues';
+import { createRunCheckpoint, hashAuthoritativeState, parseRunCheckpoint, serializeRunCheckpoint, validateRunRecovery } from '../src/core/runRecovery';
+import type { RunState } from '../src/core/run';
 
 interface GameplayState {
   x: number;
@@ -197,7 +199,7 @@ describe('authoritative deterministic simulation', () => {
     const makeInitialState = () => ({
       x: (batteryItem.x * 32 + 16) * FIXED_SCALE,
       y: (batteryItem.y * 32 + 16) * FIXED_SCALE,
-      battery: 8,
+      battery: 4,
       flashlightOn: true,
       hasKey: true,
       searched: probe.floor.searchables.map((_, index) => index !== batteryIndex),
@@ -208,7 +210,7 @@ describe('authoritative deterministic simulation', () => {
     const live = new AuthoritativeSimulation(seed, makeInitialState());
     const recorder = new InputRecorder();
     const inputs: InputState[] = [
-      emptyInput, // 8 subpercent drain reaches exactly zero.
+      emptyInput, // 4 subpercent drain reaches exactly zero.
       { ...emptyInput, flashlight: true }, // Zero battery cannot toggle it on.
       { ...emptyInput, interact: true }, // Restore charge from the searchable battery.
       { ...emptyInput, flashlight: true }, // It works again after recharge.
@@ -280,7 +282,7 @@ describe('authoritative deterministic simulation', () => {
       floor, x, y, tick: 0, hp: 73,
       battery: 55 * FIXED_SCALE + 77,
       curse: 12 * FIXED_SCALE + 77,
-      score: 432, floorsCompleted: 4 - floor, hasKey: true,
+      score: 432, floorsCompleted: 4 - floor, hasKey: true, objectiveComplete: true,
       // Isolate the transition assertion from nearby searchables: this case
       // is about stairs progression, not interaction-priority competition.
       searched: probe.floor.searchables.map(() => true),
@@ -322,7 +324,7 @@ describe('authoritative deterministic simulation', () => {
     const [exitX, exitY] = probe.floor.exit;
     const x = (exitX * 32 + 16) * FIXED_SCALE, y = (exitY * 32 + 16) * FIXED_SCALE;
     const create = (curse: number) => new AuthoritativeSimulation(seed, {
-      floor: 2, x, y, hasKey: true, curse,
+      floor: 2, x, y, hasKey: true, objectiveComplete: true, curse,
       searched: probe.floor.searchables.map(() => true),
       stalker: { state: 'dormant', x: 0, y: 0, targetX: 0, targetY: 0, ticksRemaining: 100_000, chaseStartTick: 0, lastChaseEndTick: 0, visible: false, moveRemainder: 0 },
       crawlers: [], watchers: [], ambushers: [], mimics: [],
@@ -346,7 +348,7 @@ describe('authoritative deterministic simulation', () => {
     const start = reference.floor.start;
     const px = (start[0] * 32 + 16) * FIXED_SCALE, py = (start[1] * 32 + 16) * FIXED_SCALE;
     const stalker = { state: 'hunting' as const, x: px + 10 * FIXED_SCALE, y: py, targetX: px, targetY: py, ticksRemaining: 0, chaseStartTick: 0, lastChaseEndTick: -600, visible: true, moveRemainder: 0 };
-    const atExit = new AuthoritativeSimulation(seed, { x: px, y: py, stalker });
+    const atExit = new AuthoritativeSimulation(seed, { x: px, y: py, stalker, objectiveComplete: true });
     const damageTick = atExit.stepWithEvents(emptyInput);
     expect(damageTick.events).toContainEqual({ type: 'damage', amount: 30, hp: 70 });
     expect(atExit.state.hp).toBe(70);
@@ -513,7 +515,7 @@ describe('authoritative deterministic simulation', () => {
     expect([sim.state.x, sim.state.y]).toEqual(lockedPosition);
   });
 
-  it('records and replays a complete Floor 4 to Outside run in the Phaser-free simulation', () => {
+  it('records, recovers at Block 13, continues the canonical log, and replays the complete route', async () => {
     // This fixture seed is selected against the complete Floor 4 -> Block 13
     // progression, whose shared Economy stream differs from direct floor-0 boot.
     const runSeed = 0x13579bdf2469n;
@@ -525,6 +527,7 @@ describe('authoritative deterministic simulation', () => {
     const recorder = new InputRecorder();
     const recordedStates: InputState[] = [];
     let block13EntrySnapshot: ReturnType<typeof sim.snapshot> | undefined;
+    let block13EntryRecovery: { bytes: Uint8Array; checkpoint: ReturnType<typeof createRunCheckpoint>; tick: number } | undefined;
     let crawlerChaseSeen = false, watcherCurseSeen = false, ambusherSeen = false, mimicSeen = false;
     const step = (input: InputState) => {
       const before = sim.state;
@@ -577,6 +580,42 @@ describe('authoritative deterministic simulation', () => {
       }
       if (guard >= 20_000) throw new Error(`route stalled before ${target}; at ${sim.state.x / (32 * FIXED_SCALE)},${sim.state.y / (32 * FIXED_SCALE)}`);
     };
+    const tapPuzzle = (direction: 'left' | 'right' | 'up' | 'down' | 'interact') => {
+      step({ ...emptyInput, [direction]: true });
+      step(emptyInput);
+    };
+    const solvePuzzle = () => {
+      const puzzle = sim.floor.puzzle;
+      route(sim.floor.puzzleDevice);
+      tapPuzzle('interact');
+      if (puzzle.kind === 'combination') {
+        for (let i = 0; i < 3; i++) {
+          if (i > 0) tapPuzzle('right');
+          for (let n = 0; n < puzzle.solutionCode![i]; n++) tapPuzzle('up');
+        }
+      } else if (puzzle.kind === 'resident') {
+        for (let i = 0; i < puzzle.correctResident!; i++) tapPuzzle('down');
+      } else if (puzzle.kind === 'circuit') {
+          let selected = 0;
+          for (const i of puzzle.circuitOrder!) {
+            while (selected !== i) { tapPuzzle('right'); selected = (selected + 1) % puzzle.circuitLabels!.length; }
+            tapPuzzle('up');
+        }
+      } else if (puzzle.kind === 'records') {
+        let selected = 0;
+        for (const desired of puzzle.recordOrder!) {
+          while (selected !== desired) { tapPuzzle('down'); selected = (selected + 1) % 3; }
+          tapPuzzle('interact'); selected = 0;
+        }
+      } else {
+        for (const answer of puzzle.memoryAnswers!) {
+          for (let i = 0; i < answer; i++) tapPuzzle('down');
+          tapPuzzle('interact');
+        }
+      }
+      if (!sim.state.puzzle.solved) tapPuzzle('interact');
+      expect(sim.state.puzzle.solved, `puzzle at floor ${sim.state.floor}`).toBe(true);
+    };
 
     for (let floor = 4; floor >= 0; floor--) {
       expect(sim.state.floor).toBe(floor);
@@ -588,10 +627,20 @@ describe('authoritative deterministic simulation', () => {
           step(emptyInput);
         }
       }
-      route(sim.floor.key);
-      step({ ...emptyInput, interact: true });
-      step(emptyInput);
-      expect(sim.state.hasKey).toBe(true);
+      for (const objectiveIndex of sim.floor.objectives.searchableIndices) {
+        const objective = sim.floor.searchables[objectiveIndex];
+        route([objective.x, objective.y]);
+        step({ ...emptyInput, interact: true });
+        step(emptyInput);
+      }
+      solvePuzzle();
+      expect(sim.state.objectiveComplete).toBe(true);
+      if (!sim.state.hasKey && floor === 0) {
+        route(sim.floor.key);
+        step({ ...emptyInput, interact: true });
+        step(emptyInput);
+      }
+      expect(sim.state.hasKey).toBe(floor === 0 || floor === 4 || floor === 3);
       if (floor === 0) expect(sim.floor.searchables.some(item => item.isMimic)).toBe(true);
       route(sim.floor.exit);
       let guard = 0;
@@ -608,6 +657,19 @@ describe('authoritative deterministic simulation', () => {
         expect(sim.floor.key.length).toBe(2);
         expect(sim.floor.exit.length).toBe(2);
         block13EntrySnapshot = sim.snapshot();
+        const originalRun: RunState = {
+          floor: 4, battery: 100, curse: 0, hp: 1000, score: 0, status: 'playing', floorsCompleted: 0,
+          timeStarted: 0, seenStoryIds: [], seed: Number(runSeed & 0xffffffffn), canonicalSeed: runSeed.toString(),
+        };
+        const bytes = recorder.encodeBinary();
+        block13EntryRecovery = {
+          bytes,
+          tick: sim.state.tick,
+          checkpoint: createRunCheckpoint({
+            runState: originalRun, inputLog: bytes, terminalTick: sim.state.tick,
+            stateHash: hashAuthoritativeState(sim.state), inputHash: keccak256(toHex(bytes)),
+          }),
+        };
       }
     }
     expect(sim.state.status).toBe('won');
@@ -648,6 +710,22 @@ describe('authoritative deterministic simulation', () => {
     expect(replayFinal).toEqual(liveFinal);
     expect(hashFinalStateV1(replayFinal)).toBe(hashFinalStateV1(liveFinal));
     expect(source.terminalTick).toBe(sim.state.tick);
+    expect(block13EntryRecovery).toBeDefined();
+    const recoveryPoint = block13EntryRecovery!;
+    const recoveredAtBlock13 = validateRunRecovery(parseRunCheckpoint(serializeRunCheckpoint(recoveryPoint.checkpoint)));
+    expect(recoveredAtBlock13.state).toEqual(block13EntrySnapshot!.state);
+    const continuedSimulation = new AuthoritativeSimulation(runSeed, { hp: 1000 });
+    const prefixSource = InputReplayer.fromBinary(recoveryPoint.bytes);
+    for (let tick = 0; tick < recoveryPoint.tick; tick++) continuedSimulation.step(prefixSource.getStateAtTick(tick));
+    const continuedRecorder = InputRecorder.fromBinary(recoveryPoint.bytes);
+    for (let tick = recoveryPoint.tick; tick < sim.state.tick; tick++) {
+      const input = recordedStates[tick];
+      continuedSimulation.step(input);
+      continuedRecorder.recordTick(tick, input);
+    }
+    expect(continuedSimulation.snapshot()).toEqual(sim.snapshot());
+    expect(continuedRecorder.encodeBinary()).toEqual(recorder.encodeBinary());
+    expect(await continuedRecorder.generateInputHash()).toBe(await recorder.generateInputHash());
     const replayAtRenderSchedule = (fps: number, initialStallMs = 0) => {
       const scheduledReplay = new AuthoritativeSimulation(runSeed, { hp: 1000 });
       const scheduledSource = InputReplayer.fromBinary(recorder.encodeBinary());
@@ -668,9 +746,11 @@ describe('authoritative deterministic simulation', () => {
     expect(replayAtRenderSchedule(60, 5000)).toEqual(sim.snapshot());
     expect(replayAtRenderSchedule(60)).toEqual(sim.snapshot());
     expect(crawlerChaseSeen).toBe(true);
-    expect(ambusherSeen).toBe(true);
+    // The new roster intentionally makes an Ambusher a rare contingent event;
+    // a canonical full-route traversal no longer requires one to spawn.
     expect(mimicSeen).toBe(true);
-    expect(watcherCurseSeen).toBe(true);
+    // Puzzle panels pause authoritative enemy updates until the player closes
+    // them, so this one route no longer guarantees a Watcher exposure window.
   }, 20_000);
 
   it('keeps Floor 1 to Block 13 arrival playable when its transition bonus reaches the curse threshold', () => {
@@ -679,7 +759,7 @@ describe('authoritative deterministic simulation', () => {
     const [exitX, exitY] = probe.floor.exit;
     const x = (exitX * 32 + 16) * FIXED_SCALE, y = (exitY * 32 + 16) * FIXED_SCALE;
     const initialState: Partial<AuthoritativeState> = {
-      floor: 1, x, y, tick: 500, floorsCompleted: 3, hasKey: true, curse: 90 * FIXED_SCALE,
+      floor: 1, x, y, tick: 500, floorsCompleted: 3, hasKey: true, objectiveComplete: true, curse: 90 * FIXED_SCALE,
       battery: 0,
       searched: probe.floor.searchables.map(() => true),
       corruption: { lastTriggerTick: 500, effectId: 0, effectType: 0, intensityPermille: 0, durationTicks: 0 },
@@ -707,10 +787,10 @@ describe('authoritative deterministic simulation', () => {
     expect(repeat.snapshot()).toEqual(sim.snapshot());
   });
 
-  it('uses 8 fixed battery subunits per lit simulation tick', () => {
+  it('uses 4 fixed battery subunits per lit simulation tick', () => {
     const sim = new AuthoritativeSimulation(0x812n, { crawlers: [], watchers: [], ambushers: [], mimics: [] });
     sim.step({ ...emptyInput, flashlight: true });
-    expect(sim.state.battery).toBe(100 * FIXED_SCALE - 8);
+    expect(sim.state.battery).toBe(100 * FIXED_SCALE - 4);
   });
 
   it('allows curse above 85 inside Block 13 and still loses at 100', () => {
@@ -756,7 +836,7 @@ describe('authoritative deterministic simulation', () => {
     const x = (startTileX * 32 + 16) * FIXED_SCALE;
     const y = (startTileY * 32 + 16) * FIXED_SCALE;
     const sim = new AuthoritativeSimulation(seed, {
-      floor: 0, floorsCompleted: 4, hasKey: true, x, y,
+      floor: 0, floorsCompleted: 4, hasKey: true, objectiveComplete: true, x, y,
       stalker: {
         state: 'investigating', x: x + 40 * FIXED_SCALE, y,
         targetX: x, targetY: y, ticksRemaining: 120, chaseStartTick: 0,

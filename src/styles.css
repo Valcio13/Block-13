@@ -47,6 +47,22 @@ button:focus-visible { outline: 3px solid #ffd700; outline-offset: 4px; }
 .run-choice-secondary button { border-color: #82918e; background: #111719; }
 .run-ready { margin: 1rem auto 0; color: #70d4c6; }
 .run-ready p { margin: .5rem 0; font-weight: bold; letter-spacing: .1em; }
+.run-toast-stack { position: fixed; z-index: 500; top: max(.75rem, env(safe-area-inset-top)); left: max(.75rem, env(safe-area-inset-left)); display: grid; gap: .4rem; width: min(21rem, calc(100vw - 1.5rem)); pointer-events: none; }
+.run-toast { display: grid; grid-template-columns: 1rem 1fr; gap: .55rem; align-items: center; padding: .55rem .7rem; color: #c9d0ce; border: 1px solid rgba(157, 176, 172, .22); background: rgba(8, 12, 15, .88); box-shadow: 0 .25rem 1rem #0005; font: 600 .72rem/1.35 monospace; animation: run-toast-in .2s ease-out both; }
+.run-toast-icon { color: #a7b5b2; text-align: center; }
+.run-toast.is-active { color: #f1dfae; border-color: rgba(228, 194, 120, .4); }
+.run-toast.is-active .run-toast-icon { color: #f1dfae; animation: run-toast-pulse 1.2s ease-in-out infinite; }
+.run-toast.is-completed { color: #b8d8cf; }
+.run-toast.is-completed .run-toast-icon { color: #70d4c6; }
+.run-toast.is-failed { color: #ffc2ba; border-color: rgba(255, 120, 105, .55); }
+.run-toast.is-failed .run-toast-icon { color: #ff9b91; }
+.cancel-run-preparation { position: relative; z-index: 2; margin: .25rem 0 .5rem; padding: .45rem .7rem; font-size: .65rem; }
+@keyframes run-toast-in { from { opacity: 0; transform: translateY(-.35rem); } to { opacity: 1; transform: translateY(0); } }
+@keyframes run-toast-pulse { 50% { opacity: .45; } }
+.run-countdown .title-card { width: min(100%, 42rem); }
+.run-countdown h1 { font-size: clamp(5rem, 24vw, 12rem); color: #f1e9d9; text-shadow: 0 0 2rem rgba(112, 212, 198, .2); }
+.run-countdown .subtitle { margin-bottom: .6rem; }
+.run-technical-data { width: min(100%, 36rem); margin: 1.5rem auto 0; }
 .connected-wallet, .startup-status, .network-note { margin: .9rem auto 0; font-size: .8rem; letter-spacing: .03em; }
 .menu-error { margin: 1rem auto 0; color: #ff9b91; line-height: 1.5; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
@@ -96,4 +112,66 @@ button:focus-visible { outline: 3px solid #ffd700; outline-offset: 4px; }
   background: #fff;
   color: #ff4444;
   border: none;
+}
+
+.menu-settings-button { margin-top: 1.25rem; min-height: 3rem; }
+
+.audio-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(2, 4, 8, .88);
+  backdrop-filter: blur(2px);
+}
+
+.audio-settings-panel {
+  width: min(100%, 42rem);
+  max-height: min(92vh, 52rem);
+  overflow-y: auto;
+  border: 2px solid #456a67;
+  outline: 1px solid rgba(112, 212, 198, .22);
+  background: linear-gradient(145deg, #121a1c, #090c11 68%);
+  color: #e9e5d8;
+  padding: clamp(1rem, 4vw, 1.8rem);
+  box-shadow: 0 18px 70px rgba(0, 0, 0, .8), inset 0 0 0 4px rgba(0, 0, 0, .3);
+  text-align: left;
+}
+
+.audio-settings-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #344441; }
+.audio-settings-eyebrow { margin: 0 0 .4rem; color: #70d4c6; font-size: .68rem; letter-spacing: .14em; }
+.audio-settings-header h2 { margin: 0; color: #d9f3ea; font-size: clamp(1.15rem, 4vw, 1.55rem); letter-spacing: .08em; }
+.audio-settings-close { padding: .65rem .8rem; font-size: .78rem; }
+.audio-settings-controls { padding: .6rem 0; }
+.audio-setting-row { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(8rem, 2fr) 5rem; align-items: center; gap: .85rem; padding: .75rem 0; border-bottom: 1px solid rgba(112, 212, 198, .13); }
+.audio-setting-row > label:first-child { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .3rem; color: #d9f3ea; font-size: .82rem; }
+.audio-setting-row output { color: #70d4c6; font-variant-numeric: tabular-nums; }
+.audio-setting-row input[type="range"] { width: 100%; accent-color: #70d4c6; }
+.audio-mute-toggle { display: flex; align-items: center; gap: .4rem; color: #b8c2be; font-size: .75rem; }
+.audio-mute-toggle input, .reduced-scare-toggle input { accent-color: #70d4c6; width: 1rem; height: 1rem; }
+.audio-preview-row { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; padding: 1rem 0; }
+.audio-preview-row > span { margin-right: auto; color: #8fa19d; font-size: .7rem; letter-spacing: .12em; }
+.audio-preview-row button, .audio-settings-footer button { padding: .62rem .8rem; font-size: .7rem; }
+.reduced-scare-toggle { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: .7rem; padding: 1rem 0; border-top: 1px solid #344441; border-bottom: 1px solid #344441; cursor: pointer; }
+.reduced-scare-toggle span { display: grid; gap: .35rem; }
+.reduced-scare-toggle strong { color: #d9f3ea; font-size: .82rem; }
+.reduced-scare-toggle small { color: #a5b6b5; font-size: .75rem; line-height: 1.5; }
+.reduced-scare-toggle .audio-default { color: #81918d; font-size: .62rem; white-space: nowrap; }
+.audio-settings-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-top: 1rem; }
+.audio-settings-footer [role="status"] { min-height: 1.2rem; color: #a5b6b5; font-size: .72rem; }
+.audio-settings-hint { margin: 1rem 0 0; color: #72817d; font-size: .62rem; letter-spacing: .07em; text-align: center; }
+.audio-settings-panel button:hover { border-color: #ffd700; color: #ffd700; }
+.audio-settings-panel button:focus-visible,
+.audio-settings-panel input:focus-visible,
+.menu-settings-button:focus-visible { outline: 3px solid #ffd700; outline-offset: 3px; }
+
+@media (max-width: 560px) {
+  .audio-setting-row { grid-template-columns: 1fr 5rem; gap: .55rem; }
+  .audio-setting-row > label:first-child { grid-column: 1 / -1; }
+  .audio-preview-row > span { width: 100%; }
+  .reduced-scare-toggle { grid-template-columns: auto 1fr; }
+  .reduced-scare-toggle .audio-default { grid-column: 2; }
+  .audio-settings-footer { align-items: stretch; flex-direction: column; }
 }

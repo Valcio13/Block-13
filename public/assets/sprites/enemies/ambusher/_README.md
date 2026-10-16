@@ -1,4 +1,9 @@
-# Ambusher Sprites
+# Historical Ambusher Sprite Specification
+
+> Superseded. Production warning and four 576×324 screen-space compositions
+> are registered in `src/game/enemyAssets.ts`; authored files live beside this
+> note. The descriptions below are an older placeholder plan only. Current
+> rights status is in the root [ASSET_CREDITS.md](../../../../../ASSET_CREDITS.md).
 
 **World Sprite Size**: 32×48 pixels  
 **Jumpscare Size**: 512×512 pixels (or larger)  

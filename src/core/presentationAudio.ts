@@ -1,16 +1,32 @@
 import type { SimulationEvent, AuthoritativeState } from './authoritativeSimulation';
+import type { AudioDirector } from './audioDirector';
 import { isBlock13Floor } from './progression';
 
 export type AudioCue = {
   key: string;
   cooldownMs: number;
   positional?: { x: number; y: number };
+  volume?: number;
 };
 
-const cue = (key: string, cooldownMs = 0, positional?: { x: number; y: number }): AudioCue => ({ key, cooldownMs, positional });
+const cue = (key: string, cooldownMs = 0, positional?: { x: number; y: number }, volume?: number): AudioCue => ({ key, cooldownMs, positional, volume });
+
+/** Dedicated impact gains through AudioDirector, preserving master and SFX settings. */
+export const AMBUSHER_IMPACT_PRODUCTION_VOLUME = 0.55;
+export const AMBUSHER_IMPACT_FALLBACK_VOLUME = 1.2;
+export const AMBUSHER_PRE_IMPACT_AMBIENCE_GAIN = 0.25;
+export function playAmbusherImpact(director: Pick<AudioDirector, 'hasLoadedAsset' | 'playWithCooldown' | 'stop'>, reduceIntensity = false): string | undefined {
+  // A new encounter replaces any lingering tail instead of stacking it.
+  director.stop('sfx_ambusher_impact');
+  director.stop('sfx_jumpscare_hit');
+  if (director.hasLoadedAsset('sfx_ambusher_impact')
+    && director.playWithCooldown('sfx_ambusher_impact', 'sfx', 0, { volume: AMBUSHER_IMPACT_PRODUCTION_VOLUME * (reduceIntensity ? 0.56 : 1) })) return 'sfx_ambusher_impact';
+  if (director.playWithCooldown('sfx_jumpscare_hit', 'sfx', 0, { volume: AMBUSHER_IMPACT_FALLBACK_VOLUME * (reduceIntensity ? 0.56 : 1) })) return 'sfx_jumpscare_hit';
+  return undefined;
+}
 
 /** Pure presentation mapping; it reads simulation output but never changes it. */
-export function audioCuesForEvents(events: readonly SimulationEvent[]): AudioCue[] {
+export function audioCuesForEvents(events: readonly SimulationEvent[], state?: Pick<AuthoritativeState, 'mimics'>): AudioCue[] {
   const cues: AudioCue[] = [];
   for (const event of events) {
     switch (event.type) {
@@ -29,7 +45,10 @@ export function audioCuesForEvents(events: readonly SimulationEvent[]): AudioCue
         cues.push(cue('sfx_floor_transition', 1500));
         break;
       case 'mimic_revealed':
-        cues.push(cue('sfx_mimic_reveal', 1000));
+        {
+          const mimic = state?.mimics[event.index];
+          cues.push(cue('sfx_mimic_reveal', 1000, mimic ? { x: mimic.x, y: mimic.y } : undefined, 0.42));
+        }
         break;
     }
   }
@@ -45,31 +64,34 @@ export function audioCuesForStateChange(previous: AuthoritativeState, current: A
   if (previous.flashlightOn !== current.flashlightOn) cues.push(cue(current.flashlightOn ? 'sfx_flashlight_on' : 'sfx_flashlight_off', 100));
   if (previous.battery > 20 * 256 && current.battery <= 20 * 256) cues.push(cue('sfx_battery_warning', 10_000));
   if (previous.corruption.effectId !== current.corruption.effectId) cues.push(cue('sfx_corruption_pulse', 1200));
-  if (!previous.stalker.visible && current.stalker.visible) cues.push(cue('sfx_stalker_presence', 5000, { x: current.stalker.x, y: current.stalker.y }));
+  // Only the hunt recording is currently shipped. Use it quietly at the first
+  // real visibility edge so the player hears the figure before identifying it.
+  if (!previous.stalker.visible && current.stalker.visible && current.stalker.state !== 'hunting') cues.push(cue('sfx_stalker_presence', 5000, { x: current.stalker.x, y: current.stalker.y }, 0.34));
   if (previous.stalker.state !== 'hunting' && current.stalker.state === 'hunting') {
     if (!isBlock13Floor(current.floor)) cues.push(cue('sfx_danger_stinger', 5000));
     // Block 13 currently has no dedicated stinger asset; use its real, loaded
     // Stalker cue rather than queueing an unavailable catalog key.
-    cues.push(cue('sfx_stalker_hunt', 5000, { x: current.stalker.x, y: current.stalker.y }));
+    cues.push(cue('sfx_stalker_hunt', 5000, { x: current.stalker.x, y: current.stalker.y }, 0.55));
     specificScare = true;
   }
 
   current.crawlers.forEach((enemy, index) => {
     const old = previous.crawlers.find(candidate => candidate.id === enemy.id) ?? previous.crawlers[index];
-    if (old && !old.chasing && enemy.chasing) cues.push(cue('sfx_crawler_skitter', 900, { x: enemy.x, y: enemy.y }));
+    if (old && !old.chasing && enemy.chasing) cues.push(cue('sfx_crawler_skitter', 900, { x: enemy.x, y: enemy.y }, 0.42));
   });
   current.watchers.forEach((enemy, index) => {
     const old = previous.watchers.find(candidate => candidate.id === enemy.id) ?? previous.watchers[index];
     if (!old) return;
-    if (old.active && !enemy.active) cues.push(cue('sfx_watcher_vanish', 1200, { x: old.x, y: old.y }));
-    else if (!old.active && enemy.active) cues.push(cue('sfx_watcher_presence', 3000, { x: enemy.x, y: enemy.y }));
+    if (old.active && !enemy.active) cues.push(cue('sfx_watcher_vanish', 1200, { x: old.x, y: old.y }, 0.35));
+    else if (!old.active && enemy.active) cues.push(cue('sfx_watcher_presence', 3000, { x: enemy.x, y: enemy.y }, 0.32));
   });
   current.ambushers.forEach((enemy, index) => {
     const old = previous.ambushers.find(candidate => candidate.id === enemy.id) ?? previous.ambushers[index];
     if (!old) return;
-    if (old.state !== 'warning' && enemy.state === 'warning') cues.push(cue('sfx_ambusher_warning', 2500, { x: enemy.x, y: enemy.y }));
+    if (old.state !== 'warning' && enemy.state === 'warning') cues.push(cue('sfx_ambusher_warning', 2500, { x: enemy.x, y: enemy.y }, 0.28));
     if (old.state !== 'jumpscare' && enemy.state === 'jumpscare') {
-      cues.push(cue('sfx_ambusher_attack', 1200));
+      // FloorScene starts the hit with the first visible impact frame, after
+      // the presentation-only micro-gap. Suppress the generic scare cue here.
       specificScare = true;
     }
   });
@@ -83,3 +105,27 @@ export function floorAmbienceKeys(floor: number): string[] {
   const specific = isBlock13Floor(floor) ? 'amb_block13' : floor >= 1 && floor <= 4 ? `amb_floor_${floor}` : undefined;
   return specific ? [specific] : [];
 }
+
+export interface FloorMusicTrack {
+  key: 'music_block3_airy' | 'music_block1_lost' | 'music_block13_echoes';
+  /** Per-track trim before master and music settings are applied. */
+  gain: number;
+}
+
+/** Floor-selected music is presentation-only; floor 4 deliberately stays music-free. */
+export function floorMusicTrack(floor: number): FloorMusicTrack | undefined {
+  switch (floor) {
+    case 3: return { key: 'music_block3_airy', gain: 0.24 };
+    case 2: return { key: 'music_block3_airy', gain: 0.32 };
+    case 1: return { key: 'music_block1_lost', gain: 0.20 };
+    case 0: return { key: 'music_block13_echoes', gain: 0.18 };
+    default: return undefined;
+  }
+}
+
+export const FLOOR_MUSIC_PREVIEW: readonly FloorMusicTrack[] = [
+  { key: 'music_block3_airy', gain: 0.24 },
+  { key: 'music_block3_airy', gain: 0.32 },
+  { key: 'music_block1_lost', gain: 0.20 },
+  { key: 'music_block13_echoes', gain: 0.18 },
+];

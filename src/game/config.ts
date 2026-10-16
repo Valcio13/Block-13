@@ -6,7 +6,12 @@ import type { RunState } from '../core/run';
 export function createGameConfig(
   parent: string,
   runState: RunState,
-  options: { replayLog?: Uint8Array } = {},
+  options: {
+    replayLog?: Uint8Array;
+    recoveryLog?: Uint8Array;
+    recoveryStateHash?: string;
+    persistRunRecovery?: (log: Uint8Array, state: import('../core/authoritativeSimulation').AuthoritativeState) => void;
+  } = {},
 ): Phaser.Types.Core.GameConfig {
   return {
     type: Phaser.AUTO,
@@ -36,6 +41,9 @@ export function createGameConfig(
       preBoot: (game) => {
         game.registry.set('runState', runState);
         if (options.replayLog) game.registry.set('replayLog', options.replayLog);
+        if (options.recoveryLog) game.registry.set('recoveryLog', options.recoveryLog);
+        if (options.recoveryStateHash) game.registry.set('recoveryStateHash', options.recoveryStateHash);
+        if (options.persistRunRecovery) game.registry.set('persistRunRecovery', options.persistRunRecovery);
       },
     },
   };

@@ -42,6 +42,7 @@ describe('FloorScene restart lifecycle', () => {
     const transitionBody = source.slice(transitionStart, transitionEnd);
     expect(transitionBody).toContain('this.scene.restart({ runState: this.runState })');
     expect(transitionBody).toContain('AUDIO_KEYS.interaction.floorTransition');
+    expect(transitionBody).toContain("fadeOutCategory('ambience', 850)");
 
     const terminalStart = source.indexOf("if (state.status === 'won') {");
     const terminalEnd = source.indexOf('\n      }', source.indexOf("} else if (state.status === 'lost')", terminalStart));
@@ -53,5 +54,29 @@ describe('FloorScene restart lifecycle', () => {
     const shutdownStart = source.indexOf('  shutdown() {');
     const shutdownEnd = source.indexOf('\n  private ', shutdownStart + 10);
     expect(source.slice(shutdownStart, shutdownEnd)).toContain('this.audioDirector.shutdown()');
+    expect(source).toContain("this.audioDirector.fadeInCategory('ambience', 1000)");
+    expect(source).toContain('this.audioDirector?.pausePresentation()');
+    expect(source).toContain('this.audioDirector?.resumePresentation()');
+  });
+
+  it('clears and restores the pursuit-only ambience duck across pause and terminal lifecycle', async () => {
+    const source = await readFile(fileURLToPath(sceneSourceUrl), 'utf8');
+    const clearStart = source.indexOf('  private clearFinalChaseAmbience()');
+    const clearEnd = source.indexOf('\n  private ', clearStart + 10);
+    const clearBody = source.slice(clearStart, clearEnd);
+    expect(clearBody).toContain("setCategoryDucking('ambience', 1, 'final-stalker-chase')");
+    expect(clearBody).toContain('this.tweens.killTweensOf(this.finalChaseAmbienceTween)');
+
+    const pauseStart = source.indexOf('  private showPauseMenu()');
+    const pauseEnd = source.indexOf('\n  private ', pauseStart + 10);
+    const pauseBody = source.slice(pauseStart, pauseEnd);
+    expect(pauseBody).toContain('this.clearFinalChaseAmbience()');
+    expect(pauseBody).toContain('this.setFinalChaseAmbience(isBlock13Floor(state.floor) && state.hasKey && state.stalker.state === \'hunting\'');
+
+    for (const method of ['  private completeFloor(', '  private beginVictoryEpilogue()', '  private playerDeath()', '  shutdown() {']) {
+      const start = source.indexOf(method);
+      const end = source.indexOf('\n  private ', start + 10);
+      expect(source.slice(start, end)).toContain('this.clearFinalChaseAmbience()');
+    }
   });
 });

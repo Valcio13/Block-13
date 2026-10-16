@@ -1,49 +1,51 @@
 # Block 13 audio system
 
-## Current status
+## Runtime and lifecycle
 
-Block 13 now has its first checked-in audio pack. `AudioDirector` owns playback, category volumes, optional positional falloff, presentation-only cooldowns, and cleanup. `BootScene` loads only `AUDIO_ASSET_MANIFEST`; every active manifest path is checked in under `public/assets/audio`. Unlisted cues remain silent no-ops.
+`AudioDirector` owns sound playback, master/category gains, mute state,
+presentation cooldowns, temporary ambience ducking, and scene cleanup.
+`BootScene` loads only `AUDIO_ASSET_MANIFEST` from
+`src/core/audioAssetManifest.ts`; the manifest paths resolve to checked-in
+files under `public/assets/audio/`. Catalog paths not promoted into that
+manifest are staged/unused and are not requested by the loader.
 
-Audio is presentation-only. `src/core/presentationAudio.ts` maps authoritative events and snapshot changes to cues. Sound playback, variant selection, cooldowns, loops, and scene cleanup do not affect simulation state, input, progression, or authoritative RNG. Cosmetic audio uses AudioDirector's private seeded RNG.
+Audio is presentation-only. `src/core/presentationAudio.ts` maps simulation
+events and snapshot changes to cues. Playback, local cosmetic variants,
+cooldowns, loops, and cleanup do not affect simulation state, input,
+progression, or authoritative RNG.
 
-## Active mapping
+The shared audio settings panel is available at the main menu and pause menu.
+It saves master/SFX/ambience/music volumes and mute flags to browser
+`localStorage`; live changes update active Phaser sounds from their stored
+base gain. Settings previews use bounded one-shot HTML audio playback and
+stop when replaced or when the panel closes. **Reduce Jumpscare Intensity**
+changes only the rendered Ambusher flash, camera kick, and scale punch.
 
-| Event or state edge | Audio | Behavior |
-|---|---|---|
-| Player movement | `sfx_player_footstep_1..3` | Short tick-cadenced variants while moving |
-| Flashlight toggle | `sfx_flashlight_on`, `sfx_flashlight_off` | Short one-shots |
-| Search / ordinary pickup / key | `sfx_interaction_search`, `sfx_item_pickup`, `sfx_key_pickup` | One-shots from authoritative result events |
-| Damage | `sfx_player_hurt_1..2` | Two mild variants |
-| Stalker starts hunting | `sfx_stalker_hunt` | Positional chase cue |
-| Generic scare | `sfx_jumpscare_hit` | Restrained one-shot when no specific scare cue is selected |
-| Floors 4–1 and Block 13 | `amb_floor_4`, `_3`, `_2`, `_1`, `amb_block13` | One dedicated loop for the current floor |
+Floor ambience is selected for Floors 4–1 and Block 13. Dedicated looped music
+is selected for Blocks 3, 1, and 13. The Block 13 Ambusher impact uses the
+authored composite impact sting; generic jumpscare impact remains the fallback
+for other scare events. Terminal states stop ambience/music according to the
+scene lifecycle; shutdown removes active sound handles and listeners.
 
-Floor changes stop the prior scene's loops during scene shutdown and start the next floor's dedicated loop. Death and victory stop ambience while allowing terminal one-shots to finish. Scene restart/shutdown calls `AudioDirector.shutdown()` to stop all remaining playback.
+## Assets and provenance
 
-Ambience playback uses a conservative per-sound volume of 0.32 (then master/category scaling). One-shots use their event-specific levels in `FloorScene`. Floor beds are 24-second authored mixes with soft fades at the loop boundaries.
+See [AUDIO_LICENSES.md](../AUDIO_LICENSES.md) and
+[docs/audio/THIRD_PARTY_AUDIO.md](audio/THIRD_PARTY_AUDIO.md) for source pages,
+creators, licenses, modifications, and production destinations. The files in
+`public/assets/audio/` are processed derivatives. Source recordings retained
+for provenance live under `docs/audio/sources/`; the Ambusher mix master lives
+under `docs/audio/masters/`.
 
-## Source and processing
+The Pixabay Content License permits free use and modification subject to its
+prohibited uses; it does not permit distributing the unmodified source as a
+standalone asset. See the current [Pixabay license summary](https://pixabay.com/service/license-summary/)
+and [terms](https://pixabay.com/service/terms/). The documented OpenGameArt
+sources are listed as CC0 on their source pages. Credits and documentation do
+not replace checking the license attached to a specific downloaded file.
 
-See [AUDIO_LICENSES.md](../AUDIO_LICENSES.md) for each downloaded source filename, original source page, creator, license, attribution requirement, destination file, and processing details. All source pages were verified under the Pixabay Content License. The active game files are edited OGG derivatives; raw source downloads are not in this repository. No generated audio or placeholder audio is included.
+## Verification limits
 
-## Asset layout
-
-```text
-public/assets/audio/
-  ambience/       floor 4–1 and Block 13 loops
-  enemies/stalker/ Stalker hunt cue
-  flashlight/     flashlight on/off
-  interactions/   search, item, and key pickup
-  jumpscares/     generic scare impact
-  player/         footsteps and hurt variants
-```
-
-Catalog entries without a checked-in file remain inactive. When adding sources, record provenance in `AUDIO_LICENSES.md` before adding them to `AUDIO_ASSET_MANIFEST`.
-
-## Replay safety
-
-Gameplay trigger/state comes from deterministic simulation outputs. Ambient transitions observe floor state. Audio cooldowns use wall-clock time only as a presentation throttle. Visual or audio activity must not consume WORLD, ECONOMY, EVENT, or enemy gameplay RNG streams. See the unit tests for floor cue selection, manifest file existence, cue mappings, and cosmetic isolation.
-
-## Remaining silent cues
-
-The first pack does not include battery warning, corruption pulse, death, escape, generic danger stinger, Block 13 arrival/final chase stingers, crawler, watcher, ambusher, or mimic-specific sounds. Those catalog keys remain disabled until appropriate licensed assets are sourced.
+The audio manifest is checked for path existence by tests. Automated tests do
+not establish that the subjective mix is correct on all devices. Verify
+autoplay/unlock, category balance, mute/reset, and floor-loop transitions in a
+real browser before release.

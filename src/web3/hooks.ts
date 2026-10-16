@@ -2,8 +2,8 @@ import { useAccount, useConnect, useDisconnect, useWriteContract, useWaitForTran
 import { hemiTestnet, CONTRACT_ADDRESS, RUN_REGISTRY_ABI } from './config';
 import { useState, useCallback } from 'react';
 import { type Hash } from 'viem';
-import { RULES_HASH } from './runIdentity';
-import { fetchEntropyBundle, validateEntropyBundle, type EntropyBundle } from './entropyFetcher';
+import { GAME_VERSION, RULES_HASH } from './runIdentity';
+import { fetchEntropyBundle, validateEntropyBundle, type EntropyBundle, type EntropyFetchStage, type EntropyFetchStageStatus } from './entropyFetcher';
 import type { RunManifest } from '../core/seedDerivation';
 import type { CompleteRunArgs } from './tx2Completion';
 
@@ -46,7 +46,6 @@ export function useWallet() {
 /**
  * Game configuration constants
  */
-const GAME_VERSION = '0.4.0';
 const DEFAULT_CHARACTER = 'survivor';
 
 // Preserve the existing right-padded encoding for the short gameVersion and character fields.
@@ -59,6 +58,7 @@ function encodeShortTextBytes32(str: string): `0x${string}` {
 }
 
 export type StartRunPhase = 'entropy' | 'wallet' | 'submitted' | 'confirmed';
+export type StartRunProgress = (stage: EntropyFetchStage, status: EntropyFetchStageStatus) => void;
 
 export function useStartRun() {
   const { writeContractAsync } = useWriteContract();
@@ -76,6 +76,7 @@ export function useStartRun() {
     gameMode: number = 0,
     onPhase?: (phase: StartRunPhase) => void,
     signal?: AbortSignal,
+    onProgress?: StartRunProgress,
   ): Promise<{ runId: bigint; manifest: RunManifest; hash: Hash }> => {
     if (!publicClient || !address) {
       throw new Error('Wallet not connected');
@@ -90,7 +91,7 @@ export function useStartRun() {
       onPhase?.('entropy');
       
       // Fetch entropy from multiple chains
-      const entropy: EntropyBundle = await fetchEntropyBundle(publicClient, address);
+      const entropy: EntropyBundle = await fetchEntropyBundle(publicClient, address, { onStage: onProgress });
       if (signal?.aborted) throw new Error('Hemi run setup cancelled.');
       
       if (!validateEntropyBundle(entropy)) {

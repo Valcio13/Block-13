@@ -1,4 +1,10 @@
-# Enemy Sprites
+# Historical Enemy Sprite Specification
+
+> Superseded. Production enemy art is registered in
+> `src/game/enemyAssets.ts` and `src/game/stalkerAssets.ts`; Stalker art is
+> under `../characters/stalker/`. The specifications below describe an older
+> placeholder plan, not current requirements. See the root
+> [ASSET_CREDITS.md](../../../../ASSET_CREDITS.md) for rights status.
 
 All enemy sprites follow the art bible specifications. Each enemy has its own subdirectory with specific requirements.
 

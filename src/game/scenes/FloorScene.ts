@@ -4,29 +4,119 @@ import { AudioDirector, AUDIO_KEYS } from '../../core/audioDirector';
 import { SimulationEngine } from '../../core/simulationEngine';
 import { InputPipeline, InputRecorder, InputReplayer, LiveInputSource, type InputSource, type InputState } from '../../core/inputRecorder';
 import { firstMimicTwitchDelay, mimicTwitch } from '../../core/cosmeticAnimation';
-import { audioCuesForEvents, audioCuesForStateChange, floorAmbienceKeys, type AudioCue } from '../../core/presentationAudio';
+import { AMBUSHER_PRE_IMPACT_AMBIENCE_GAIN, audioCuesForEvents, audioCuesForStateChange, floorAmbienceKeys, floorMusicTrack, FLOOR_MUSIC_PREVIEW, playAmbusherImpact, type AudioCue, type FloorMusicTrack } from '../../core/presentationAudio';
 import type { Floor, Searchable } from '../../core/floor';
 import type { RunState } from '../../core/run';
 import { AuthoritativeSimulation, FIXED_SCALE, type AuthoritativeState } from '../../core/authoritativeSimulation';
 import { encodeFinalStateV1, finalStateV1FromSimulation, hashFinalStateV1 } from '../../core/finalStateV1';
 import { keccak256, toHex } from 'viem';
 import { getAuthoredClueForSearchId } from '../../core/clues';
+import { addNotebookDiscovery, addNotebookSearchEvents, discoveredObjectiveSteps, emptyNotebookJournal, type NotebookEntry, type NotebookJournal } from '../investigationNotebook';
+import { memoryFragmentDisplay, recordsMayBeCompared } from '../puzzlePresentation';
 import { formatFixedPointPercent, formatWholePercent } from '../../core/uiFormatting';
-import { corruptionVisualStrength, floorVisualProfile, flashlightVisualFactor, tileDressingAt } from '../../core/visualAtmosphere';
+import { architecturalMarkAt, corruptionVisualStrength, floorAmbientVisibility, floorFlashlightContrast, floorVisualProfile, flashlightVisualFactor, surfaceColorGrade, tileDressingAt } from '../../core/visualAtmosphere';
+import {
+  BLOCK13_ASSET_MANIFEST,
+  BLOCK13_MAP_TEXTURE_KEY,
+  block13BranchPlacements,
+  block13HubRingPlacements,
+  block13HasOffsetThreshold,
+  block13OverlayAssetAt,
+  block13SurfaceAssetAt,
+  block13WallEdgeRotations,
+} from '../block13Assets';
 import { isBlock13Floor, START_FLOOR } from '../../core/progression';
 import { enemyPresentationExposure, hasPresentationLineOfSight } from '../presentationVisibility';
 import { collectOccludedLightRays, type OccludedRay } from '../lightOcclusion';
-import { blockTransitionBeats, EpilogueAdvanceGate, hudWarningCopy, nextEpilogueBeat, nextOpeningStoryIndex, objectiveCopy, OPENING_STORY_LINES, playerBlockName, shouldBeginVictoryEpilogue, VICTORY_EPILOGUE, watcherIsCausingCurse } from '../contestUx';
+import {
+  ambusherCameraKickIntensity,
+  ambusherFrameForAccessibility,
+  advanceAmbusherJumpscare,
+  avoidImmediateAmbusherRepeat,
+  ambusherLocalPreviewVariant,
+  ambusherJumpscareFrame,
+  ambusherJumpscareFraming,
+  ambusherImpactStarted,
+  ambusherJumpscareLayout,
+  ambusherJumpscareTextureKey,
+  ambusherJumpscareVariant,
+  AMBUSHER_JUMPSCARE_TIMING,
+  AMBUSHER_JUMPSCARE_TOTAL_MS,
+  AMBUSHER_JUMPSCARE_VARIANTS,
+} from '../ambusherJumpscare';
+import { blockTransitionBeats, EpilogueAdvanceGate, hudWarningCopy, nextEpilogueBeat, objectiveCopy, playerBlockName, shouldBeginVictoryEpilogue, VICTORY_EPILOGUE, watcherIndividuallyCausingCurse, watcherIsCausingCurse } from '../contestUx';
+import { KEY_PIXEL_RECTS, PIXEL_PALETTE, PLAYER_PIXEL_RECTS, pixelRectsAreValid, STAIR_PIXEL_RECTS, STALKER_PIXEL_RECTS } from '../pixelIdentity';
+import {
+  PLAYER_WALK_CYCLE_DURATION_MS,
+  playerMovedBetween,
+  playerTextureKeyForFacing,
+  playerTextureKeyForPresentation,
+} from '../playerAssets';
+import {
+  ORDINARY_ENVIRONMENT_ASSET_MANIFEST,
+  ordinaryOverlayAssetsForMap,
+  ordinaryOverlayPlacementAllowed,
+  ordinaryMapDecorationPlacements,
+  ordinaryThresholdTreatment,
+  ordinarySurfaceAssetsForMap,
+  resolveOrdinaryOverlayAsset,
+  ordinarySurfaceAssetAt,
+  resolveOrdinaryContainerTexture,
+  resolveOrdinarySurfaceAsset,
+  type OrdinaryEnvironmentAssetName,
+} from '../environmentAssets';
+import {
+  inferStalkerVisualFacing,
+  stalkerMovedBetween,
+  stalkerTextureKeyForFacing,
+  stalkerTextureKeyForPresentation,
+  STALKER_WALK_CYCLE_DURATION_MS,
+  type StalkerVisualFacing,
+} from '../stalkerAssets';
+import {
+  ambusherTextureKey,
+  crawlerMovedBetween,
+  crawlerPresentationPhaseOffsetMs,
+  crawlerTextureKeyForPresentation,
+  CRAWLER_WALK_CYCLE_DURATION_MS,
+  MIMIC_REVEAL_PULSE_DURATION_MS,
+  mimicRevealPulseScale,
+  mimicTextureKey,
+  ambusherWarningAlpha,
+  watcherGazeEyeAlpha,
+  watcherGazeAudioPosition,
+  watcherTextureKey,
+} from '../enemyAssets';
+import { NARRATIVE_ASSET_MANIFEST, OPENING_CINEMATIC, shouldPlayOpeningCinematic, victoryExteriorScale } from '../narrativeAssets';
+import { HauntingDirector, HorrorPacingModel, HauntingSilence, hauntingPresentationAllowed, hauntingWhisperLine, type HauntingEvent, type HauntingEventType } from '../hauntingDirector';
+import { interactionPrompt, rejectedInteractionFeedback } from '../interactionPresentation';
+import { hashAuthoritativeState } from '../../core/runRecovery';
+import { PLAYER_FOOTSTEP_COOLDOWN_MS, PLAYER_FOOTSTEP_VARIANT_GAINS, shouldPlayFootstep } from '../footstepMix';
+import { containerScareSearchIndex, containerScareShouldPlay, containerScareStyle } from '../containerScare';
+import { stalkerNearMissCueAvailable, stalkerNearMissState } from '../stalkerPresentation';
+import { accessiblePresentationIntensity, finalChaseAmbienceGain, genericScareCameraKick, stalkerHuntScale } from '../accessibilityPresentation';
+import {
+  BLOCK3_REFINED_EXPERIMENT_ASSETS,
+  block3RoomNoticeTile,
+  block3SurfaceTextureAt,
+  block3ExperimentTextureForAsset,
+  block3VisualModeLabel,
+  nextBlock3VisualMode,
+  type Block3ExperimentTextureKey,
+  type Block3VisualMode,
+} from '../block3VisualExperiment';
 
 interface FloorSceneData {
   runState: RunState;
   /** Optional encoded run log, supplied by a replay launcher. */
   replayLog?: Uint8Array;
+  recoveryLog?: Uint8Array;
 }
 
 interface SearchableSprite {
   sprite: Phaser.GameObjects.Sprite;
   halo: Phaser.GameObjects.Arc;
+  evidenceLabel?: Phaser.GameObjects.Text;
   data: Searchable;
   searched: boolean;
 }
@@ -37,6 +127,9 @@ export class FloorScene extends Phaser.Scene {
   private runState!: RunState;
   private floorData!: Floor;
   private tileSize = 32;
+  private ordinaryEnvironmentImage?: Phaser.GameObjects.Image;
+  private block3VisualMode: Block3VisualMode = 'original';
+  private block3VisualKeyHandler?: (event: KeyboardEvent) => void;
   private player!: Phaser.GameObjects.Sprite;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: { w: Phaser.Input.Keyboard.Key; a: Phaser.Input.Keyboard.Key; s: Phaser.Input.Keyboard.Key; d: Phaser.Input.Keyboard.Key };
@@ -61,8 +154,24 @@ export class FloorScene extends Phaser.Scene {
 
   // Mimic twitch state (tick-based)
   private mimicTwitchStates: Map<Phaser.GameObjects.Sprite, { nextTick: number; entityId: number }> = new Map();
+  private mimicRevealElapsedMs = new Map<Phaser.GameObjects.Sprite, number>();
   private statusText!: Phaser.GameObjects.Text;
   private interactPrompt!: Phaser.GameObjects.Text;
+  private puzzlePanel?: Phaser.GameObjects.Rectangle;
+  private puzzlePanelText?: Phaser.GameObjects.Text;
+  private puzzlePanelArt?: Phaser.GameObjects.Graphics;
+  private notebookOpen = false;
+  private notebookJournal!: NotebookJournal;
+  private notebookElements: Phaser.GameObjects.GameObject[] = [];
+  private notebookKeyHandler?: (event: KeyboardEvent) => void;
+  private notebookToggleKey?: Phaser.Input.Keyboard.Key;
+  private puzzleHintKey?: Phaser.Input.Keyboard.Key;
+  private notebookFloor = 4;
+  private notebookEntryIndex = 0;
+  private notebookHintStage = 0;
+  private puzzleDeviceMarker?: Phaser.GameObjects.Graphics;
+  private puzzleFallbackMarker?: Phaser.GameObjects.Graphics;
+  private puzzleCloseRequested = false;
   private controlsHint!: Phaser.GameObjects.Text;
   private healthBarBg!: Phaser.GameObjects.Rectangle;
   private healthBarFill!: Phaser.GameObjects.Graphics;
@@ -79,11 +188,46 @@ export class FloorScene extends Phaser.Scene {
   private damageVignette!: Phaser.GameObjects.Graphics;
   private corruptionVignette!: Phaser.GameObjects.Graphics;
   private playerFacingAngle = 0;
+  private playerIsMoving = false;
+  private playerWalkAnimationElapsedMs = 0;
   private stalkerSprite!: Phaser.GameObjects.Sprite;
+  private stalkerVisualFacing: StalkerVisualFacing = 'down';
+  private stalkerIsMoving = false;
+  private stalkerWalkAnimationElapsedMs = 0;
+  private stalkerNearMissActive = false;
+  private stalkerNearMissNextCueAt = Number.NEGATIVE_INFINITY;
+  private lastFootstepTick = -10000;
+  private finalChaseAudioActive = false;
+  private finalChaseAmbienceGain = 1;
+  private finalChaseAmbienceTween?: { gain: number };
   private audioDirector!: AudioDirector;
+  private audioPreviewKeyHandler?: (event: KeyboardEvent) => void;
+  private audioPreviewIndex = -1;
   private ambusherSprites: Phaser.GameObjects.Sprite[] = [];
+  private ambusherJumpscareVeil?: Phaser.GameObjects.Rectangle;
+  private ambusherJumpscareImage?: Phaser.GameObjects.Image;
+  private ambusherJumpscareElapsedMs = 0;
+  private ambusherJumpscareVariantIndex = 0;
+  private ambusherJumpscareFramingIndex = 0;
+  private lastAmbusherJumpscareVariantIndex?: number;
+  private ambusherJumpscareImpactPlayed = false;
   private crawlerSprites: Phaser.GameObjects.Sprite[] = [];
+  private crawlerPresentation = new Map<number, { moving: boolean; elapsedMs: number }>();
   private watcherSprites: Phaser.GameObjects.Sprite[] = [];
+  private watcherEyeGlints: Phaser.GameObjects.Graphics[] = [];
+  private hauntingDirector = new HauntingDirector();
+  private horrorPacing = new HorrorPacingModel();
+  private hauntingSilence = new HauntingSilence();
+  private hauntingVisual?: Phaser.GameObjects.Image;
+  private hauntingWhisper?: Phaser.GameObjects.Text;
+  private hauntingVisualRemainingMs = 0;
+  private hauntingWhisperRemainingMs = 0;
+  private containerScareEffect?: Phaser.GameObjects.Graphics;
+  private containerScareAudio?: Phaser.Sound.BaseSound;
+  private containerScareRemainingMs = 0;
+  private containerScareInitialPeakAlpha = 0;
+  private appliedHauntingAmbienceGain = 1;
+  private hauntingDebugKeyHandler?: (event: KeyboardEvent) => void;
   private isPaused = false; // Track pause state
   private pauseKey!: Phaser.Input.Keyboard.Key;
   private isTransitioning = false; // Track floor transitions
@@ -92,10 +236,12 @@ export class FloorScene extends Phaser.Scene {
   private closeStoryPopup?: () => void;
   private storyCloseKey?: Phaser.Input.Keyboard.Key;
   private openingStoryOpen = false;
+  private openingStoryEligible = true;
   private openingStoryIndex = 0;
   private openingStoryTimer?: Phaser.Time.TimerEvent;
   private openingStoryElements: Phaser.GameObjects.GameObject[] = [];
   private openingStoryText?: Phaser.GameObjects.Text;
+  private openingStoryImage?: Phaser.GameObjects.Image;
   private openingAdvanceKey?: Phaser.Input.Keyboard.Key;
   private endingEpilogueOpen = false;
   private endingEpilogueIndex = 0;
@@ -103,7 +249,8 @@ export class FloorScene extends Phaser.Scene {
   private endingEpilogueElements: Phaser.GameObjects.GameObject[] = [];
   private endingEpilogueText?: Phaser.GameObjects.Text;
   private endingEpilogueVeil?: Phaser.GameObjects.Rectangle;
-  private endingExterior?: Phaser.GameObjects.Graphics;
+  private endingExterior?: Phaser.GameObjects.Graphics | Phaser.GameObjects.Image;
+  private endingExteriorPlayer?: Phaser.GameObjects.Sprite;
   private endingAdvanceGate = new EpilogueAdvanceGate();
   private endingKeyDownHandler?: (event: KeyboardEvent) => void;
   private endingKeyUpHandler?: (event: KeyboardEvent) => void;
@@ -117,12 +264,53 @@ export class FloorScene extends Phaser.Scene {
     // scene.restart() data params are unreliable in Phaser
     const registryState = this.registry.get('runState') as RunState | undefined;
     this.runState = registryState || data.runState;
+    const notebookSeed = BigInt(this.runState.canonicalSeed).toString();
+    const savedJournal = this.registry.get('investigationNotebook') as NotebookJournal | undefined;
+    this.notebookJournal = savedJournal?.seed === notebookSeed ? savedJournal : emptyNotebookJournal(notebookSeed);
+    this.notebookFloor = this.runState.floor;
+    this.notebookEntryIndex = 0;
+    this.notebookOpen = false;
+    this.notebookElements = [];
+    this.notebookHintStage = 0;
+    this.block3VisualMode = 'original';
+    this.ordinaryEnvironmentImage = undefined;
+    this.block3VisualKeyHandler = undefined;
 
     // Reset per-floor state
     this.hasKey = false;
     this.stairsUnlocked = false;
     this.flashlightOn = false;
+    this.playerIsMoving = false;
+    this.playerWalkAnimationElapsedMs = 0;
     this.searchableSprites = [];
+    this.crawlerPresentation.clear();
+    this.watcherSprites = [];
+    this.watcherEyeGlints = [];
+    this.mimicRevealElapsedMs.clear();
+    this.hauntingDirector = new HauntingDirector();
+    this.horrorPacing = new HorrorPacingModel();
+    this.hauntingSilence.clear();
+    this.hauntingVisual = undefined;
+    this.hauntingWhisper = undefined;
+    this.hauntingVisualRemainingMs = 0;
+    this.hauntingWhisperRemainingMs = 0;
+    this.containerScareEffect = undefined;
+    this.containerScareAudio = undefined;
+    this.containerScareRemainingMs = 0;
+    this.containerScareInitialPeakAlpha = 0;
+    this.stalkerNearMissActive = false;
+    this.finalChaseAudioActive = false;
+    this.finalChaseAmbienceGain = 1;
+    this.finalChaseAmbienceTween = undefined;
+    this.stalkerNearMissNextCueAt = Number.NEGATIVE_INFINITY;
+    this.lastFootstepTick = -10000;
+    this.appliedHauntingAmbienceGain = 1;
+    this.ambusherJumpscareVeil = undefined;
+    this.ambusherJumpscareImage = undefined;
+    this.ambusherJumpscareElapsedMs = 0;
+    this.ambusherJumpscareVariantIndex = 0;
+    this.ambusherJumpscareFramingIndex = 0;
+    this.ambusherJumpscareImpactPlayed = false;
     this.isTransitioning = false;
     this.block13ObjectiveStatus = '';
     this.storyPopupOpen = false;
@@ -140,12 +328,19 @@ export class FloorScene extends Phaser.Scene {
     this.endingEpilogueText = undefined;
     this.endingEpilogueVeil = undefined;
     this.endingExterior = undefined;
+    this.endingExteriorPlayer = undefined;
     this.endingAdvanceGate = new EpilogueAdvanceGate();
     this.endingKeyDownHandler = undefined;
     this.endingKeyUpHandler = undefined;
     // Phaser restarts this Scene instance. Clear every presentation reference
     // here so create() cannot accidentally touch a destroyed floor's objects.
     this.statusText = undefined as unknown as Phaser.GameObjects.Text;
+    this.puzzlePanel = undefined;
+    this.puzzlePanelText = undefined;
+    this.puzzlePanelArt = undefined;
+    this.puzzleDeviceMarker = undefined;
+    this.puzzleFallbackMarker = undefined;
+    this.puzzleCloseRequested = false;
     this.keyLabel = undefined as unknown as Phaser.GameObjects.Text;
     this.stairsLabel = undefined as unknown as Phaser.GameObjects.Text;
     this.healthBarBg = undefined as unknown as Phaser.GameObjects.Rectangle;
@@ -173,6 +368,49 @@ export class FloorScene extends Phaser.Scene {
         floor: this.runState.floor, hp: this.runState.hp, battery: Math.round(this.runState.battery * FIXED_SCALE),
         curse: Math.round(this.runState.curse * FIXED_SCALE), score: this.runState.score, floorsCompleted: this.runState.floorsCompleted,
       });
+    this.notebookFloor = this.authoritativeSimulation.state.floor;
+    const recoveryLog = data.recoveryLog ?? this.registry.get('recoveryLog') as Uint8Array | undefined;
+    if (!recoveryLog && this.authoritativeSimulation.state.tick === 0 && this.inputRecorder.getEventCount() === 0) {
+      this.notebookJournal = emptyNotebookJournal(notebookSeed);
+      this.registry.set('investigationNotebook', this.notebookJournal);
+    }
+    this.openingStoryEligible = !recoveryLog && !data.replayLog;
+    const persistInitialRecovery = this.registry.get('persistRunRecovery') as ((log: Uint8Array, state: AuthoritativeState) => void) | undefined;
+    if (!recoveryLog && this.authoritativeSimulation.state.tick === 0 && persistInitialRecovery) {
+      persistInitialRecovery(this.inputRecorder.encodeBinary(), this.authoritativeSimulation.state);
+    }
+    if (recoveryLog) {
+      const recoveredEvents = InputRecorder.decodeBinary(recoveryLog) as ReturnType<typeof InputRecorder.decodeBinary> & { terminalTick?: number };
+      const recoveryTick = recoveredEvents.terminalTick ?? recoveredEvents.reduce((max, event) => Math.max(max, event.tick + 1), 0);
+      const recoverySource = InputReplayer.fromBinary(recoveryLog);
+      // Rebuild the journal from the same verified deterministic replay used
+      // for recovery. A stale client cache is never trusted as discovered data.
+      let rebuiltJournal = emptyNotebookJournal(notebookSeed);
+      for (let tick = 0; tick < recoveryTick; tick++) {
+        const floorBeforeTick = this.authoritativeSimulation.floor;
+        const result = this.authoritativeSimulation.stepWithEvents(recoverySource.getStateAtTick(tick));
+        rebuiltJournal = addNotebookSearchEvents(rebuiltJournal, floorBeforeTick, result.events);
+      }
+      this.notebookJournal = rebuiltJournal;
+      this.registry.set('investigationNotebook', this.notebookJournal);
+      this.inputRecorder = InputRecorder.fromBinary(recoveryLog);
+      this.simulationEngine.restoreTick(recoveryTick);
+      const expectedStateHash = this.registry.get('recoveryStateHash') as string | undefined;
+      if (!expectedStateHash || hashAuthoritativeState(this.authoritativeSimulation.state) !== expectedStateHash) {
+        throw new Error('Saved run state does not match its deterministic input replay. The run was stopped safely.');
+      }
+      this.runState.floor = this.authoritativeSimulation.state.floor;
+      this.runState.floorsCompleted = this.authoritativeSimulation.state.floorsCompleted;
+      this.runState.hp = this.authoritativeSimulation.state.hp;
+      this.runState.battery = this.authoritativeSimulation.state.battery / FIXED_SCALE;
+      this.runState.curse = this.authoritativeSimulation.state.curse / FIXED_SCALE;
+      this.runState.score = this.authoritativeSimulation.state.score;
+      this.runState.status = this.authoritativeSimulation.state.status;
+      this.registry.set('inputRecorder', this.inputRecorder);
+      this.registry.remove('recoveryLog');
+      this.registry.remove('recoveryStateHash');
+      this.registry.set('openingStorySeen', true);
+    }
     this.registry.set('authoritativeSimulation', this.authoritativeSimulation);
     this.floorData = this.authoritativeSimulation.floor;
     const savedInputSource = this.registry.get('inputSource') as InputSource | undefined;
@@ -203,9 +441,10 @@ export class FloorScene extends Phaser.Scene {
 
     // Create searchable objects
     this.createSearchables(searchables);
+    this.createPuzzleMarkers();
 
     // Create key sprite
-    this.keySprite = this.createKey(key[0], key[1]);
+    if (isBlock13Floor(this.authoritativeSimulation.state.floor)) this.keySprite = this.createKey(key[0], key[1]);
 
     // Create stairs sprite (locked initially)
     this.stairsSprite = this.createStairs(exit[0], exit[1]);
@@ -223,12 +462,19 @@ export class FloorScene extends Phaser.Scene {
       scene: this,
     });
     for (const key of floorAmbienceKeys(this.authoritativeSimulation.state.floor)) {
-      this.audioDirector.play(key, 'ambience', { loop: true, volume: 0.32 });
+      this.audioDirector.play(key, 'ambience', { loop: true, volume: 0.45 });
     }
+    if (floorAmbienceKeys(this.authoritativeSimulation.state.floor).length > 0) {
+      this.audioDirector.fadeInCategory('ambience', 1000);
+    }
+    const floorMusic = floorMusicTrack(this.authoritativeSimulation.state.floor);
+    if (floorMusic) this.startFloorMusic(floorMusic, 900);
+    if (import.meta.env.DEV && !this.runState.manifest) this.bindDevelopmentAudioPreview();
     // Legacy managers are not constructed: AuthoritativeSimulation owns all AI,
     // random decisions, movement, damage, searches, and progression.
     this.createSecondaryEnemySprites();
     this.createAmbusherSprites();
+    this.createHauntingVisual();
 
     // Camera follows player smoothly with increased zoom
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
@@ -260,7 +506,22 @@ export class FloorScene extends Phaser.Scene {
     };
     this.flashlightKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.F);
     this.interactKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    this.input.keyboard!.addCapture(Phaser.Input.Keyboard.KeyCodes.TAB);
+    this.notebookToggleKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.TAB);
+    this.notebookToggleKey.on('down', () => {
+      if (this.notebookOpen) this.closeNotebook();
+      else if (!this.storyPopupOpen && !this.openingStoryOpen && !this.endingEpilogueOpen && !this.isPaused && !this.isTransitioning) this.openNotebook();
+    });
+    this.puzzleHintKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.H);
+    this.puzzleHintKey.on('down', () => {
+      if (this.authoritativeSimulation.state.puzzle.active) {
+        const discovered = discoveredObjectiveSteps(this.floorData, this.authoritativeSimulation.state.searched);
+        if (this.floorData.puzzle.kind === 'circuit' && discovered.has(0)) this.notebookHintStage = (this.notebookHintStage + 1) % 3;
+        this.updatePuzzlePanel(this.authoritativeSimulation.state);
+      }
+    });
     this.pauseKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.bindDevelopmentBlock3VisualToggle();
     if (!this.inputSource) {
       this.inputSource = new LiveInputSource(() => this.readKeyboardInput());
       this.registry.set('inputSource', this.inputSource);
@@ -269,6 +530,10 @@ export class FloorScene extends Phaser.Scene {
 
     // Setup pause key handler
     this.pauseKey.on('down', () => {
+      if (this.authoritativeSimulation.state.puzzle.active) {
+        this.puzzleCloseRequested = true;
+        return;
+      }
       if (this.openingStoryOpen) {
         this.skipOpeningStory();
         return;
@@ -294,6 +559,7 @@ export class FloorScene extends Phaser.Scene {
     this.openingAdvanceKey.on('down', () => {
       if (this.openingStoryOpen) this.advanceOpeningStory();
     });
+    if (import.meta.env.DEV && !this.runState.manifest) this.bindHauntingDebugControls();
 
     // Ensure keyboard is enabled
     if (this.input.keyboard) {
@@ -309,6 +575,17 @@ export class FloorScene extends Phaser.Scene {
       padding: { x: 8, y: 4 },
       lineSpacing: 2,
     }).setScrollFactor(0).setDepth(100);
+    const compactHud = this.scale.height < 420 || this.scale.width < 640;
+    const puzzlePanelW = Math.min(600, this.scale.width - 28);
+    const puzzlePanelH = Math.min(430, this.scale.height - 28);
+    this.puzzlePanel = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, puzzlePanelW, puzzlePanelH, 0x0c1012, 0.98)
+      .setScrollFactor(0).setDepth(600).setStrokeStyle(2, 0xb07956, 1).setVisible(false);
+    this.puzzlePanelText = this.add.text(this.scale.width / 2 + 22, this.scale.height / 2, '', {
+      fontFamily: 'monospace', fontSize: compactHud ? '9px' : '13px', color: '#eee8f2', align: 'left',
+      wordWrap: { width: puzzlePanelW - 90 }, lineSpacing: compactHud ? 2 : 5,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(601).setVisible(false);
+    this.puzzlePanelArt = this.createPuzzlePanelArt(puzzlePanelW, puzzlePanelH);
+    this.cameras.main.ignore([this.puzzlePanel, this.puzzlePanelText, this.puzzlePanelArt]);
 
 
     // Interaction prompt (hidden initially)
@@ -326,7 +603,10 @@ export class FloorScene extends Phaser.Scene {
     ).setOrigin(0.5).setScrollFactor(0).setDepth(100).setVisible(false);
 
     // Controls hin
-    this.controlsHint = this.add.text(16, this.cameras.main.height - 100, 'WASD / ARROWS - MOVE\nF - FLASHLIGHT\nE - INTERACT\nESC - PAUSE', {
+    this.controlsHint = this.add.text(16, this.cameras.main.height - 100, [
+      'WASD / ARROWS - MOVE', 'F - FLASHLIGHT', 'E - INTERACT', 'TAB - NOTEBOOK  ·  ESC - PAUSE',
+      ...(this.isDevelopmentBlock3VisualComparisonAvailable() ? ['F8 - BLOCK 3 ART: ORIGINAL'] : []),
+    ].join('\n'), {
       fontFamily: 'monospace',
       fontSize: '12px',
       color: '#a5b6b5',
@@ -386,13 +666,34 @@ export class FloorScene extends Phaser.Scene {
 
     // FloorScene is only entered after local setup or TX1 confirmation, so the
     // opening story cannot delay either wallet flow. It is presentation-only.
-    if (this.authoritativeSimulation.state.floor === START_FLOOR
-      && this.registry.get('openingStorySeen') !== true) {
+    if (shouldPlayOpeningCinematic({
+      floor: this.authoritativeSimulation.state.floor,
+      tick: this.authoritativeSimulation.state.tick,
+      replay: false, // init() already folded replay/recovery eligibility into this flag.
+      recovery: !this.openingStoryEligible,
+      alreadySeen: this.registry.get('openingStorySeen') === true,
+    })) {
       this.showOpeningStory();
     }
   }
 
   update(time: number, delta: number) {
+    // Wall-clock accumulation drives only the cosmetic walk-frame selection.
+    if (this.playerIsMoving && Number.isFinite(delta) && delta > 0) {
+      this.playerWalkAnimationElapsedMs = (this.playerWalkAnimationElapsedMs + delta) % PLAYER_WALK_CYCLE_DURATION_MS;
+    }
+    if (this.stalkerIsMoving && Number.isFinite(delta) && delta > 0) {
+      this.stalkerWalkAnimationElapsedMs = (this.stalkerWalkAnimationElapsedMs + delta) % STALKER_WALK_CYCLE_DURATION_MS;
+    }
+    if (Number.isFinite(delta) && delta > 0) {
+      for (const presentation of this.crawlerPresentation.values()) {
+        if (presentation.moving) presentation.elapsedMs = (presentation.elapsedMs + delta) % CRAWLER_WALK_CYCLE_DURATION_MS;
+      }
+    }
+    this.updateAmbusherJumpscare(delta);
+    this.updateHauntingPresentation(delta);
+    this.updateContainerScare(delta);
+
     // Story and pause overlays freeze simulation ticks. Dismissing a note is UI
     // input only, so it is neither recorded nor allowed to consume a gameplay tick.
     if (!this.storyPopupOpen && !this.openingStoryOpen && !this.endingEpilogueOpen && !this.isTransitioning && !this.isPaused) {
@@ -441,15 +742,30 @@ export class FloorScene extends Phaser.Scene {
       }
 
       this.updateLighting();
-      this.renderAuthoritativeState(before, state, result.events);
+      this.renderAuthoritativeState(before, state, result.events, fixedDelta);
       this.presentSimulationEvents(result.events);
+      if (inputs.interact && before.puzzle.active && result.events.length === 0) {
+        const evidenceFound = this.floorData.objectives.searchableIndices.filter(index => state.searched[index]).length;
+        if (state.puzzle.fallbackActive) this.showTemporaryMessage('NORMAL ENTRY IS DISABLED — USE THE FALLBACK.', '#d4c6f0', 1100);
+        else if (evidenceFound < this.floorData.objectives.searchableIndices.length) this.showTemporaryMessage('FIND ALL EVIDENCE BEFORE SUBMITTING.', '#d4c6f0', 1100);
+      } else if (inputs.interact && result.events.length === 0) {
+        const feedback = rejectedInteractionFeedback(state, this.floorData);
+        if (feedback) this.showTemporaryMessage(feedback, '#a5b6b5', 1100);
+      }
       if (state.status === 'won') {
+        this.clearAmbusherJumpscare();
         this.beginVictoryEpilogue();
       } else if (state.status === 'lost') {
+        this.clearAmbusherJumpscare();
         this.audioDirector.stopCategory('ambience');
         this.playerDeath();
       }
     });
+
+    const persistRecovery = this.registry.get('persistRunRecovery') as ((log: Uint8Array, state: AuthoritativeState) => void) | undefined;
+    if (persistRecovery && (tick % 60 === 59 || this.authoritativeSimulation.state.status !== 'playing')) {
+      persistRecovery(this.inputRecorder.encodeBinary(), this.authoritativeSimulation.state);
+    }
 
     // InputPipeline records this terminal tick after the simulation callback.
     // Freeze both canonical artifacts only after that write is complete.
@@ -470,26 +786,433 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private presentSimulationEvents(events: ReturnType<AuthoritativeSimulation['stepWithEvents']>['events']) {
-    for (const audioCue of audioCuesForEvents(events)) this.playAudioCue(audioCue);
+    for (const audioCue of audioCuesForEvents(events, this.authoritativeSimulation.state)) this.playAudioCue(audioCue);
     for (const event of events) {
       if (event.type === 'key_collected') {
-        this.showTemporaryMessage(isBlock13Floor(this.authoritativeSimulation.state.floor) ? 'EXIT OPEN — GET OUT' : 'KEY FOUND — RETURN TO STAIRS', '#ffd700');
+        this.showTemporaryMessage(this.authoritativeSimulation.state.floor === 0
+          ? 'EXIT KEY RECOVERED — FIND THE WAY OUT' : 'STAIR KEY RECOVERED — RETURN TO THE STAIRS', '#ffd700');
+      }
+      else if (event.type === 'objective_updated') this.showTemporaryMessage(
+        event.complete ? (event.floor === 1 ? 'RECORDS RECONSTRUCTED — THE EXIT IS OPEN' : 'PUZZLE COMPLETE — PROGRESSION UNLOCKED') : `EVIDENCE FOUND ${event.progress}/${event.total}`,
+        event.complete ? '#ffd700' : '#d4c6f0',
+      );
+      else if (event.type === 'puzzle_wrong_answer') {
+        const reduced = this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false;
+        if (event.floor === 4 && event.failures === 1) {
+          const flicker = reduced ? 30 : 90;
+          this.cameras.main.flash(100, flicker, flicker, flicker);
+        }
+        if (event.floor === 4 && event.failures === 2) this.playAudioCue({ key: `${AUDIO_KEYS.player.footstep}_${(this.runState.seed % 3) + 1}`, cooldownMs: 0, volume: reduced ? 0.08 : 0.14 });
+        if (event.failures === 3 && (event.floor === 4 || event.floor === 3)) {
+          this.showHauntingVisual('silhouette', 13_000 + event.floor, reduced ? 650 : 900);
+          this.showTemporaryMessage(event.floor === 4 ? 'THE LOCK HAS JAMMED — FIND THE MAINTENANCE TOOL' : 'THE DIRECTORY IS UNUSABLE — FIND THE ARCHIVAL CLUE', '#e8c6d4', 1800);
+        } else if (event.floor === 3 && event.failures === 1) {
+          const evidence = this.searchableSprites[this.floorData.objectives.searchableIndices[0]]?.sprite;
+          if (evidence) this.tweens.add({ targets: evidence, angle: 180, duration: 180, yoyo: true, hold: 350 });
+          this.showTemporaryMessage('THE RESIDENT RECORD HAS TURNED FACE DOWN.', '#d4c6f0', 1500);
+        } else if (event.floor === 3 && event.failures === 2) {
+          const evidence = this.searchableSprites[this.floorData.objectives.searchableIndices[1]]?.sprite;
+          if (evidence) this.tweens.add({ targets: evidence, alpha: 0.12, duration: 280, yoyo: true, hold: 500 });
+          this.showTemporaryMessage('ONE NAME HAS VANISHED FROM THE DIRECTORY.', '#d4c6f0', 1500);
+        }
+        else this.showTemporaryMessage(event.floor === 2 ? 'THE CIRCUIT IS STILL INCOMPLETE.'
+          : event.floor === 1 ? 'THE RECORDS STILL CONTRADICT.' : 'THE MEMORIES DO NOT ALIGN.', '#d4c6f0', 1300);
+      }
+      else if (event.type === 'puzzle_fallback_item_found') {
+        if (event.floor === 3) {
+          const resident = this.floorData.puzzle.residents![this.floorData.puzzle.correctResident!];
+          const content = `The sealed original names ${resident.name}, apartment ${resident.apartment}, as the resident removed from the register. Return to the directory to recover the key.`;
+          this.recordNotebookEntry({ id: `${event.floor}:archival-addendum`, floor: event.floor, title: 'ARCHIVAL ADDENDUM', content, important: true });
+          this.showClueModal('ARCHIVAL ADDENDUM', content, true);
+        } else this.showTemporaryMessage('MAINTENANCE TOOL FOUND — RETURN TO THE JAMMED LOCKBOX', '#ffca86', 1800);
+      }
+      else if (event.type === 'puzzle_solved') {
+        if (event.floor === 1) {
+          const sequence = this.floorData.puzzle.recordOrder!.map(index => this.floorData.puzzle.recordEvents![index]).join('\n→ ');
+          this.showClueModal('THE UNALTERED SEQUENCE', `${sequence}\n\nThe official index was altered. This is the sequence preserved by the three independent records.`);
+        } else if (event.floor === 0) {
+          const state = this.authoritativeSimulation.state;
+          const eventId = Math.imul(this.runState.seed ^ state.tick, 0x45d9f3b) >>> 0;
+          this.showHauntingVisual('silhouette', eventId, 1800);
+          this.showTemporaryMessage('THE SENDER WAS ALREADY INSIDE THE PHOTOGRAPH.', '#e8c6d4', 2300);
+        } else this.showTemporaryMessage(
+          event.floor === 2 ? 'ARCHIVE POWER RESTORED' : 'PUZZLE SOLVED', '#ffd700', 1800,
+        );
       }
       else if (event.type === 'damage') this.showTemporaryMessage(`HURT -${event.amount} HP`, '#ff6666');
       else if (event.type === 'loot_searched') {
         const result = event.result;
+        if (result.type === 'staircase_key') continue;
         if (result.type === 'battery') this.showTemporaryMessage(`BATTERY +${result.amount}%`, '#70d4c6');
         else if (result.type === 'health') this.showTemporaryMessage(`HEALTH +${result.amount} HP`, '#70d4c6');
         else if (result.type === 'collectible') this.showTemporaryMessage(`${result.item.toUpperCase()} +${result.score} POINTS`, '#ffd700');
         else if (result.type === 'clue') {
+          this.recordNotebookEvents(this.floorData, [event]);
+          const objectiveStep = this.floorData.searchables[event.index]?.objectiveStep;
           const clue = getAuthoredClueForSearchId(result.id);
-          this.showClueModal(clue?.title ?? 'NOTE FOUND', clue?.content ?? 'The writing is too faded to read.');
+          const puzzleClue = objectiveStep === undefined ? undefined : this.floorData.puzzle.clueTexts[objectiveStep];
+          this.showClueModal(puzzleClue ? `${this.floorData.puzzle.title} // EVIDENCE ${objectiveStep! + 1}` : clue?.title ?? 'NOTE FOUND', puzzleClue ?? clue?.content ?? 'The writing is too faded to read.', true);
         } else if (result.type === 'nothing') this.showTemporaryMessage('EMPTY', '#a5b6b5');
         else this.showTemporaryMessage('MIMIC REVEALED — RUN', '#ff6666');
       } else if (event.type === 'floor_transition' && event.toFloor >= 0) {
         this.showTemporaryMessage(`${playerBlockName(event.toFloor)} UNLOCKED`, '#ffd700');
       }
+      if (event.type === 'loot_searched' && this.authoritativeSimulation.state.status === 'playing') {
+        const state = this.authoritativeSimulation.state;
+        const anomaly = this.canStartHaunting(state) ? this.hauntingDirector.evaluateSearch({
+          floor: state.floor, tick: state.tick,
+          tileX: Math.floor(state.x / FIXED_SCALE / this.tileSize),
+          tileY: Math.floor(state.y / FIXED_SCALE / this.tileSize),
+        }, event.index, this.horrorPacing.stage) : null;
+        if (anomaly) this.presentHauntingEvent(anomaly);
+      }
     }
+  }
+
+  private createHauntingVisual() {
+    const texture = this.textures.exists('forgotten_appearance') ? 'forgotten_appearance'
+      : this.textures.exists('stalker_idle_up') ? 'stalker_idle_up' : 'stalker';
+    this.hauntingVisual = this.add.image(0, 0, texture).setOrigin(0.5).setDepth(8).setVisible(false);
+    this.hauntingWhisper = this.add.text(0, 0, '', {
+      fontFamily: 'monospace', fontSize: '9px', color: '#d5cbd7',
+      backgroundColor: '#090811cc', padding: { x: 3, y: 2 },
+      shadow: { offsetX: 1, offsetY: 1, color: '#000000', blur: 0, fill: true },
+    }).setOrigin(0.5).setDepth(12).setVisible(false);
+    if (texture !== 'stalker') this.markTextureNearest(texture);
+    // This object deliberately has no physics body and is never added to sim state.
+  }
+
+  private realEnemyThreatActive(state: AuthoritativeState): boolean {
+    const px = state.x / FIXED_SCALE, py = state.y / FIXED_SCALE;
+    const near = (x: number, y: number, range: number) => Math.hypot(x / FIXED_SCALE - px, y / FIXED_SCALE - py) <= range;
+    return state.stalker.visible
+      || watcherIsCausingCurse(state)
+      || state.crawlers.some(enemy => enemy.chasing && near(enemy.x, enemy.y, 180))
+      || state.mimics.some(enemy => enemy.active && enemy.revealed && near(enemy.x, enemy.y, 220))
+      || state.ambushers.some(enemy => enemy.state === 'warning' || enemy.state === 'jumpscare');
+  }
+
+  private canStartHaunting(state: AuthoritativeState): boolean {
+    return hauntingPresentationAllowed({
+      tick: state.tick,
+      status: state.status,
+      paused: this.isPaused,
+      transitioning: this.isTransitioning,
+      modalOpen: this.storyPopupOpen || this.openingStoryOpen || this.endingEpilogueOpen,
+      presentationActive: Boolean(this.ambusherJumpscareVeil?.active || this.containerScareEffect
+        || this.hauntingSilence.isActive || this.hauntingVisual?.visible || this.hauntingWhisper?.visible),
+      realThreatActive: this.realEnemyThreatActive(state),
+      recoveryUntilTick: this.hauntingDirector.recoveryUntilTick,
+    });
+  }
+
+  private presentHauntingEvent(event: HauntingEvent) {
+    if (!this.canStartHaunting(this.authoritativeSimulation.state)) return;
+    this.hauntingVisual?.setVisible(false);
+    this.hauntingWhisper?.setVisible(false);
+    switch (event.type) {
+      case 'false_footstep': {
+        // The checked-in player-step recording is the only suitable neutral one-shot.
+        // Select a variant by local hash so AudioDirector's RNG is not advanced.
+        const key = `${AUDIO_KEYS.player.footstep}_${event.id % 3 + 1}`;
+        const reduced = this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false;
+        if (this.audioDirector?.hasLoadedAsset(key)) this.audioDirector.playWithCooldown(key, 'sfx', 8000, { volume: reduced ? 0.08 : 0.14 });
+        break;
+      }
+      case 'silence':
+        if (!this.hauntingSilence.isActive) this.hauntingSilence.start(event.durationMs);
+        break;
+      case 'silhouette':
+      case 'fake_stalker':
+      case 'environment_shift':
+        this.showHauntingVisual(event.type, event.id, event.durationMs);
+        break;
+      case 'whisper':
+        this.showHauntingWhisper(event.id, event.durationMs);
+        break;
+    }
+  }
+
+  private showHauntingWhisper(eventId: number, durationMs: number) {
+    if (!this.hauntingWhisper) return;
+    this.hauntingVisual?.setVisible(false);
+    const tile = this.findHauntingTile(true, eventId);
+    if (!tile) return;
+    this.hauntingWhisper.setText(hauntingWhisperLine(eventId, tile[0], tile[1]))
+      .setPosition(tile[0] * this.tileSize + 16, tile[1] * this.tileSize + 16)
+      .setAlpha(0.88).setVisible(true);
+    this.hauntingWhisperRemainingMs = durationMs;
+  }
+
+  private findHauntingTile(walkable: boolean, eventId: number): [number, number] | undefined {
+    const state = this.authoritativeSimulation.state;
+    const px = state.x / FIXED_SCALE, py = state.y / FIXED_SCALE;
+    const centerX = Math.floor(px / this.tileSize), centerY = Math.floor(py / this.tileSize);
+    const protectedTiles = new Set<string>([
+      `${this.floorData.start[0]},${this.floorData.start[1]}`,
+      `${this.floorData.key[0]},${this.floorData.key[1]}`,
+      `${this.floorData.exit[0]},${this.floorData.exit[1]}`,
+      ...this.floorData.searchables.map(item => `${item.x},${item.y}`),
+      ...this.floorData.doors.map(([x, y]) => `${x},${y}`),
+    ]);
+    const candidates: [number, number][] = [];
+    for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {
+      const distance = Math.hypot(dx, dy);
+      if (distance < 3.25 || distance > 7 || Math.abs(dx) < 2 && Math.abs(dy) < 2) continue;
+      const x = centerX + dx, y = centerY + dy;
+      if (Boolean(this.floorData.tiles[y]?.[x]) !== walkable || protectedTiles.has(`${x},${y}`)) continue;
+      const worldX = x * this.tileSize + this.tileSize / 2;
+      const worldY = y * this.tileSize + this.tileSize / 2;
+      if (Math.abs(worldX - px) > this.cameras.main.width / this.cameras.main.zoom * 0.46
+        || Math.abs(worldY - py) > this.cameras.main.height / this.cameras.main.zoom * 0.46) continue;
+      if (walkable && !hasPresentationLineOfSight(this.floorData, px, py, worldX, worldY)) continue;
+      candidates.push([x, y]);
+    }
+    if (!candidates.length) return undefined;
+    // Event identity and stable tile coordinates choose the placement; no RNG.
+    let index = Math.imul(eventId ^ (centerX * 31 + centerY), 0x45d9f3b) >>> 0;
+    index %= candidates.length;
+    return candidates[index];
+  }
+
+  private showHauntingVisual(type: HauntingEventType, eventId: number, durationMs: number) {
+    if (!this.hauntingVisual) return;
+    this.hauntingWhisper?.setVisible(false);
+    const environment = type === 'environment_shift';
+    const tile = this.findHauntingTile(!environment, eventId);
+    if (!tile) return;
+    let textureKey: string;
+    if (!environment) {
+      textureKey = this.textures.exists('forgotten_appearance') ? 'forgotten_appearance'
+        : type === 'silhouette' && this.textures.exists('watcher_idle') ? 'watcher_idle'
+          : this.textures.exists('stalker_idle_up') ? 'stalker_idle_up' : 'stalker';
+    } else {
+      const floor = this.authoritativeSimulation.state.floor;
+      const candidates = floor === 0
+        ? ['b13_impossible_wall_seam', 'b13_repeated_panel', 'b13_broken_ring_segment']
+        : floor === 1 ? ['env_b1_wall_spall_01', 'env_b1_fracture_overlay_01']
+          : floor === 2 ? ['env_b2_breaker_panel_01', 'env_b2_maintenance_marking_01']
+            : floor === 3 ? ['env_b3_wall_peel_01', 'env_b3_wall_peel_02']
+              : ['env_wall_variant_02', 'env_wall_base'];
+      textureKey = candidates.find(key => this.textures.exists(key)) ?? 'stalker';
+    }
+    if (!this.textures.exists(textureKey)) return;
+    const [x, y] = tile;
+    const width = textureKey === 'forgotten_appearance' ? 32
+      : environment && textureKey === 'env_b2_breaker_panel_01' ? 24 : this.tileSize;
+    const height = textureKey === 'forgotten_appearance' ? 52
+      : environment && textureKey === 'env_b2_breaker_panel_01' ? 32 : this.tileSize;
+    const reduceIntensity = this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false;
+    const rawAlpha = environment ? 0.62 : type === 'fake_stalker' ? 0.32 : 0.28;
+    this.hauntingVisual.setTexture(textureKey).setPosition(x * this.tileSize + 16, y * this.tileSize + 16)
+      .setDisplaySize(width, height).setTint(environment ? 0xffffff : type === 'fake_stalker' ? 0x8c7d99 : 0x55505b)
+      .setAlpha(accessiblePresentationIntensity(rawAlpha, reduceIntensity)).setVisible(true);
+    this.markTextureNearest(textureKey);
+    this.hauntingVisualRemainingMs = durationMs;
+  }
+
+  private updateHauntingPresentation(delta: number) {
+    if (this.isPaused || this.isTransitioning || this.storyPopupOpen || this.openingStoryOpen
+      || this.endingEpilogueOpen || this.authoritativeSimulation?.state.status !== 'playing') {
+      this.clearHauntingPresentation();
+      return;
+    }
+    const safeDelta = Number.isFinite(delta) && delta > 0 ? delta : 0;
+    const gain = this.hauntingSilence.update(safeDelta);
+    if (gain !== this.appliedHauntingAmbienceGain) {
+      this.audioDirector?.setCategoryDucking('ambience', gain);
+      this.appliedHauntingAmbienceGain = gain;
+    }
+    if (this.hauntingWhisper?.visible) {
+      this.hauntingWhisperRemainingMs -= safeDelta;
+      const state = this.authoritativeSimulation.state;
+      const px = state.x / FIXED_SCALE, py = state.y / FIXED_SCALE;
+      const distance = Phaser.Math.Distance.Between(px, py, this.hauntingWhisper.x, this.hauntingWhisper.y);
+      const blocked = !hasPresentationLineOfSight(this.floorData, px, py, this.hauntingWhisper.x, this.hauntingWhisper.y);
+      if (this.hauntingWhisperRemainingMs <= 0 || distance < 56 || blocked || !this.cameras.main.worldView.contains(this.hauntingWhisper.x, this.hauntingWhisper.y)) {
+        this.hauntingWhisper.setVisible(false);
+      }
+    }
+    if (!this.hauntingVisual?.visible) return;
+    this.hauntingVisualRemainingMs -= safeDelta;
+    const state = this.authoritativeSimulation.state;
+    const playerX = state.x / FIXED_SCALE, playerY = state.y / FIXED_SCALE;
+    const distance = Phaser.Math.Distance.Between(playerX, playerY, this.hauntingVisual.x, this.hauntingVisual.y);
+    const visualTileX = Math.floor(this.hauntingVisual.x / this.tileSize);
+    const visualTileY = Math.floor(this.hauntingVisual.y / this.tileSize);
+    const beyondCamera = !this.cameras.main.worldView.contains(this.hauntingVisual.x, this.hauntingVisual.y);
+    const walkableVisual = Boolean(this.floorData.tiles[visualTileY]?.[visualTileX]);
+    const lostSight = walkableVisual
+      && !hasPresentationLineOfSight(this.floorData, playerX, playerY, this.hauntingVisual.x, this.hauntingVisual.y);
+    const revealed = walkableVisual && enemyPresentationExposure(
+      this.floorData, state, visualTileX * this.tileSize * FIXED_SCALE + 16 * FIXED_SCALE,
+      visualTileY * this.tileSize * FIXED_SCALE + 16 * FIXED_SCALE,
+    ) >= 0.7;
+    if (this.hauntingVisualRemainingMs <= 0 || distance < 76 || beyondCamera || lostSight || revealed) {
+      this.hauntingVisual.setVisible(false);
+    }
+  }
+
+  private clearHauntingPresentation() {
+    this.hauntingSilence.clear();
+    this.appliedHauntingAmbienceGain = 1;
+    this.audioDirector?.setCategoryDucking('ambience', 1);
+    this.hauntingVisual?.setVisible(false);
+    this.hauntingVisualRemainingMs = 0;
+    this.hauntingWhisper?.setVisible(false);
+    this.hauntingWhisperRemainingMs = 0;
+  }
+
+  private bindHauntingDebugControls() {
+    this.hauntingDebugKeyHandler = (event: KeyboardEvent) => {
+      if (event.repeat || this.isPaused || this.isTransitioning) return;
+      const keys: Record<string, HauntingEventType> = {
+        h: 'false_footstep', j: 'silence', k: 'silhouette', l: 'fake_stalker', i: 'environment_shift',
+      };
+      const type = keys[event.key.toLowerCase()];
+      if (!type) return;
+      event.preventDefault();
+      const state = this.authoritativeSimulation.state;
+      this.presentHauntingEvent({ type, id: ((state.tick * 2654435761) >>> 0), durationMs: type === 'silence' ? 1200 : type === 'fake_stalker' ? 450 : type === 'silhouette' ? 300 : 1800 });
+    };
+    this.input.keyboard?.on('keydown', this.hauntingDebugKeyHandler);
+  }
+
+  /** A compact wall-clock presentation timeline, isolated from simulation state and RNG. */
+  private startAmbusherJumpscare(enemyId: number, eventTick: number) {
+    this.clearAmbusherJumpscare();
+    this.clearContainerScare();
+    this.clearHauntingPresentation();
+    this.ambusherJumpscareElapsedMs = 0;
+    this.audioDirector?.setCategoryDucking('ambience', AMBUSHER_PRE_IMPACT_AMBIENCE_GAIN);
+    const selectedVariant = avoidImmediateAmbusherRepeat(
+      ambusherJumpscareVariant(enemyId, eventTick), this.lastAmbusherJumpscareVariantIndex,
+    );
+    this.ambusherJumpscareVariantIndex = import.meta.env.DEV && !this.runState.manifest
+      ? ambusherLocalPreviewVariant(window.location.search) ?? selectedVariant
+      : selectedVariant;
+    this.lastAmbusherJumpscareVariantIndex = this.ambusherJumpscareVariantIndex;
+    this.ambusherJumpscareFramingIndex = ambusherJumpscareFraming(enemyId, eventTick);
+    const { width, height } = this.uiCamera;
+    this.ambusherJumpscareVeil = this.add.rectangle(width / 2, height / 2, width, height, 0x03020a, 0.86)
+      .setScrollFactor(0).setDepth(500);
+    this.cameras.main.ignore(this.ambusherJumpscareVeil);
+    this.refreshAmbusherJumpscareFrame();
+  }
+
+  private updateAmbusherJumpscare(delta: number) {
+    if (!this.ambusherJumpscareVeil) return;
+    if (this.isPaused || this.isTransitioning || this.authoritativeSimulation?.state.status !== 'playing') {
+      this.clearAmbusherJumpscare();
+      return;
+    }
+    const nextFrame = advanceAmbusherJumpscare(this.ambusherJumpscareElapsedMs, delta, this.ambusherJumpscareImpactPlayed);
+    this.ambusherJumpscareElapsedMs = nextFrame.elapsedMs;
+    if (this.ambusherJumpscareElapsedMs >= AMBUSHER_JUMPSCARE_TOTAL_MS) {
+      this.clearAmbusherJumpscare();
+      return;
+    }
+    this.refreshAmbusherJumpscareFrame();
+    if (nextFrame.impactBegins) {
+      this.ambusherJumpscareImpactPlayed = true;
+      this.audioDirector?.setCategoryDucking('ambience', 1);
+      const reduced = this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false;
+      if (this.audioDirector) playAmbusherImpact(this.audioDirector, reduced);
+      this.cameras.main.shake(reduced ? Math.round(AMBUSHER_JUMPSCARE_TIMING.cameraKickMs * 0.46) : AMBUSHER_JUMPSCARE_TIMING.cameraKickMs,
+        ambusherCameraKickIntensity(reduced));
+    }
+  }
+
+  private refreshAmbusherJumpscareFrame() {
+    const composition = AMBUSHER_JUMPSCARE_VARIANTS[this.ambusherJumpscareVariantIndex];
+    const reduceIntensity = this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false;
+    const frame = ambusherFrameForAccessibility(ambusherJumpscareFrame(this.ambusherJumpscareElapsedMs, composition), reduceIntensity);
+    this.ambusherJumpscareVeil?.setFillStyle(frame.veilColor, frame.veilAlpha);
+    if (!frame.imageVisible) {
+      this.ambusherJumpscareImage?.setVisible(false);
+      return;
+    }
+    if (!this.ambusherJumpscareImage) {
+      const enemyId = this.authoritativeSimulation.state.ambushers.find(enemy => enemy.state === 'jumpscare')?.id ?? 0;
+      const textureKey = ambusherJumpscareTextureKey(composition, key => this.textures.exists(key), `ambusher_${enemyId}`);
+      if (!this.textures.exists(textureKey)) return;
+      this.markTextureNearest(textureKey);
+      this.ambusherJumpscareImage = this.add.image(this.uiCamera.width / 2, this.uiCamera.height / 2, textureKey)
+        .setOrigin(0.5).setScrollFactor(0).setDepth(501);
+      this.cameras.main.ignore(this.ambusherJumpscareImage);
+    }
+    const source = this.textures.get(this.ambusherJumpscareImage.texture.key).getSourceImage();
+    const layout = ambusherJumpscareLayout(
+      this.uiCamera.width, this.uiCamera.height, source.width, source.height,
+      this.ambusherJumpscareFramingIndex, frame.punch, composition,
+    );
+    this.ambusherJumpscareImage.setPosition(layout.x, layout.y).setScale(layout.scale).setAlpha(1).setVisible(true);
+  }
+
+  private clearAmbusherJumpscare() {
+    this.audioDirector?.setCategoryDucking('ambience', 1);
+    this.ambusherJumpscareImage?.destroy();
+    this.ambusherJumpscareVeil?.destroy();
+    this.ambusherJumpscareImage = undefined;
+    this.ambusherJumpscareVeil = undefined;
+    this.ambusherJumpscareElapsedMs = 0;
+    this.ambusherJumpscareImpactPlayed = false;
+  }
+
+  /** Short procedural container apparition. The existing authoritative box
+   * scare selects the moment; this presentation cannot alter its result. */
+  private startContainerScare(worldX: number, worldY: number) {
+    this.clearHauntingPresentation();
+    this.clearContainerScare();
+    const reduced = this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false;
+    const style = containerScareStyle(reduced);
+    const graphic = this.add.graphics().setPosition(worldX, worldY).setDepth(14);
+    this.uiCamera?.ignore(graphic);
+    const outline = 0x0a0810;
+    const bone = 0xc9c2d2;
+    graphic.fillStyle(outline, 0.96);
+    graphic.fillRect(-8, -13, 5, 19);
+    graphic.fillRect(-5, -11, 13, 15);
+    graphic.fillRect(5, -8, 5, 12);
+    graphic.fillStyle(bone, style.peakAlpha);
+    graphic.fillRect(-7, -12, 3, 16);
+    graphic.fillRect(-3, -10, 3, 13);
+    graphic.fillRect(1, -14, 3, 17);
+    graphic.fillRect(5, -9, 3, 13);
+    graphic.fillRect(-4, 1, 11, 5);
+    graphic.fillStyle(0x21131f, style.peakAlpha);
+    graphic.fillRect(-1, -5, 3, 3);
+    graphic.setScale(style.peakScale);
+    this.containerScareEffect = graphic;
+    this.containerScareRemainingMs = style.durationMs;
+    this.containerScareInitialPeakAlpha = style.peakAlpha;
+    if (this.audioDirector?.hasLoadedAsset('sfx_jumpscare_hit')) {
+      this.containerScareAudio = this.audioDirector.playWithCooldown('sfx_jumpscare_hit', 'sfx', 1800, { volume: reduced ? 0.42 : 0.58 }) ?? undefined;
+    }
+  }
+
+  private updateContainerScare(delta: number) {
+    if (!this.containerScareEffect) return;
+    if (this.isPaused || this.isTransitioning || this.storyPopupOpen || this.openingStoryOpen
+      || this.endingEpilogueOpen || this.authoritativeSimulation?.state.status !== 'playing') {
+      this.clearContainerScare();
+      return;
+    }
+    this.containerScareRemainingMs -= Number.isFinite(delta) && delta > 0 ? delta : 0;
+    const style = containerScareStyle(this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false);
+    const intensity = this.containerScareInitialPeakAlpha > 0 ? style.peakAlpha / this.containerScareInitialPeakAlpha : 0;
+    this.containerScareEffect.setScale(style.peakScale);
+    this.containerScareEffect.setAlpha(Math.max(0, Math.min(1, this.containerScareRemainingMs / 120)) * intensity);
+    if (this.containerScareRemainingMs <= 0) this.clearContainerScare();
+  }
+
+  private clearContainerScare() {
+    this.containerScareEffect?.destroy();
+    this.containerScareEffect = undefined;
+    this.containerScareRemainingMs = 0;
+    this.containerScareInitialPeakAlpha = 0;
+    this.containerScareAudio?.stop();
+    this.containerScareAudio = undefined;
   }
 
   private playAudioCue(audioCue: AudioCue) {
@@ -497,25 +1220,111 @@ export class FloorScene extends Phaser.Scene {
     if (!director) return;
     if (audioCue.key === 'sfx_player_hurt') {
       director.playVariantWithCooldown(audioCue.key, AUDIO_KEYS.player.hurtVariants, 'sfx', audioCue.cooldownMs, { volume: 0.7 });
-    } else if (audioCue.key === 'sfx_crawler_skitter') {
-      director.playVariantWithCooldown(audioCue.key, 2, 'sfx', audioCue.cooldownMs, { volume: 0.5 });
+    } else if (audioCue.key === 'sfx_crawler_skitter' && audioCue.positional) {
+      director.playPositionalVariantWithCooldown(audioCue.key, 2, {
+        x: audioCue.positional.x / FIXED_SCALE,
+        y: audioCue.positional.y / FIXED_SCALE,
+        maxDistance: 300,
+        category: 'sfx',
+        volume: audioCue.volume ?? 0.42,
+      }, this.player.x, this.player.y, audioCue.cooldownMs);
+    } else if (audioCue.key === 'sfx_flashlight_on' || audioCue.key === 'sfx_flashlight_off') {
+      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.95 });
+    } else if (audioCue.key === 'sfx_interaction_search') {
+      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.8 });
     } else if (audioCue.positional) {
+      const reduced = director.getSettings().reduceJumpscareIntensity;
+      const intensityScale = reduced && audioCue.key === 'sfx_ambusher_warning' ? 0.56 : 1;
       director.playPositionalWithCooldown({
         key: audioCue.key,
         x: audioCue.positional.x / FIXED_SCALE,
         y: audioCue.positional.y / FIXED_SCALE,
-        maxDistance: 420,
+        maxDistance: audioCue.key === 'sfx_stalker_hunt' ? 520 : audioCue.key === 'sfx_mimic_reveal' ? 360 : 420,
         category: 'sfx',
-        volume: 0.65,
+        volume: (audioCue.volume ?? 0.75) * intensityScale,
       }, this.player.x, this.player.y, audioCue.cooldownMs);
     } else {
-      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.65 });
+      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.75 });
     }
   }
 
+  /** Duck only the active Block 13 ambience loop during pursuit, respecting the live mix settings. */
+  private setFinalChaseAmbience(active: boolean, reduceIntensity: boolean) {
+    this.finalChaseAudioActive = active;
+    const targetGain = active ? finalChaseAmbienceGain(reduceIntensity) : 1;
+    if (this.finalChaseAmbienceTween) this.tweens.killTweensOf(this.finalChaseAmbienceTween);
+    const progress = { gain: this.finalChaseAmbienceGain };
+    this.finalChaseAmbienceTween = progress;
+    try {
+      this.tweens.add({
+        targets: progress,
+        gain: targetGain,
+        duration: active ? 520 : 760,
+        ease: 'Sine.easeInOut',
+        onUpdate: () => {
+          this.finalChaseAmbienceGain = progress.gain;
+          this.audioDirector?.setCategoryDucking('ambience', progress.gain, 'final-stalker-chase');
+        },
+        onComplete: () => {
+          this.finalChaseAmbienceGain = targetGain;
+          this.finalChaseAmbienceTween = undefined;
+          this.audioDirector?.setCategoryDucking('ambience', targetGain, 'final-stalker-chase');
+        },
+      });
+    } catch {
+      this.finalChaseAmbienceGain = targetGain;
+      this.finalChaseAmbienceTween = undefined;
+      this.audioDirector?.setCategoryDucking('ambience', targetGain, 'final-stalker-chase');
+    }
+  }
+
+  /** Drop pursuit-only ambience ducking when gameplay presentation suspends or ends. */
+  private clearFinalChaseAmbience() {
+    if (this.finalChaseAmbienceTween) this.tweens.killTweensOf(this.finalChaseAmbienceTween);
+    this.finalChaseAmbienceTween = undefined;
+    this.finalChaseAudioActive = false;
+    this.finalChaseAmbienceGain = 1;
+    this.audioDirector?.setCategoryDucking('ambience', 1, 'final-stalker-chase');
+  }
+
   /** Presentation adapter: every moving enemy/object comes from an immutable sim snapshot. */
-  private renderAuthoritativeState(previous: AuthoritativeState, state: AuthoritativeState, events: ReturnType<AuthoritativeSimulation['stepWithEvents']>['events']) {
-    this.block13ObjectiveStatus = objectiveCopy(state.floor, state.hasKey, state.stalker.state === 'hunting');
+  private renderAuthoritativeState(previous: AuthoritativeState, state: AuthoritativeState, events: ReturnType<AuthoritativeSimulation['stepWithEvents']>['events'], presentationDeltaMs: number) {
+    const watcherGazeNow = watcherIsCausingCurse(state);
+    const watcherGazeBefore = watcherIsCausingCurse(previous);
+    const encounterStarted = (!previous.stalker.visible && state.stalker.visible)
+      || (previous.stalker.state !== 'hunting' && state.stalker.state === 'hunting')
+      || (!watcherGazeBefore && watcherGazeNow)
+      || state.crawlers.some(enemy => enemy.chasing && !previous.crawlers.find(old => old.id === enemy.id)?.chasing)
+      || state.ambushers.some(enemy => ['warning', 'jumpscare'].includes(enemy.state)
+        && !['warning', 'jumpscare'].includes(previous.ambushers.find(old => old.id === enemy.id)?.state ?? 'hidden'))
+      || events.some(event => event.type === 'mimic_revealed')
+      || previous.damageEventId !== state.damageEventId
+      || previous.boxScare.lastTriggerTick !== state.boxScare.lastTriggerTick;
+    const threatActive = this.realEnemyThreatActive(state);
+    this.hauntingDirector.prepareFloor(state.floor);
+    if (encounterStarted) {
+      this.clearHauntingPresentation();
+      this.hauntingDirector.registerMajorEncounter(state.tick);
+    }
+    const stage = this.horrorPacing.observe({
+      floor: state.floor,
+      tileX: Math.floor(state.x / FIXED_SCALE / this.tileSize),
+      tileY: Math.floor(state.y / FIXED_SCALE / this.tileSize),
+      deltaMs: presentationDeltaMs,
+      moving: playerMovedBetween(previous, state),
+      realThreatActive: threatActive,
+      encounterStarted,
+    });
+    if (state.status === 'playing' && state.tick !== previous.tick) {
+      const event = this.canStartHaunting(state) ? this.hauntingDirector.evaluate({
+        floor: state.floor, tick: state.tick,
+        tileX: Math.floor(state.x / FIXED_SCALE / this.tileSize),
+        tileY: Math.floor(state.y / FIXED_SCALE / this.tileSize),
+      }, stage) : null;
+      if (event) this.presentHauntingEvent(event);
+    }
+    const objectiveProgress = this.floorData.objectives.searchableIndices.filter(index => state.searched[index]).length;
+    this.block13ObjectiveStatus = objectiveCopy(state.floor, state.hasKey, state.stalker.state === 'hunting', state.objectiveComplete, objectiveProgress, this.floorData.objectives.searchableIndices.length);
     if (this.registry.get('stalkerHintShown') !== true && state.stalker.visible) {
       this.registry.set('stalkerHintShown', true);
       this.showTemporaryMessage('FLASHLIGHT CAN REPEL IT', '#ffd700', 2200);
@@ -523,35 +1332,56 @@ export class FloorScene extends Phaser.Scene {
     if (previous.stalker.state === 'hunting' && state.stalker.state === 'retreating' && state.flashlightOn) {
       this.showTemporaryMessage('STALKER REPELLED', '#70d4c6');
     }
-    if (state.curse > previous.curse && watcherIsCausingCurse(state) && this.registry.get('watcherHintShown') !== true) {
+    if (!watcherGazeBefore && watcherGazeNow) {
+      const gazePosition = watcherGazeAudioPosition(previous, state);
+      if (gazePosition) this.playAudioCue({ key: 'sfx_watcher_gaze', cooldownMs: 2500, positional: gazePosition, volume: 0.22 });
+      this.showTemporaryMessage('WATCHER GAZE — TURN AWAY', '#d4c6f0', 1800);
+    } else if (watcherGazeBefore && !watcherGazeNow && state.watchers.some(watcher => watcher.active)) {
+      this.showTemporaryMessage('GAZE BROKEN', '#70d4c6', 1100);
+    }
+    if (watcherGazeNow && this.registry.get('watcherHintShown') !== true) {
       this.registry.set('watcherHintShown', true);
-      this.showTemporaryMessage('WATCHER — LOOK AWAY\nCURSE RISING', '#d4c6f0', 1900);
+      this.showTemporaryMessage('WATCHER IN SIGHT\nLOOK AWAY TO STOP CURSE • HOLD LIGHT ON IT TO DRIVE IT OFF', '#d4c6f0', 3000);
     }
-    if (state.ambushers.some(enemy => enemy.state === 'warning'
-      && previous.ambushers.find(old => old.id === enemy.id)?.state !== 'warning')) {
-      this.showTemporaryMessage('AMBUSHER WARNING — MOVE!', '#ffaaa0');
-    }
-    if (state.facingX !== 0 || state.facingY !== 0) this.playerFacingAngle = Math.atan2(state.facingY, state.facingX);
+    this.updatePlayerPresentationFacing(previous, state);
     this.hasKey = state.hasKey;
-    this.stairsUnlocked = state.hasKey;
+    this.stairsUnlocked = isBlock13Floor(state.floor) ? state.hasKey && state.objectiveComplete : state.objectiveComplete;
     const block13 = isBlock13Floor(state.floor);
     this.updateObjectiveVisibility(state);
-    this.stairsSprite.setTexture(state.hasKey ? 'stairs_unlocked' : 'stairs_locked');
+    this.stairsSprite.setTexture(this.stairsUnlocked ? 'stairs_unlocked' : 'stairs_locked');
     this.searchableSprites.forEach((entry, index) => {
+      const wasSearched = entry.searched;
       entry.searched = state.searched[index] ?? true;
+      if (!wasSearched && entry.searched && !entry.data.isMimic) this.showContainerSearchPulse(entry);
       const mimic = state.mimics.find(m => m.searchableIndex === index);
       if (mimic?.revealed) {
+        const wasRevealed = previous.mimics.find(old => old.searchableIndex === mimic.searchableIndex)?.revealed ?? false;
+        if (!wasRevealed) this.mimicRevealElapsedMs.set(entry.sprite, 0);
         this.mimicTwitchStates.delete(entry.sprite);
         const exposure = enemyPresentationExposure(this.floorData, state, mimic.x, mimic.y);
         entry.sprite.setVisible(mimic.active && exposure > 0);
-        entry.sprite.setTexture('mimic_revealed');
+        entry.sprite.setTexture(mimicTextureKey(true, key => this.textures.exists(key), 'mimic_revealed'));
         entry.sprite.setPosition(mimic.x / FIXED_SCALE, mimic.y / FIXED_SCALE);
         entry.sprite.setTint(exposure >= 0.7 ? 0xffe4dc : 0xc5a8ae).setAlpha(exposure);
-        entry.sprite.setScale(1.2);
+        const revealElapsed = this.mimicRevealElapsedMs.get(entry.sprite);
+        entry.sprite.setScale(revealElapsed === undefined ? 1.2 : mimicRevealPulseScale(revealElapsed));
+        if (revealElapsed !== undefined) {
+          const nextElapsed = revealElapsed + Math.max(0, presentationDeltaMs);
+          if (nextElapsed >= MIMIC_REVEAL_PULSE_DURATION_MS) this.mimicRevealElapsedMs.delete(entry.sprite);
+          else this.mimicRevealElapsedMs.set(entry.sprite, nextElapsed);
+        }
       } else {
-        entry.sprite.setTexture(entry.data.isMimic ? `mimic_${entry.data.x}_${entry.data.y}` : `searchable_${entry.data.objectType}`);
+        this.mimicRevealElapsedMs.delete(entry.sprite);
+        const textureName = entry.data.isMimic
+          ? mimicTextureKey(false, key => this.textures.exists(key), `mimic_${entry.data.x}_${entry.data.y}`)
+          : this.searchableTextureName(entry.data, entry.searched);
+        if (!this.textures.exists(textureName)) this.createOpenContainerFallbackTexture(entry.data);
+        if (entry.sprite.texture.key !== textureName) {
+          entry.sprite.setTexture(textureName);
+          if (textureName.startsWith('env_')) this.markTextureNearest(textureName);
+        }
         entry.sprite.setTint(0xffffff).setScale(1);
-        entry.sprite.setVisible(!entry.searched);
+        entry.sprite.setVisible(entry.data.isMimic ? !entry.searched : true);
       }
     });
     // Disguised mimics keep their old twitching presentation; it only moves
@@ -559,14 +1389,60 @@ export class FloorScene extends Phaser.Scene {
     this.updateMimicTwitches(state.tick);
 
     const stalker = state.stalker;
+    const previousStalkerFacing = this.stalkerVisualFacing;
+    this.stalkerVisualFacing = inferStalkerVisualFacing(previous.stalker, stalker, previousStalkerFacing);
+    const stalkerMoving = stalkerMovedBetween(previous.stalker, stalker);
+    if (stalkerMoving !== this.stalkerIsMoving || (stalkerMoving && this.stalkerVisualFacing !== previousStalkerFacing)) {
+      this.stalkerWalkAnimationElapsedMs = 0;
+    }
+    this.stalkerIsMoving = stalkerMoving;
+    const stalkerTexture = stalkerTextureKeyForPresentation(
+      this.stalkerVisualFacing,
+      stalkerMoving,
+      this.stalkerWalkAnimationElapsedMs,
+      key => this.textures.exists(key),
+    );
+    if (this.stalkerSprite?.texture.key !== stalkerTexture) {
+      this.stalkerSprite?.setTexture(stalkerTexture);
+      if (stalkerTexture !== 'stalker') this.markTextureNearest(stalkerTexture);
+    }
     this.stalkerSprite?.setPosition(stalker.x / FIXED_SCALE, stalker.y / FIXED_SCALE);
     const stalkerExposure = enemyPresentationExposure(this.floorData, state, stalker.x, stalker.y);
-    this.stalkerSprite?.setAlpha(stalker.visible ? stalkerExposure * (stalker.state === 'hunting' ? 0.98 : 0.76) : 0);
-    this.stalkerSprite?.setTint(stalker.state === 'hunting' && stalkerExposure >= 0.7 ? 0xffb7b0 : stalkerExposure >= 0.7 ? 0xe0d1d8 : 0xffffff);
+    this.stalkerSprite?.setAlpha(stalker.visible
+      ? Math.max(stalkerExposure * (stalker.state === 'hunting' ? 0.98 : 0.76), stalker.state === 'hunting' ? 0.54 : 0.27)
+      : 0);
     const finalChase = isBlock13Floor(state.floor) && state.hasKey && stalker.state === 'hunting';
-    this.stalkerSprite?.setScale(stalker.visible && stalker.state === 'hunting' ? (finalChase ? 1.3 : 1.14) : 1);
+    const reduceJumpscareIntensity = this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false;
+    if (finalChase !== this.finalChaseAudioActive) this.setFinalChaseAmbience(finalChase, reduceJumpscareIntensity);
+    this.stalkerSprite?.setScale(stalker.visible && stalker.state === 'hunting'
+      ? stalkerHuntScale(reduceJumpscareIntensity, finalChase) : 1);
+    const stalkerDistance = Math.hypot(stalker.x - state.x, stalker.y - state.y) / FIXED_SCALE;
+    const proximity = stalkerNearMissState(stalkerDistance, stalker.state === 'hunting', this.stalkerNearMissActive);
+    this.stalkerNearMissActive = proximity.active;
+    this.stalkerSprite?.setTint(proximity.active ? 0xffc9c1
+      : stalker.state === 'hunting' && stalkerExposure >= 0.7 ? 0xffb7b0
+        : stalkerExposure >= 0.7 ? 0xe0d1d8 : 0xffffff);
+    if (proximity.entered && !this.ambusherJumpscareVeil?.active && stalkerNearMissCueAvailable(this.time.now, this.stalkerNearMissNextCueAt)) {
+      this.cameras.main.shake(110, accessiblePresentationIntensity(0.0018, reduceJumpscareIntensity));
+      this.playAudioCue({ key: 'sfx_stalker_hunt', cooldownMs: 8000, positional: { x: stalker.x, y: stalker.y }, volume: 0.22 });
+      this.stalkerNearMissNextCueAt = this.time.now;
+    }
     state.crawlers.forEach((enemy, index) => {
       const sprite = this.crawlerSprites[index];
+      const previousCrawler = previous.crawlers.find(old => old.id === enemy.id) ?? enemy;
+      const moving = crawlerMovedBetween(previousCrawler, enemy);
+      const presentation = this.crawlerPresentation.get(enemy.id) ?? { moving: false, elapsedMs: 0 };
+      if (moving !== presentation.moving) presentation.elapsedMs = 0;
+      presentation.moving = moving;
+      this.crawlerPresentation.set(enemy.id, presentation);
+      const textureKey = crawlerTextureKeyForPresentation(
+        moving, presentation.elapsedMs, key => this.textures.exists(key), `crawler_${enemy.id}`,
+        crawlerPresentationPhaseOffsetMs(enemy.id),
+      );
+      if (sprite && sprite.texture.key !== textureKey) {
+        sprite.setTexture(textureKey);
+        if (textureKey !== `crawler_${enemy.id}`) this.markTextureNearest(textureKey);
+      }
       const exposure = enemyPresentationExposure(this.floorData, state, enemy.x, enemy.y);
       sprite?.setPosition(enemy.x / FIXED_SCALE, enemy.y / FIXED_SCALE);
       sprite?.setAlpha(exposure * (enemy.chasing ? 1 : 0.76));
@@ -576,65 +1452,238 @@ export class FloorScene extends Phaser.Scene {
     });
     state.watchers.forEach((enemy, index) => {
       const sprite = this.watcherSprites[index];
+      const textureKey = watcherTextureKey(key => this.textures.exists(key), `watcher_${enemy.id}`);
+      if (sprite && sprite.texture.key !== textureKey) {
+        sprite.setTexture(textureKey);
+        if (textureKey !== `watcher_${enemy.id}`) this.markTextureNearest(textureKey);
+      }
       const exposure = enemyPresentationExposure(this.floorData, state, enemy.x, enemy.y);
       sprite?.setPosition(enemy.x / FIXED_SCALE, enemy.y / FIXED_SCALE);
-      sprite?.setAlpha(enemy.active ? exposure * (0.76 + Math.sin(state.tick * 0.045 + enemy.id) * 0.07) : 0);
+      sprite?.setAlpha(enemy.active ? Math.max(exposure, 0.34) * (0.82 + Math.sin(state.tick * 0.045 + enemy.id) * 0.06) : 0);
       sprite?.setTint(exposure >= 0.7 ? 0xd9d4ef : 0xffffff);
+      const gazeAlpha = watcherGazeEyeAlpha(
+        enemy.active,
+        watcherIndividuallyCausingCurse(state, enemy),
+        exposure,
+      );
+      this.watcherEyeGlints[index]?.setPosition(enemy.x / FIXED_SCALE, enemy.y / FIXED_SCALE)
+        .setVisible(gazeAlpha > 0).setAlpha(gazeAlpha);
     });
+    const ambusherImpact = state.status === 'playing' ? ambusherImpactStarted(previous.ambushers, state.ambushers) : undefined;
+    if (ambusherImpact) this.startAmbusherJumpscare(ambusherImpact.id, state.tick);
+    else {
+      const searchedIndices = events.filter(event => event.type === 'loot_searched').map(event => event.index);
+      const searchableIndex = containerScareSearchIndex(previous.boxScare, state.boxScare, searchedIndices);
+      const canPresent = state.status === 'playing' && !this.isPaused && !this.isTransitioning
+        && !this.storyPopupOpen && !this.openingStoryOpen && !this.endingEpilogueOpen && !this.ambusherJumpscareVeil;
+      if (containerScareShouldPlay(searchableIndex !== null, Boolean(this.ambusherJumpscareVeil?.active), canPresent) && searchableIndex !== null) {
+        const searchable = this.searchableSprites[searchableIndex]?.data;
+        if (searchable) this.startContainerScare(searchable.x * this.tileSize + 16, searchable.y * this.tileSize + 16);
+      }
+    }
     state.ambushers.forEach((enemy, index) => {
       const sprite = this.ambusherSprites[index];
+      const textureKey = ambusherTextureKey(key => this.textures.exists(key), `ambusher_${enemy.id}`);
+      if (sprite && sprite.texture.key !== textureKey) {
+        sprite.setTexture(textureKey);
+        if (textureKey !== `ambusher_${enemy.id}`) this.markTextureNearest(textureKey);
+      }
       const exposure = enemyPresentationExposure(this.floorData, state, enemy.x, enemy.y);
       sprite?.setPosition(enemy.x / FIXED_SCALE, enemy.y / FIXED_SCALE);
       const activePresentation = enemy.state === 'warning' || enemy.state === 'jumpscare';
       sprite?.setVisible(activePresentation && exposure > 0);
-      sprite?.setAlpha(enemy.state === 'warning' ? exposure * (0.62 + (Math.sin(state.tick * 0.35 + enemy.id) + 1) * 0.14) : enemy.state === 'jumpscare' ? exposure : 0);
+      sprite?.setAlpha(enemy.state === 'warning' ? ambusherWarningAlpha(exposure, state.tick, enemy.id) : enemy.state === 'jumpscare' ? exposure : 0);
       sprite?.setTint(enemy.state === 'warning' ? 0xffdca0 : 0xffaaa0);
     });
+    this.updatePuzzlePanel(state);
     this.updateInteractionFeedback(state);
     this.updateCorruptionAtmosphere(state);
     this.updateAuthoritativePrompt(state);
     if (state.hp !== previous.hp) this.updateHealthBar();
-    if ((state.x !== previous.x || state.y !== previous.y) && state.tick % 15 === 0) {
-      this.audioDirector?.playVariantWithCooldown(AUDIO_KEYS.player.footstep, AUDIO_KEYS.player.footstepVariants, 'sfx', 90, { volume: 0.22 });
+    if ((state.x !== previous.x || state.y !== previous.y) && shouldPlayFootstep(this.lastFootstepTick, state.tick)) {
+      this.audioDirector?.playVariantWithCooldown(
+        AUDIO_KEYS.player.footstep,
+        AUDIO_KEYS.player.footstepVariants,
+        'sfx',
+        PLAYER_FOOTSTEP_COOLDOWN_MS,
+        undefined,
+        PLAYER_FOOTSTEP_VARIANT_GAINS,
+      );
+      this.lastFootstepTick = state.tick;
     }
     for (const audioCue of audioCuesForStateChange(previous, state, events)) this.playAudioCue(audioCue);
     if (state.damageEventId !== previous.damageEventId) {
       this.cameras.main.shake(150, 0.0035);
       this.flashDamageVignette();
     }
-    if (state.scareEventId !== previous.scareEventId) this.cameras.main.shake(220, 0.006);
-    if (finalChase && previous.stalker.state !== 'hunting') this.cameras.main.shake(260, 0.0045);
+    if (state.scareEventId !== previous.scareEventId && !ambusherImpact) {
+      const kick = genericScareCameraKick(this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false);
+      this.cameras.main.shake(kick.durationMs, kick.intensity);
+    }
+    if (finalChase && previous.stalker.state !== 'hunting') {
+      this.cameras.main.shake(reduceJumpscareIntensity ? 160 : 260, reduceJumpscareIntensity ? 0.0025 : 0.0045);
+    }
     if (state.corruption.effectId !== previous.corruption.effectId) {
       const names: CorruptionEffect['type'][] = ['horizontal_shift', 'scanline', 'chromatic', 'hud_flicker', 'static_noise', 'camera_shake', 'visual_glitch'];
       this.executeCorruptionEffect({
         type: names[state.corruption.effectType] ?? 'visual_glitch',
-        intensity: state.corruption.intensityPermille / 1000,
+        intensity: accessiblePresentationIntensity(
+          state.corruption.intensityPermille / 1000,
+          this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false,
+        ),
         duration: SimulationEngine.ticksToMs(state.corruption.durationTicks),
       });
     }
   }
 
   private updateAuthoritativePrompt(state: AuthoritativeState) {
-    const px = state.x, py = state.y, range2 = (48 * FIXED_SCALE) ** 2;
-    let prompt = '';
-    const keyX = (this.floorData.key[0] * 32 + 16) * FIXED_SCALE;
-    const keyY = (this.floorData.key[1] * 32 + 16) * FIXED_SCALE;
-    if (!state.hasKey && (px - keyX) ** 2 + (py - keyY) ** 2 <= range2) prompt = '[E] PICK UP KEY';
-    else {
-      const itemIndex = this.floorData.searchables.findIndex((item, i) => !state.searched[i] && (px - (item.x * 32 + 16) * FIXED_SCALE) ** 2 + (py - (item.y * 32 + 16) * FIXED_SCALE) ** 2 <= range2);
-      if (itemIndex >= 0) prompt = `[E] SEARCH ${this.floorData.searchables[itemIndex].objectType.toUpperCase()}`;
-      else {
-        const [ex, ey] = this.floorData.exit;
-        const dx = px - (ex * 32 + 16) * FIXED_SCALE, dy = py - (ey * 32 + 16) * FIXED_SCALE;
-        if (dx * dx + dy * dy <= range2) {
-          prompt = isBlock13Floor(state.floor)
-            ? state.hasKey ? '[E] ESCAPE OUTSIDE' : '[E] EXIT (LOCKED)'
-            : state.hasKey ? '[E] DESCEND STAIRS' : '[E] STAIRS (LOCKED)';
-        }
-      }
-    }
+    const prompt = interactionPrompt(state, this.floorData);
     this.interactPrompt.setText(prompt);
     this.interactPrompt.setVisible(prompt.length > 0);
+  }
+
+  private updatePuzzlePanel(state: AuthoritativeState) {
+    const puzzle = this.floorData.puzzle;
+    const run = state.puzzle;
+    const visible = run.active;
+    this.puzzleFallbackMarker?.setVisible(run.fallbackActive && !run.fallbackItemFound);
+    this.puzzlePanel?.setVisible(visible);
+    this.puzzlePanelText?.setVisible(visible);
+    this.puzzlePanelArt?.setVisible(visible);
+    const panelAccents: Record<Floor['puzzle']['kind'], number> = {
+      combination: 0xd6a362, resident: 0xb6a9a0, circuit: 0x88b5a1, records: 0xb69ab8, memory: 0xa893c7,
+    };
+    this.puzzlePanel?.setStrokeStyle(2, panelAccents[puzzle.kind], 1);
+    if (!visible || !this.puzzlePanelText) return;
+    const discoveredSteps = discoveredObjectiveSteps(this.floorData, state.searched);
+    const evidence = discoveredSteps.size;
+    const lines = [`${puzzle.title}`, `OBJECTIVE  ·  ${this.puzzleObjectiveCopy(puzzle.kind)}`,
+      `EVIDENCE RECOVERED  ${evidence}/${this.floorData.objectives.searchableIndices.length}`, ''];
+    if (puzzle.kind === 'combination') {
+      lines.push('CALCULATE EACH RESULT, THEN SET THE THREE DIALS.', '',
+        ...puzzle.combinationExpressions!.map((expression, index) => `${index === run.selectedIndex ? '▶ ' : '  '}DIGIT ${index + 1}  ${expression.left} ${expression.operator} ${expression.right}  =  [ ${run.enteredCode[index]} ]`),
+        '', '← / → CHOOSE A DIAL   ↑ / ↓ CHANGE IT   E TEST CODE');
+    } else if (puzzle.kind === 'resident') {
+      lines.push('CROSS-REFERENCE BOTH RECORDS WITH THE DIRECTORY.', `MATCHES REQUIRED  ·  ${evidence}/2 RECORDS`, '', ...puzzle.residents!.map((resident, index) => `${index === run.selectedIndex ? '▶ ' : '  '}${resident.name} — APT ${resident.apartment} — BIKE ${resident.hasBicycle ? 'YES' : 'NO'} — NIGHTS ${resident.worksNights ? 'YES' : 'NO'}`), '↑ / ↓ SELECT   E CONFIRM');
+    } else if (puzzle.kind === 'circuit') {
+      const expectedNext = puzzle.circuitOrder![run.circuitSequence.length];
+      lines.push('TARGET  ·  TRACE THE ARCHIVE RELAY THROUGH TWO FEEDS', 'Power the marked feeds in the recovered order; other feeds stay off.', `SEQUENCE  ·  ${run.circuitSequence.map(index => puzzle.circuitLabels![index]).join(' → ') || '—'}`, `NEXT CONTACT  ·  ${expectedNext === undefined ? 'ROUTE COMPLETE' : puzzle.circuitLabels![expectedNext]}`, '', ...puzzle.circuitLabels!.map((label, index) => `${index === run.selectedIndex ? '▶ ' : '  '}FEED ${index + 1}  ─ ${run.switchMask & (1 << index) ? '[ON ]' : '[OFF]'} ${label}  ─▶ RELAY`), '← / → SELECT   ↑ TOGGLE   E TEST CIRCUIT');
+      if (discoveredSteps.has(0) && this.notebookHintStage === 1) lines.push('', 'HINT 1 / 2  ·  THE DIAGRAM IDENTIFIES TWO FEEDS. MATCH THOSE LABELS; LEAVE THE OTHER TWO OFF.');
+      else if (discoveredSteps.has(0) && this.notebookHintStage === 2) lines.push('', 'RECOVERED DIAGRAM:', puzzle.clueTexts[0]);
+      else if (discoveredSteps.has(0)) lines.push('', 'H  OPTIONAL HINT 1 / 2  ·  READ THE MAINTENANCE DIAGRAM');
+      else lines.push('', 'SEARCH FOR THE AMBER PUZZLE EVIDENCE MARKER.');
+    } else if (puzzle.kind === 'records') {
+      lines.push('REBUILD THE NIGHT IN CHRONOLOGICAL ORDER FROM THE RECORDS.', `CHAIN  ·  ${run.recordOrder.length}/3 EVENTS PLACED`, 'Evidence excerpts are kept in your notebook.', '');
+      if (recordsMayBeCompared(puzzle, discoveredSteps)) {
+        lines.push(`ORDER  ·  ${run.recordOrder.map(index => puzzle.recordEvents![index]).join('  →  ') || '—'}`,
+          ...puzzle.recordEvents!.map((event, index) => `${index === run.selectedIndex ? '▶ ' : '  '}${run.recordOrder.includes(index) ? '✓ ' : '  '}${event}`), '↑ / ↓ SELECT   E ADD THE NEXT EVENT');
+      } else lines.push('RECOVER ALL THREE DOCUMENTS TO OPEN THE INDEX.');
+    } else {
+      lines.push('ASSOCIATE EACH RECOVERED MEMORY WITH ITS PLACE IN THE BUILDING.', `LINKS CONFIRMED  ·  ${run.memoryConfirmedMask.toString(2).replace(/0/g, '').length}/3`, 'Unknown fragments stay blank until encountered.', '');
+      puzzle.memoryFragments!.forEach((fragment, index) => {
+        const display = memoryFragmentDisplay(fragment, puzzle.memoryChoices![run.memoryAnswers[index]], index, discoveredSteps);
+        lines.push(discoveredSteps.has(index)
+          ? `${run.memoryConfirmedMask & (1 << index) ? '✓ ' : index === run.selectedIndex ? '▶ ' : '  '}${display}`
+          : `  ${display}`);
+      });
+      lines.push('← / → SELECT FRAGMENT   ↑ / ↓ CHANGE   E CONFIRM');
+    }
+    if (run.fallbackActive) lines.push('', 'NORMAL ENTRY DISABLED — FIND THE MAINTENANCE TOOL.');
+    else if (run.attemptsRemaining > 0) lines.push('', `ATTEMPTS REMAINING: ${run.attemptsRemaining}`);
+    if (evidence < this.floorData.objectives.searchableIndices.length) lines.push('', 'FIND ALL EVIDENCE BEFORE SUBMITTING.');
+    lines.push('', 'TAB NOTEBOOK     E SUBMIT / CONFIRM     F OR ESC CLOSE');
+    this.puzzlePanelText.setText(lines.join('\n'));
+  }
+
+  private puzzleObjectiveCopy(kind: Floor['puzzle']['kind']): string {
+    switch (kind) {
+      case 'combination': return 'OPEN THE LOCK WITH THREE FOUND DIGITS';
+      case 'resident': return 'CROSS-REFERENCE THE RESIDENT RECORDS';
+      case 'circuit': return 'RESTORE POWER TO THE ARCHIVE RELAY';
+      case 'records': return 'RECONSTRUCT THE TRUE EVENT ORDER';
+      case 'memory': return 'RECONNECT THE MEMORIES YOU HAVE FOUND';
+    }
+  }
+
+  /** Crisp, locally drawn puzzle emblems; no external raster UI assets. */
+  private createPuzzlePanelArt(panelW: number, panelH: number): Phaser.GameObjects.Graphics {
+    const art = this.add.graphics().setScrollFactor(0).setDepth(602).setVisible(false);
+    const cx = this.scale.width / 2, cy = this.scale.height / 2;
+    const x = cx - panelW / 2 + 18, y = cy - 12;
+    const palette: Record<Floor['puzzle']['kind'], number> = {
+      combination: 0xd6a362, resident: 0xb6a9a0, circuit: 0x88b5a1, records: 0xb69ab8, memory: 0xa893c7,
+    };
+    const color = palette[this.floorData.puzzle.kind];
+    art.lineStyle(1, color, 0.9).fillStyle(color, 0.12);
+    switch (this.floorData.puzzle.kind) {
+      case 'combination':
+        for (let i = 0; i < 3; i++) {
+          art.fillRect(x + i * 11, y - 11, 9, 22).strokeRect(x + i * 11, y - 11, 9, 22);
+          art.fillRect(x + 3 + i * 11, y - 2, 3, 3);
+        }
+        break;
+      case 'resident':
+        art.strokeRect(x - 1, y - 13, 27, 26).fillRect(x + 2, y - 9, 5, 5);
+        art.lineBetween(x + 11, y - 8, x + 22, y - 8).lineBetween(x + 2, y + 1, x + 23, y + 1)
+          .lineBetween(x + 2, y + 6, x + 19, y + 6);
+        break;
+      case 'circuit':
+        art.lineBetween(x, y - 11, x + 17, y - 11).lineBetween(x, y - 4, x + 17, y - 4)
+          .lineBetween(x, y + 4, x + 17, y + 4).lineBetween(x, y + 11, x + 17, y + 11)
+          .lineBetween(x + 17, y - 11, x + 17, y + 11).lineBetween(x + 17, y, x + 26, y);
+        for (let i = 0; i < 4; i++) art.fillRect(x + 3, y - 13 + i * 7, 4, 4);
+        art.fillRect(x + 24, y - 2, 4, 4);
+        break;
+      case 'records':
+        art.strokeRect(x, y - 12, 22, 8).strokeRect(x + 3, y - 2, 22, 8).strokeRect(x + 6, y + 8, 22, 8);
+        break;
+      case 'memory':
+        art.lineBetween(x + 3, y - 9, x + 22, y).lineBetween(x + 3, y + 9, x + 22, y)
+          .lineBetween(x + 22, y, x + 11, y);
+        art.fillCircle(x + 3, y - 9, 3).fillCircle(x + 3, y + 9, 3).fillCircle(x + 22, y, 3).fillCircle(x + 11, y, 3);
+        break;
+    }
+    void panelH;
+    return art;
+  }
+
+  private createPuzzleMarkers() {
+    const [deviceX, deviceY] = this.floorData.puzzleDevice;
+    if (!(this.floorData.puzzle.floor === 4)) {
+      const marker = this.add.graphics().setDepth(4);
+      const x = deviceX * this.tileSize + 16, y = deviceY * this.tileSize + 16;
+      marker.fillStyle(0x17151e, 0.96).fillRect(x - 10, y - 9, 20, 18);
+      marker.lineStyle(1, 0x9b8aa6, 0.9).strokeRect(x - 10, y - 9, 20, 18);
+      marker.lineStyle(1, 0xe0a86f, 0.85).lineBetween(x - 6, y - 3, x + 6, y - 3).lineBetween(x - 6, y + 1, x + 6, y + 1).lineBetween(x - 6, y + 5, x + 3, y + 5);
+      this.puzzleDeviceMarker = marker;
+    }
+    if (this.floorData.puzzleFallbackSite) {
+      const [x, y] = this.floorData.puzzleFallbackSite;
+      const marker = this.add.graphics().setDepth(4).setVisible(false);
+      const px = x * this.tileSize + 16, py = y * this.tileSize + 16;
+      marker.fillStyle(0x231b13, 0.96).fillRect(px - 9, py - 9, 18, 18);
+      marker.lineStyle(1, 0xffbf72, 1).strokeRect(px - 9, py - 9, 18, 18);
+      marker.lineStyle(2, 0xffbf72, 0.95).lineBetween(px - 5, py + 4, px + 5, py - 4).lineBetween(px - 1, py + 1, px + 3, py + 5);
+      this.puzzleFallbackMarker = marker;
+    }
+  }
+
+  /** Brief world-space confirmation on a completed search; it reads sim state only. */
+  private showContainerSearchPulse(entry: SearchableSprite) {
+    const accent = entry.data.objectType === 'maintenance_lockbox'
+      ? 0xd0a465 : floorVisualProfile(this.authoritativeSimulation.state.floor).accent;
+    const pulse = this.add.circle(entry.sprite.x, entry.sprite.y, 12)
+      .setFillStyle(accent, 0)
+      .setStrokeStyle(2, accent, 0.82)
+      .setDepth(13);
+    this.tweens.add({
+      targets: pulse,
+      scale: 1.9,
+      alpha: 0,
+      duration: 260,
+      ease: 'Cubic.Out',
+      onComplete: () => pulse.destroy(),
+    });
   }
 
   private updateObjectiveVisibility(state: AuthoritativeState) {
@@ -644,8 +1693,8 @@ export class FloorScene extends Phaser.Scene {
     const exitX = this.floorData.exit[0] * 32 + 16, exitY = this.floorData.exit[1] * 32 + 16;
     const keyInSight = !block13 || hasPresentationLineOfSight(this.floorData, playerX, playerY, keyX, keyY);
     const exitInSight = !block13 || hasPresentationLineOfSight(this.floorData, playerX, playerY, exitX, exitY);
-    this.keySprite.setVisible(!state.hasKey && keyInSight);
-    this.keyLabel.setVisible(!state.hasKey && keyInSight);
+    this.keySprite?.setVisible(block13 && !state.hasKey && keyInSight);
+    this.keyLabel?.setVisible(block13 && !state.hasKey && keyInSight);
     this.stairsSprite.setVisible(exitInSight);
     this.stairsLabel.setVisible(exitInSight);
   }
@@ -665,18 +1714,33 @@ export class FloorScene extends Phaser.Scene {
 
     const keyX = this.floorData.key[0] * this.tileSize + this.tileSize / 2;
     const keyY = this.floorData.key[1] * this.tileSize + this.tileSize / 2;
-    updateHalo(this.keyHalo, keyX, keyY, !state.hasKey);
+    if (this.keyHalo) updateHalo(this.keyHalo, keyX, keyY, block13 && !state.hasKey);
     const exitX = this.floorData.exit[0] * this.tileSize + this.tileSize / 2;
     const exitY = this.floorData.exit[1] * this.tileSize + this.tileSize / 2;
     updateHalo(this.stairsHalo, exitX, exitY, true);
     if (block13) {
-      this.stairsHalo.setFillStyle(state.hasKey ? 0xc07883 : 0x8c6e81, state.hasKey ? 0.1 : 0.035);
-      this.stairsHalo.setStrokeStyle(state.hasKey ? 2 : 1, state.hasKey ? 0xf0a0a9 : 0x9b8298, state.hasKey ? 0.72 : 0.36);
+      const finalChase = state.hasKey && state.stalker.state === 'hunting';
+      const reduced = this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false;
+      const chasePulse = finalChase ? (Math.sin(state.tick * 0.045) + 1) * 0.5 : 0;
+      const pulseScale = reduced ? 0.035 : 0.06;
+      this.stairsHalo.setScale(finalChase ? 1 + pulseScale * chasePulse : 1);
+      this.stairsHalo.setFillStyle(finalChase ? 0xa75775 : state.hasKey ? 0xc07883 : 0x8c6e81,
+        finalChase ? 0.08 + chasePulse * 0.035 : state.hasKey ? 0.1 : 0.035);
+      this.stairsHalo.setStrokeStyle(state.hasKey ? 2 : 1,
+        finalChase ? 0xf09aaf : state.hasKey ? 0xf0a0a9 : 0x9b8298,
+        finalChase ? 0.68 + chasePulse * 0.12 : state.hasKey ? 0.72 : 0.36);
     }
     this.searchableSprites.forEach((entry, index) => {
       const x = entry.data.x * this.tileSize + this.tileSize / 2;
       const y = entry.data.y * this.tileSize + this.tileSize / 2;
-      updateHalo(entry.halo, x, y, !state.searched[index] && entry.sprite.visible);
+      const unsearched = !state.searched[index] && entry.sprite.visible;
+      updateHalo(entry.halo, x, y, unsearched);
+      if (entry.evidenceLabel) {
+        const dx = px - x, dy = py - y;
+        const nearby = dx * dx + dy * dy <= 192 * 192;
+        entry.evidenceLabel.setVisible(unsearched && nearby && this.hasPresentationLineOfSight(px, py, x, y));
+        entry.evidenceLabel.setAlpha(tickPulse);
+      }
     });
   }
 
@@ -698,8 +1762,8 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private createInteractableHalo(x: number, y: number, color: number, radius: number) {
-    return this.add.circle(x, y, radius, color, 0.04)
-      .setStrokeStyle(1, color, 0.5)
+    return this.add.circle(x, y, radius, color, 0.075)
+      .setStrokeStyle(2, color, 0.68)
       .setDepth(3)
       .setVisible(false);
   }
@@ -710,13 +1774,15 @@ export class FloorScene extends Phaser.Scene {
   private readKeyboardInput(): InputState {
     const justPressedF = Phaser.Input.Keyboard.JustDown(this.flashlightKey);
     const justPressedE = Phaser.Input.Keyboard.JustDown(this.interactKey);
+    const closePuzzle = this.puzzleCloseRequested;
+    this.puzzleCloseRequested = false;
 
     return {
       left: this.cursors.left.isDown || this.wasd.a.isDown,
       right: this.cursors.right.isDown || this.wasd.d.isDown,
       up: this.cursors.up.isDown || this.wasd.w.isDown,
       down: this.cursors.down.isDown || this.wasd.s.isDown,
-      flashlight: justPressedF,
+      flashlight: justPressedF || closePuzzle,
       interact: justPressedE,
     };
   }
@@ -761,6 +1827,8 @@ export class FloorScene extends Phaser.Scene {
     const worldHeight = this.floorData.height * this.tileSize;
     const state = this.authoritativeSimulation.state;
     const profile = floorVisualProfile(state.floor);
+    const ambientVisibility = floorAmbientVisibility(state.floor);
+    const beamContrast = floorFlashlightContrast(state.floor);
 
     this.lightmapGraphics.clear();
     this.lightmapGraphics.fillStyle(profile.darkness, 1);
@@ -773,11 +1841,11 @@ export class FloorScene extends Phaser.Scene {
       [], this.ambientRayAngles, this.ambientLightRays,
     );
     // Concentric clipped polygons preserve soft falloff while respecting walls.
-    this.drawOccludedLightShape(ambientRays, originX, originY, 88, scaleColor(profile.ambient, 0.34));
-    this.drawOccludedLightShape(ambientRays, originX, originY, 76, scaleColor(profile.ambient, 0.48));
-    this.drawOccludedLightShape(ambientRays, originX, originY, 62, scaleColor(profile.ambient, 0.62));
-    this.drawOccludedLightShape(ambientRays, originX, originY, 48, scaleColor(profile.ambient, 0.82));
-    this.drawOccludedLightShape(ambientRays, originX, originY, 34, scaleColor(profile.ambient, 1.08));
+    this.drawOccludedLightShape(ambientRays, originX, originY, 88, scaleColor(profile.ambient, 0.34 * ambientVisibility));
+    this.drawOccludedLightShape(ambientRays, originX, originY, 76, scaleColor(profile.ambient, 0.48 * ambientVisibility));
+    this.drawOccludedLightShape(ambientRays, originX, originY, 62, scaleColor(profile.ambient, 0.62 * ambientVisibility));
+    this.drawOccludedLightShape(ambientRays, originX, originY, 48, scaleColor(profile.ambient, 0.82 * ambientVisibility));
+    this.drawOccludedLightShape(ambientRays, originX, originY, 34, scaleColor(profile.ambient, 1.08 * ambientVisibility));
 
     if (this.flashlightOn) {
       const factor = flashlightVisualFactor(state.tick, state.floor);
@@ -790,11 +1858,11 @@ export class FloorScene extends Phaser.Scene {
         this.playerFacingAngle - FLASHLIGHT_HALF_ANGLES[0], this.playerFacingAngle + FLASHLIGHT_HALF_ANGLES[0],
         2, this.flashlightBoundaryAngles, this.flashlightRayAngles, this.flashlightLightRays,
       );
-      this.drawOccludedLightShape(flashlightRays, originX, originY, 286, scaleColor(profile.flashlight, 0.3 * factor), FLASHLIGHT_HALF_ANGLES[0]);
-      this.drawOccludedLightShape(flashlightRays, originX, originY, 270, scaleColor(profile.flashlight, 0.42 * factor), FLASHLIGHT_HALF_ANGLES[1]);
-      this.drawOccludedLightShape(flashlightRays, originX, originY, 248, scaleColor(profile.flashlight, 0.62 * factor), FLASHLIGHT_HALF_ANGLES[2]);
-      this.drawOccludedLightShape(flashlightRays, originX, originY, 226, scaleColor(profile.flashlight, 0.82 * factor), FLASHLIGHT_HALF_ANGLES[3]);
-      this.drawOccludedLightShape(flashlightRays, originX, originY, 210, scaleColor(profile.flashlight, factor), FLASHLIGHT_HALF_ANGLES[4]);
+      this.drawOccludedLightShape(flashlightRays, originX, originY, 286, scaleColor(profile.flashlight, 0.3 * factor * beamContrast), FLASHLIGHT_HALF_ANGLES[0]);
+      this.drawOccludedLightShape(flashlightRays, originX, originY, 270, scaleColor(profile.flashlight, 0.42 * factor * beamContrast), FLASHLIGHT_HALF_ANGLES[1]);
+      this.drawOccludedLightShape(flashlightRays, originX, originY, 248, scaleColor(profile.flashlight, 0.62 * factor * beamContrast), FLASHLIGHT_HALF_ANGLES[2]);
+      this.drawOccludedLightShape(flashlightRays, originX, originY, 226, scaleColor(profile.flashlight, 0.82 * factor * beamContrast), FLASHLIGHT_HALF_ANGLES[3]);
+      this.drawOccludedLightShape(flashlightRays, originX, originY, 210, scaleColor(profile.flashlight, factor * beamContrast), FLASHLIGHT_HALF_ANGLES[4]);
     }
 
     // Draw the finished grayscale lightmap into the RenderTexture
@@ -837,6 +1905,22 @@ export class FloorScene extends Phaser.Scene {
     return graphics;
   }
 
+  private markTextureNearest(textureKey: string) {
+    this.textures.get(textureKey).setFilter(Phaser.Textures.FilterMode.NEAREST);
+  }
+
+  private generatePixelTexture(textureKey: string, width: number, height: number, rects: readonly { x: number; y: number; width: number; height: number; color: keyof typeof PIXEL_PALETTE }[]) {
+    if (!pixelRectsAreValid(rects, width, height)) throw new RangeError(`Invalid pixel sprite definition: ${textureKey}`);
+    const graphics = this.add.graphics();
+    for (const rect of rects) {
+      graphics.fillStyle(PIXEL_PALETTE[rect.color], 1);
+      graphics.fillRect(rect.x, rect.y, rect.width, rect.height);
+    }
+    graphics.generateTexture(textureKey, width, height);
+    graphics.destroy();
+    this.markTextureNearest(textureKey);
+  }
+
   private showTemporaryMessage(text: string, color: string, duration: number = 1200) {
     const msg = this.add.text(
       this.cameras.main.width / 2,
@@ -873,7 +1957,17 @@ export class FloorScene extends Phaser.Scene {
     });
   }
 
-  private showClueModal(title: string, content: string) {
+  private recordNotebookEntry(entry: NotebookEntry | undefined) {
+    this.notebookJournal = addNotebookDiscovery(this.notebookJournal, entry);
+    this.registry.set('investigationNotebook', this.notebookJournal);
+  }
+
+  private recordNotebookEvents(floor: Floor, events: readonly { type: string; index?: number }[]) {
+    this.notebookJournal = addNotebookSearchEvents(this.notebookJournal, floor, events);
+    this.registry.set('investigationNotebook', this.notebookJournal);
+  }
+
+  private showClueModal(title: string, content: string, recorded = false) {
     if (this.storyPopupOpen) return;
     this.storyPopupOpen = true;
     this.interactPrompt.setVisible(false);
@@ -897,7 +1991,7 @@ export class FloorScene extends Phaser.Scene {
       fontFamily: 'monospace', fontSize: '15px', color: '#e0ded7', lineSpacing: 8,
       wordWrap: { width: panelWidth - 56, useAdvancedWrap: true },
     }).setScrollFactor(0).setDepth(depth + 2);
-    const closeButton = this.add.text(centerX, centerY + panelHeight / 2 - 34, 'CLOSE NOTE  ·  [SPACE / ESC]', {
+    const closeButton = this.add.text(centerX, centerY + panelHeight / 2 - 34, recorded ? 'RECORDED IN NOTEBOOK [TAB]  ·  CLOSE [SPACE / ESC]' : 'CLOSE NOTE  ·  [SPACE / ESC]', {
       fontFamily: 'monospace', fontSize: '13px', color: '#70d4c6',
       backgroundColor: '#202a2a', padding: { x: 14, y: 8 },
     }).setOrigin(0.5).setScrollFactor(0).setDepth(depth + 2).setInteractive();
@@ -913,25 +2007,184 @@ export class FloorScene extends Phaser.Scene {
     closeButton.on('pointerdown', close);
   }
 
+  private openNotebook() {
+    if (this.notebookOpen || !this.uiCamera) return;
+    this.notebookOpen = true;
+    this.storyPopupOpen = true;
+    this.interactPrompt?.setVisible(false);
+    this.notebookFloor = this.authoritativeSimulation.state.floor;
+    this.notebookEntryIndex = 0;
+    this.closeStoryPopup = () => this.closeNotebook();
+    this.renderNotebook();
+    this.notebookKeyHandler = event => {
+      if (!this.notebookOpen) return;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        const floors = [4, 3, 2, 1, 0];
+        const at = floors.indexOf(this.notebookFloor);
+        this.notebookFloor = floors[(at + (event.key === 'ArrowRight' ? 1 : floors.length - 1)) % floors.length];
+        this.notebookEntryIndex = 0;
+        this.renderNotebook();
+        event.preventDefault();
+      } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        const entries = this.notebookEntriesForFloor(this.notebookFloor);
+        this.notebookEntryIndex = Phaser.Math.Clamp(this.notebookEntryIndex + (event.key === 'ArrowDown' ? 1 : -1), 0, Math.max(0, entries.length - 1));
+        this.renderNotebook();
+        event.preventDefault();
+      } else if (event.key === 'Escape') {
+        this.closeNotebook();
+        event.preventDefault();
+      } else if (event.code === 'Space') {
+        this.closeNotebook();
+        event.preventDefault();
+      }
+    };
+    this.input.keyboard?.on('keydown', this.notebookKeyHandler);
+  }
+
+  private notebookEntriesForFloor(floor: number): NotebookEntry[] {
+    return this.notebookJournal.entries.filter(entry => entry.floor === floor);
+  }
+
+  private renderNotebook() {
+    this.notebookElements.forEach(element => element.destroy());
+    this.notebookElements = [];
+    const width = this.uiCamera.width, height = this.uiCamera.height;
+    const cx = width / 2, cy = height / 2;
+    const compact = width < 760 || height < 520;
+    const panelW = Math.min(900, width - (compact ? 20 : 48)), panelH = Math.min(620, height - (compact ? 20 : 48));
+    const left = cx - panelW / 2, top = cy - panelH / 2;
+    const add = <T extends Phaser.GameObjects.GameObject>(element: T): T => {
+      this.cameras.main.ignore(element);
+      this.notebookElements.push(element);
+      return element;
+    };
+    add(this.add.rectangle(cx, cy, width, height, 0x03070b, 0.88).setScrollFactor(0).setDepth(700).setInteractive());
+    add(this.add.rectangle(cx, cy, panelW, panelH, 0x111a22, 1).setScrollFactor(0).setDepth(701).setStrokeStyle(2, 0x536573, 1));
+    add(this.add.rectangle(cx, cy, panelW - 12, panelH - 12, 0x17232c, 1).setScrollFactor(0).setDepth(702).setStrokeStyle(1, 0x293b48, 1));
+    add(this.add.rectangle(cx, top + 70, panelW - 14, 1, 0x425663, 0.9).setScrollFactor(0).setDepth(703));
+    add(this.add.text(left + 22, top + 16, 'FIELD NOTES', {
+      fontFamily: 'monospace', fontSize: compact ? '16px' : '20px', color: '#f0ede4', fontStyle: 'bold', letterSpacing: 2,
+    }).setScrollFactor(0).setDepth(704));
+    add(this.add.text(left + 22, top + 43, 'RECOVERED DOCUMENTS', {
+      fontFamily: 'monospace', fontSize: compact ? '10px' : '11px', color: '#aebbc2', letterSpacing: 1,
+    }).setScrollFactor(0).setDepth(704));
+
+    const floorLabels: Array<[number, string]> = [[4, 'FLOOR 4'], [3, 'FLOOR 3'], [2, 'FLOOR 2'], [1, 'FLOOR 1'], [0, 'FLOOR 13']];
+    const tabY = top + 86;
+    const tabX = left + 14;
+    const tabWidth = (panelW - 28) / floorLabels.length;
+    floorLabels.forEach(([floor, label], index) => {
+      const shortLabel = `BLOCK ${floor === 0 ? '13' : floor}`;
+      const x = tabX + tabWidth * (index + 0.5);
+      const active = floor === this.notebookFloor;
+      const count = this.notebookEntriesForFloor(floor).length;
+      const tab = add(this.add.rectangle(x, tabY, tabWidth - 6, 36, active ? 0x354957 : 0x202d36, 1)
+        .setScrollFactor(0).setDepth(704).setStrokeStyle(1, active ? 0xe29354 : 0x40515c, 1)
+        .setInteractive({ useHandCursor: true }));
+      add(this.add.text(x, tabY - 4, shortLabel, {
+        fontFamily: 'monospace', fontSize: compact ? '9px' : '11px', color: active ? '#f3eee6' : '#b6c0c4', fontStyle: active ? 'bold' : 'normal',
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(705));
+      add(this.add.text(x, tabY + 10, `${count} ${count === 1 ? 'NOTE' : 'NOTES'}`, {
+        fontFamily: 'monospace', fontSize: compact ? '8px' : '9px', color: active ? '#e9a263' : '#81919a',
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(705));
+      tab.on('pointerdown', () => { this.notebookFloor = floor; this.notebookEntryIndex = 0; this.renderNotebook(); });
+    });
+
+    const entries = this.notebookEntriesForFloor(this.notebookFloor);
+    const contentTop = top + 116;
+    const contentBottom = top + panelH - 50;
+    const railX = left + 18, railW = Math.max(138, panelW * 0.31);
+    const detailX = railX + railW + 16, detailW = left + panelW - 18 - detailX;
+    add(this.add.rectangle(railX + railW / 2, (contentTop + contentBottom) / 2, railW, contentBottom - contentTop, 0x0d151c, 1)
+      .setScrollFactor(0).setDepth(703).setStrokeStyle(1, 0x2f414c, 1));
+    add(this.add.text(railX + 14, contentTop + 12, `${this.notebookFloor === 0 ? 'BLOCK 13' : `BLOCK ${this.notebookFloor}`}  ·  ${entries.length} FOUND`, {
+      fontFamily: 'monospace', fontSize: compact ? '9px' : '10px', color: '#bdc7cb', fontStyle: 'bold',
+    }).setScrollFactor(0).setDepth(704));
+    add(this.add.rectangle(railX + railW / 2, contentTop + 34, railW - 20, 1, 0x354751, 1).setScrollFactor(0).setDepth(704));
+    add(this.add.rectangle(detailX + detailW / 2, (contentTop + contentBottom) / 2, detailW, contentBottom - contentTop, 0xd5d9d6, 1)
+      .setScrollFactor(0).setDepth(703).setStrokeStyle(1, 0x71818a, 1));
+    if (entries.length === 0) {
+      add(this.add.text(detailX + 22, contentTop + 28, 'NO DOCUMENTS RECOVERED', {
+        fontFamily: 'monospace', fontSize: compact ? '12px' : '15px', color: '#263139', fontStyle: 'bold',
+      }).setScrollFactor(0).setDepth(704));
+      add(this.add.text(detailX + 22, contentTop + 62, 'Evidence you collect on this block will be filed here.', {
+        fontFamily: 'monospace', fontSize: compact ? '11px' : '13px', color: '#46535a', lineSpacing: 5,
+        wordWrap: { width: detailW - 44, useAdvancedWrap: true },
+      }).setScrollFactor(0).setDepth(704));
+    } else {
+      const rowPitch = compact ? 34 : 42;
+      const visibleLimit = Math.max(1, Math.min(compact ? 5 : 8, Math.floor((contentBottom - contentTop - 64) / rowPitch)));
+      const visibleStart = Math.min(Math.max(0, this.notebookEntryIndex - Math.floor(visibleLimit / 2)), Math.max(0, entries.length - visibleLimit));
+      entries.slice(visibleStart, visibleStart + visibleLimit).forEach((entry, offset) => {
+        const index = visibleStart + offset;
+        const rowY = contentTop + 54 + offset * rowPitch;
+        const selected = index === this.notebookEntryIndex;
+        const row = add(this.add.rectangle(railX + railW / 2, rowY, railW - 20, rowPitch - 3, selected ? 0x2c414e : 0x111c24, 1)
+          .setScrollFactor(0).setDepth(704).setStrokeStyle(1, selected ? 0xe29354 : 0x25353f, 1)
+          .setInteractive({ useHandCursor: true }));
+        add(this.add.text(railX + 20, rowY, `${entry.important ? '◆ ' : '· '}${entry.title}`, {
+          fontFamily: 'monospace', fontSize: compact ? '10px' : '11px', color: selected ? '#f4eee5' : '#b5c0c4',
+          wordWrap: { width: railW - 48, useAdvancedWrap: true }, maxLines: 2,
+        }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(705));
+        row.on('pointerdown', () => { this.notebookEntryIndex = index; this.renderNotebook(); });
+      });
+      const selected = entries[this.notebookEntryIndex] ?? entries[0];
+      add(this.add.text(detailX + 22, contentTop + 20, `DOCUMENT ${String(this.notebookEntryIndex + 1).padStart(2, '0')} / ${String(entries.length).padStart(2, '0')}`, {
+        fontFamily: 'monospace', fontSize: compact ? '9px' : '10px', color: '#53636a', letterSpacing: 1,
+      }).setScrollFactor(0).setDepth(704));
+      add(this.add.text(detailX + 22, contentTop + 48, selected.title, {
+        fontFamily: 'monospace', fontSize: compact ? '13px' : '17px', color: '#17242a', fontStyle: 'bold',
+        wordWrap: { width: detailW - 44, useAdvancedWrap: true },
+      }).setScrollFactor(0).setDepth(704));
+      const dividerY = contentTop + (compact ? 92 : 104);
+      add(this.add.rectangle(detailX + detailW / 2, dividerY, detailW - 44, 1, 0x9aa5a4, 1).setScrollFactor(0).setDepth(704));
+      add(this.add.text(detailX + 22, dividerY + 18, selected.content, {
+        fontFamily: 'monospace', fontSize: compact ? '12px' : '14px', color: '#252f33', lineSpacing: compact ? 4 : 8,
+        wordWrap: { width: detailW - 44, useAdvancedWrap: true },
+      }).setScrollFactor(0).setDepth(704));
+    }
+    add(this.add.text(cx, top + panelH - 24, '← / → BLOCK     ↑ / ↓ NOTE     TAB / SPACE / ESC CLOSE', {
+      fontFamily: 'monospace', fontSize: compact ? '9px' : '11px', color: '#d5dfe2', letterSpacing: 1,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(704).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.closeNotebook()));
+  }
+
+  private closeNotebook() {
+    if (!this.notebookOpen) return;
+    this.notebookOpen = false;
+    this.storyPopupOpen = false;
+    if (this.notebookKeyHandler) this.input.keyboard?.off('keydown', this.notebookKeyHandler);
+    this.notebookKeyHandler = undefined;
+    this.closeStoryPopup = undefined;
+    this.notebookElements.forEach(element => element.destroy());
+    this.notebookElements = [];
+  }
+
   private showOpeningStory() {
     if (this.openingStoryOpen || !this.uiCamera) return;
     this.openingStoryOpen = true;
     this.openingStoryIndex = 0;
 
     const { width, height } = this.cameras.main;
-    const veil = this.add.rectangle(width / 2, height / 2, width, height, 0x030609, 0.96)
-      .setScrollFactor(0).setDepth(500).setInteractive();
-    const timeLabel = this.add.text(width / 2, height / 2 - 74, 'NIGHT SHIFT  //  INCIDENT LOG', {
-      fontFamily: 'monospace', fontSize: '12px', color: '#70817f', letterSpacing: 2,
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(501);
-    const storyText = this.add.text(width / 2, height / 2 - 8, '', {
-      fontFamily: 'monospace', fontSize: '20px', color: '#d9e3df', align: 'center',
-      wordWrap: { width: Math.min(560, width - 64), useAdvancedWrap: true },
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(501);
-    const hint = this.add.text(width / 2, height / 2 + 84, '[SPACE / ENTER] CONTINUE  ·  [ESC] SKIP', {
-      fontFamily: 'monospace', fontSize: '11px', color: '#80918e', letterSpacing: 1,
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(501);
-    this.openingStoryElements = [veil, timeLabel, storyText, hint];
+    const image = this.add.image(width / 2, height / 2, OPENING_CINEMATIC[0].texture)
+      .setDisplaySize(width, height).setScrollFactor(0).setDepth(500).setAlpha(0);
+    const veil = this.add.rectangle(width / 2, height / 2, width, height, 0x030609, 0.16)
+      .setScrollFactor(0).setDepth(501).setInteractive();
+    const timeLabel = this.add.text(width / 2, 34, 'FLOOR 13  //  THE BUILDING THAT NEVER EXISTED', {
+      fontFamily: 'monospace', fontSize: '12px', color: '#d3d5d0', letterSpacing: 2,
+      backgroundColor: '#090b10aa', padding: { x: 10, y: 6 },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(502);
+    const storyText = this.add.text(width / 2, height - 76, '', {
+      fontFamily: 'monospace', fontSize: '20px', color: '#f1eee4', align: 'center',
+      backgroundColor: '#090b10c9', padding: { x: 16, y: 10 },
+      wordWrap: { width: Math.min(620, width - 64), useAdvancedWrap: true },
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(502);
+    const hint = this.add.text(width - 22, height - 22, '[SPACE / ENTER] CONTINUE  ·  [ESC] SKIP', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#d0d0ca', letterSpacing: 1,
+      backgroundColor: '#090b10aa', padding: { x: 8, y: 5 },
+    }).setOrigin(1).setScrollFactor(0).setDepth(502);
+    this.openingStoryImage = image;
+    this.openingStoryElements = [image, veil, timeLabel, storyText, hint];
     this.openingStoryText = storyText;
     this.cameras.main.ignore(this.openingStoryElements);
     veil.on('pointerdown', () => this.advanceOpeningStory());
@@ -939,26 +2192,27 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private renderOpeningStoryLine() {
-    if (!this.openingStoryOpen || !this.openingStoryText) return;
-    this.openingStoryText.setText(OPENING_STORY_LINES[this.openingStoryIndex]);
+    if (!this.openingStoryOpen || !this.openingStoryText || !this.openingStoryImage) return;
+    const scene = OPENING_CINEMATIC[this.openingStoryIndex];
+    this.openingStoryText.setText(scene.caption);
     this.openingStoryTimer?.remove(false);
-    this.openingStoryTimer = this.time.delayedCall(1100, () => this.advanceOpeningStory());
+    this.openingStoryImage.setTexture(scene.texture).setDisplaySize(this.uiCamera.width, this.uiCamera.height).setAlpha(1);
+    this.tweens.killTweensOf(this.openingStoryImage);
+    this.openingStoryTimer = this.time.delayedCall(scene.durationMs, () => this.advanceOpeningStory());
   }
 
   private advanceOpeningStory() {
     if (!this.openingStoryOpen) return;
-    const nextIndex = nextOpeningStoryIndex(this.openingStoryIndex);
-    if (nextIndex < 0) {
+    if (this.openingStoryIndex >= OPENING_CINEMATIC.length - 1) {
       this.closeOpeningStory();
       return;
     }
-    this.openingStoryIndex = nextIndex;
+    this.openingStoryIndex++;
     this.renderOpeningStoryLine();
   }
 
   private skipOpeningStory() {
     if (!this.openingStoryOpen) return;
-    this.openingStoryIndex = nextOpeningStoryIndex(this.openingStoryIndex, true);
     this.closeOpeningStory();
   }
 
@@ -967,14 +2221,20 @@ export class FloorScene extends Phaser.Scene {
     this.openingStoryOpen = false;
     this.openingStoryTimer?.remove(false);
     this.openingStoryTimer = undefined;
+    if (this.openingStoryImage) this.tweens.killTweensOf(this.openingStoryImage);
     this.openingStoryElements.forEach(element => element.destroy());
     this.openingStoryElements = [];
+    this.openingStoryImage = undefined;
     this.openingStoryText = undefined;
     this.registry.set('openingStorySeen', true);
   }
 
   private showPauseMenu() {
     this.isPaused = true;
+    this.clearFinalChaseAmbience();
+    this.audioDirector?.pausePresentation();
+    this.clearAmbusherJumpscare();
+    this.clearHauntingPresentation();
 
     // Pause the scene's simulation update and input capture.
 
@@ -995,7 +2255,7 @@ export class FloorScene extends Phaser.Scene {
       this.cameras.main.width / 2,
       this.cameras.main.height / 2,
       menuWidth,
-      menuHeight,
+      menuHeight + 54,
       0x1a1a1a,
       1
     ).setScrollFactor(0).setDepth(301);
@@ -1005,13 +2265,13 @@ export class FloorScene extends Phaser.Scene {
       this.cameras.main.width / 2,
       this.cameras.main.height / 2,
       menuWidth,
-      menuHeight
+      menuHeight + 54
     ).setScrollFactor(0).setDepth(301).setStrokeStyle(2, 0x70d4c6, 1);
 
     // Pause title
     const title = this.add.text(
       this.cameras.main.width / 2,
-      this.cameras.main.height / 2 - 100,
+      this.cameras.main.height / 2 - 125,
       'PAUSED',
       {
         fontFamily: 'monospace',
@@ -1024,7 +2284,7 @@ export class FloorScene extends Phaser.Scene {
     // Resume button
     const resumeButton = this.add.text(
       this.cameras.main.width / 2,
-      this.cameras.main.height / 2 - 20,
+      this.cameras.main.height / 2 - 58,
       'RESUME',
       {
         fontFamily: 'monospace',
@@ -1035,10 +2295,17 @@ export class FloorScene extends Phaser.Scene {
       }
     ).setOrigin(0.5).setScrollFactor(0).setDepth(302).setInteractive();
 
+    const settingsButton = this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2,
+      'AUDIO SETTINGS',
+      { fontFamily: 'monospace', fontSize: '17px', color: '#d9f3ea', backgroundColor: '#2a2a2a', padding: { x: 16, y: 8 } },
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(302).setInteractive();
+
     // Main menu button
     const mainMenuButton = this.add.text(
       this.cameras.main.width / 2,
-      this.cameras.main.height / 2 + 40,
+      this.cameras.main.height / 2 + 54,
       'MAIN MENU',
       {
         fontFamily: 'monospace',
@@ -1052,7 +2319,7 @@ export class FloorScene extends Phaser.Scene {
     // Instructions
     const instructions = this.add.text(
       this.cameras.main.width / 2,
-      this.cameras.main.height / 2 + 110,
+      this.cameras.main.height / 2 + 125,
       '[ESC] RESUME  ·  [TAB/↑/↓] SELECT  ·  [ENTER] CONFIRM',
       {
         fontFamily: 'monospace',
@@ -1061,8 +2328,8 @@ export class FloorScene extends Phaser.Scene {
       }
     ).setOrigin(0.5).setScrollFactor(0).setDepth(302);
 
-    const pauseElements = [overlay, menu, border, title, resumeButton, mainMenuButton, instructions];
-    const pauseActions = [resumeButton, mainMenuButton];
+    const pauseElements = [overlay, menu, border, title, resumeButton, settingsButton, mainMenuButton, instructions];
+    const pauseActions = [resumeButton, settingsButton, mainMenuButton];
     let selectedAction = 0;
     const showSelectedAction = () => pauseActions.forEach((button, index) => {
       const selected = index === selectedAction;
@@ -1079,8 +2346,15 @@ export class FloorScene extends Phaser.Scene {
       showSelectedAction();
     });
 
-    mainMenuButton.on('pointerover', () => {
+    settingsButton.on('pointerover', () => {
       selectedAction = 1;
+      showSelectedAction();
+    });
+    settingsButton.on('pointerout', showSelectedAction);
+    settingsButton.on('pointerdown', () => window.dispatchEvent(new Event('block13:open-audio-settings')));
+
+    mainMenuButton.on('pointerover', () => {
+      selectedAction = 2;
       showSelectedAction();
     });
     mainMenuButton.on('pointerout', () => {
@@ -1090,6 +2364,10 @@ export class FloorScene extends Phaser.Scene {
     // Close pause menu handler
     const closePauseMenu = () => {
       this.isPaused = false;
+      this.audioDirector?.resumePresentation();
+      const state = this.authoritativeSimulation.state;
+      this.setFinalChaseAmbience(isBlock13Floor(state.floor) && state.hasKey && state.stalker.state === 'hunting',
+        this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false);
       pauseElements.forEach(el => el.destroy());
       this.pauseKey.off('down', escHandler);
       this.input.keyboard?.off('keydown', pauseKeyboardHandler);
@@ -1136,7 +2414,8 @@ export class FloorScene extends Phaser.Scene {
       ? playerBlockName(this.runState.floor)
       : `${playerBlockName(this.runState.floor)}/${START_FLOOR}`;
     const simulationState = this.authoritativeSimulation.state;
-    this.block13ObjectiveStatus = objectiveCopy(simulationState.floor, simulationState.hasKey, simulationState.stalker.state === 'hunting');
+    const objectiveProgress = this.floorData.objectives.searchableIndices.filter(index => simulationState.searched[index]).length;
+    this.block13ObjectiveStatus = objectiveCopy(simulationState.floor, simulationState.hasKey, simulationState.stalker.state === 'hunting', simulationState.objectiveComplete, objectiveProgress, this.floorData.objectives.searchableIndices.length);
 
     const lines = [
       floorDisplay,
@@ -1147,7 +2426,6 @@ export class FloorScene extends Phaser.Scene {
       `SCORE: ${this.runState.score}`,
       `LIGHT: ${flashStatus}`,
       ...hudWarningCopy({ hp: simulationState.hp, battery: simulationState.battery / FIXED_SCALE, curse: simulationState.curse / FIXED_SCALE }),
-      ...hudWarningCopy({ hp: this.authoritativeSimulation.state.hp, battery: this.authoritativeSimulation.state.battery / FIXED_SCALE, curse: this.authoritativeSimulation.state.curse / FIXED_SCALE }),
     ];
     this.statusText.setText(lines.join('\n'));
 
@@ -1209,6 +2487,629 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private drawFloor(tiles: boolean[][]) {
+    if (isBlock13Floor(this.authoritativeSimulation.state.floor) && this.drawAuthoredBlock13Floor(tiles)) return;
+    if (!isBlock13Floor(this.authoritativeSimulation.state.floor) && this.drawAuthoredOrdinaryFloor(tiles)) return;
+    this.drawProceduralFloor(tiles);
+  }
+
+  /** Composes authored ordinary-floor art into one static texture beneath lighting. */
+  private drawAuthoredOrdinaryFloor(tiles: boolean[][]): boolean {
+    const floor = this.authoritativeSimulation.state.floor;
+    if (floor < 1 || floor > 4) return false;
+    const mapWidth = this.floorData.width * this.tileSize;
+    const mapHeight = this.floorData.height * this.tileSize;
+    const profile = floorVisualProfile(floor);
+    const sources = new Map<OrdinaryEnvironmentAssetName, CanvasImageSource>();
+    for (const name of Object.keys(ORDINARY_ENVIRONMENT_ASSET_MANIFEST) as OrdinaryEnvironmentAssetName[]) {
+      const source = this.getOrdinaryEnvironmentAssetSource(name);
+      if (source) sources.set(name, source);
+    }
+    const useRefinedBlock3 = import.meta.env.DEV && floor === 3 && this.block3VisualMode === 'refined';
+    const experimentSources = new Map<Block3ExperimentTextureKey, CanvasImageSource>();
+    if (useRefinedBlock3) {
+      for (const { key } of BLOCK3_REFINED_EXPERIMENT_ASSETS) {
+        const source = this.getBlock3ExperimentAssetSource(key);
+        if (source) experimentSources.set(key, source);
+      }
+      for (const name of Object.keys(ORDINARY_ENVIRONMENT_ASSET_MANIFEST) as OrdinaryEnvironmentAssetName[]) {
+        const key = block3ExperimentTextureForAsset(name);
+        if (!key) continue;
+        const source = this.getBlock3ExperimentAssetSource(key);
+        if (!source) return false;
+        sources.set(name, source);
+      }
+    }
+    if (!sources.has('floor_base') || !sources.has('wall_base')) return false;
+
+    const textureKey = 'ordinary_composed_environment';
+    // Reuse the existing canvas texture and image when F8 rebuilds Block 3.
+    // This preserves the image's camera filters and display-list slot while
+    // replacing only the static surface pixels.
+    const composed = (this.textures.exists(textureKey)
+      ? this.textures.get(textureKey)
+      : this.textures.createCanvas(textureKey, mapWidth, mapHeight)) as Phaser.Textures.CanvasTexture | null;
+    if (!composed) return false;
+    const context = composed.getContext();
+    context.imageSmoothingEnabled = false;
+    context.clearRect(0, 0, mapWidth, mapHeight);
+
+    const importantTiles = new Set<string>([
+      `${this.floorData.start[0]},${this.floorData.start[1]}`,
+      `${this.floorData.key[0]},${this.floorData.key[1]}`,
+      `${this.floorData.exit[0]},${this.floorData.exit[1]}`,
+      ...this.floorData.searchables.map(item => `${item.x},${item.y}`),
+    ]);
+    const doorTiles = new Set(this.floorData.doors.map(([x, y]) => `${x},${y}`));
+    const protectedTiles = new Set([...importantTiles, ...doorTiles]);
+    const surfaceAssets = ordinarySurfaceAssetsForMap(floor, tiles, protectedTiles);
+    const authoredOverlayAssets = ordinaryOverlayAssetsForMap(floor, tiles, protectedTiles);
+
+    for (let y = 0; y < tiles.length; y++) {
+      for (let x = 0; x < tiles[y].length; x++) {
+        const walkable = tiles[y][x];
+        const requested = surfaceAssets[y][x] ?? ordinarySurfaceAssetAt(floor, x, y, walkable)!;
+        const resolved = resolveOrdinarySurfaceAsset(requested, name => sources.has(name));
+        const nextToWall = walkable && [tiles[y - 1]?.[x], tiles[y]?.[x + 1], tiles[y + 1]?.[x], tiles[y]?.[x - 1]].some(value => value === false);
+        const refinedSurface = useRefinedBlock3
+          ? experimentSources.get(block3SurfaceTextureAt(x, y, walkable, nextToWall, protectedTiles.has(`${x},${y}`)))
+          : undefined;
+        const px = x * this.tileSize;
+        const py = y * this.tileSize;
+        if (refinedSurface || resolved) {
+          context.drawImage(refinedSurface ?? sources.get(resolved!)!, px, py, this.tileSize, this.tileSize);
+          this.applySurfaceColorGrade(context, floor, x, y, walkable);
+        } else {
+          context.fillStyle = `#${(walkable ? profile.floorBase : profile.wallBase).toString(16).padStart(6, '0')}`;
+          context.fillRect(px, py, this.tileSize, this.tileSize);
+          context.strokeStyle = `#${profile.grid.toString(16).padStart(6, '0')}`;
+          context.globalAlpha = walkable ? 0.18 : 0.54;
+          context.strokeRect(px + 0.5, py + 0.5, this.tileSize - 1, this.tileSize - 1);
+          context.globalAlpha = 1;
+        }
+      }
+    }
+
+    // Edges are composed from existing occupancy only; no tile data is changed.
+    const wallEdge = sources.get('wall_edge');
+    if (wallEdge) {
+      for (let y = 0; y < tiles.length; y++) {
+        for (let x = 0; x < tiles[y].length; x++) {
+          if (tiles[y][x]) continue;
+          const rotations = block13WallEdgeRotations({
+            up: Boolean(tiles[y - 1]?.[x]),
+            right: Boolean(tiles[y]?.[x + 1]),
+            down: Boolean(tiles[y + 1]?.[x]),
+            left: Boolean(tiles[y]?.[x - 1]),
+          });
+          for (const rotation of rotations) {
+            context.save();
+            context.translate(x * this.tileSize + 16, y * this.tileSize + 16);
+            context.rotate(rotation);
+            context.drawImage(wallEdge, -16, -16, 32, 32);
+            context.restore();
+          }
+        }
+      }
+    }
+
+    // Existing coordinate-derived marks choose their authored block-specific replacement.
+    const authoredOverlayTiles = new Set<string>();
+    const authoredReplacementTiles = new Set<string>();
+    if (!useRefinedBlock3) for (let y = 0; y < tiles.length; y++) {
+      for (let x = 0; x < tiles[y].length; x++) {
+        const id = `${x},${y}`;
+        const requestedAsset = authoredOverlayAssets[y][x];
+        const asset = requestedAsset ? resolveOrdinaryOverlayAsset(requestedAsset, name => sources.has(name)) : null;
+        const source = asset ? sources.get(asset) : undefined;
+        if (!asset || !source) continue;
+        authoredReplacementTiles.add(id);
+        if (!ordinaryOverlayPlacementAllowed(asset, importantTiles.has(id), doorTiles.has(id))) continue;
+        const dimensions = ORDINARY_ENVIRONMENT_ASSET_MANIFEST[asset].width;
+        const height = ORDINARY_ENVIRONMENT_ASSET_MANIFEST[asset].height;
+        context.drawImage(source,
+          x * this.tileSize + (this.tileSize - dimensions) / 2,
+          y * this.tileSize + (this.tileSize - height) / 2,
+          dimensions,
+          height,
+        );
+        authoredOverlayTiles.add(id);
+      }
+    }
+
+    // Retain coordinate-derived dressing that does not duplicate an authored mark.
+    for (let y = 0; y < tiles.length; y++) {
+      for (let x = 0; x < tiles[y].length; x++) {
+        const id = `${x},${y}`;
+        const dressing = useRefinedBlock3 ? 'none' : tileDressingAt(floor, x, y, tiles[y][x]);
+        const overlayDrawn = authoredOverlayTiles.has(id);
+        const dressingConflicts = overlayDrawn && (
+          (floor === 3 && dressing === 'crack')
+          || (floor === 2 && dressing === 'warning')
+          || (floor === 1 && (dressing === 'crack' || dressing === 'corruption'
+            || (authoredOverlayTiles.has(id) && authoredOverlayAssets[y][x] === 'damaged_floor_panel_01' && dressing !== 'none')))
+        );
+        if (!dressingConflicts) this.drawTileDressingOnCanvas(context, dressing, x, y, tiles[y][x], profile);
+        if (!useRefinedBlock3 && !authoredReplacementTiles.has(id) && !protectedTiles.has(id)) {
+          this.drawArchitecturalMarkOnCanvas(context, architecturalMarkAt(floor, x, y, tiles[y][x]), x, y, profile);
+        }
+      }
+    }
+
+    // Small wall-mounted details stay in the static map layer, beneath actors
+    // and the existing runtime lighting composition.
+    const decorations = ordinaryMapDecorationPlacements(floor, tiles, this.floorData.doors, importantTiles);
+    const propPlacement = useRefinedBlock3 ? decorations.find(item => item.asset === 'wall_lamp_01') : undefined;
+    const decorativeProp = useRefinedBlock3 ? this.getBlock3ExperimentAssetSource('dev_b3_decorative_prop') : null;
+    const roomNoticeTile = useRefinedBlock3 ? block3RoomNoticeTile(tiles, this.floorData.doors, protectedTiles) : null;
+    for (const { asset, x, y } of decorations) {
+      if (decorativeProp && propPlacement?.x === x && propPlacement.y === y) continue;
+      if (roomNoticeTile?.[0] === x && roomNoticeTile[1] === y) {
+        const notice = experimentSources.get('dev_b3_room_notice');
+        if (notice) context.drawImage(notice, x * this.tileSize, y * this.tileSize, 32, 32);
+        continue;
+      }
+      const source = sources.get(asset);
+      if (!source) continue;
+      const experimentalKey = useRefinedBlock3 ? block3ExperimentTextureForAsset(asset) : null;
+      const experimentalSize = experimentalKey && BLOCK3_REFINED_EXPERIMENT_ASSETS.find(item => item.key === experimentalKey);
+      const { width, height } = experimentalSize ?? ORDINARY_ENVIRONMENT_ASSET_MANIFEST[asset];
+      context.drawImage(source,
+        x * this.tileSize + (this.tileSize - width) / 2,
+        y * this.tileSize + (this.tileSize - height) / 2,
+        width,
+        height,
+      );
+    }
+    if (roomNoticeTile && !decorations.some(item => item.x === roomNoticeTile[0] && item.y === roomNoticeTile[1])) {
+      const notice = experimentSources.get('dev_b3_room_notice');
+      if (notice) context.drawImage(notice, roomNoticeTile[0] * this.tileSize, roomNoticeTile[1] * this.tileSize, 32, 32);
+    }
+    if (decorativeProp && propPlacement) {
+      // One stable wall-mounted prop; its lower edge aligns to the wall tile.
+      context.drawImage(decorativeProp,
+        propPlacement.x * this.tileSize,
+        propPlacement.y * this.tileSize - 16,
+        this.tileSize,
+        48,
+      );
+    }
+
+    // These coordinates already represent open passages in Floor.doors.
+    const threshold = sources.get('threshold');
+    for (const [x, y] of this.floorData.doors) {
+      if (!tiles[y]?.[x]) continue;
+      const horizontal = Boolean(tiles[y]?.[x - 1] && tiles[y]?.[x + 1]);
+      const vertical = Boolean(tiles[y - 1]?.[x] && tiles[y + 1]?.[x]);
+      if (horizontal === vertical) continue;
+      const centerX = x * this.tileSize + 16;
+      const centerY = y * this.tileSize + 16;
+      if (threshold) {
+        context.save();
+        context.translate(centerX, centerY);
+        if (!horizontal) context.rotate(Math.PI / 2);
+        context.drawImage(threshold, -16, -16, 32, 32);
+        this.drawOrdinaryThresholdMark(context, floor);
+        context.restore();
+      } else {
+        context.fillStyle = `#${profile.accent.toString(16).padStart(6, '0')}`;
+        context.globalAlpha = 0.48;
+        if (horizontal) {
+          context.fillRect(x * this.tileSize + 13, y * this.tileSize + 3, 6, 2);
+          context.fillRect(x * this.tileSize + 13, y * this.tileSize + 27, 6, 2);
+        } else {
+          context.fillRect(x * this.tileSize + 3, y * this.tileSize + 13, 2, 6);
+          context.fillRect(x * this.tileSize + 27, y * this.tileSize + 13, 2, 6);
+        }
+        context.globalAlpha = 1;
+      }
+    }
+
+    composed.refresh();
+    composed.setFilter(Phaser.Textures.FilterMode.NEAREST);
+    if (!this.ordinaryEnvironmentImage?.active) {
+      this.ordinaryEnvironmentImage = this.add.image(0, 0, textureKey).setOrigin(0).setDepth(0);
+    }
+    // Initial floor composition runs before uiCamera is created. Reassert this
+    // filter after every rebuild so a hot-switched world layer never leaks into
+    // the fixed HUD camera.
+    this.uiCamera?.ignore(this.ordinaryEnvironmentImage);
+    return true;
+  }
+
+  private isDevelopmentBlock3VisualComparisonAvailable(): boolean {
+    return import.meta.env.DEV
+      && this.authoritativeSimulation?.state.floor === 3
+      && BLOCK3_REFINED_EXPERIMENT_ASSETS.every(asset => this.textures.exists(asset.key));
+  }
+
+  private bindDevelopmentBlock3VisualToggle() {
+    if (!this.isDevelopmentBlock3VisualComparisonAvailable()) return;
+    this.block3VisualKeyHandler = event => {
+      if (event.repeat || event.code !== 'F8') return;
+      this.block3VisualMode = nextBlock3VisualMode(this.block3VisualMode);
+      // Recompose only the floor's static background texture. No simulation,
+      // RNG, input-log, player, camera, or interactable state is touched here.
+      this.drawFloor(this.floorData.tiles);
+      this.controlsHint?.setText([
+        'WASD / ARROWS - MOVE', 'F - FLASHLIGHT', 'E - INTERACT', 'ESC - PAUSE',
+        `F8 - BLOCK 3 ART: ${block3VisualModeLabel(this.block3VisualMode)}`,
+      ].join('\n'));
+    };
+    this.input.keyboard?.on('keydown', this.block3VisualKeyHandler);
+  }
+
+  private getBlock3ExperimentAssetSource(key: Block3ExperimentTextureKey): CanvasImageSource | null {
+    if (!this.textures.exists(key)) return null;
+    const metadata = BLOCK3_REFINED_EXPERIMENT_ASSETS.find(asset => asset.key === key);
+    if (!metadata) return null;
+    const texture = this.textures.get(key);
+    texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+    const source = texture.getSourceImage() as CanvasImageSource & { width?: number; height?: number; naturalWidth?: number; naturalHeight?: number };
+    const width = source.naturalWidth || source.width;
+    const height = source.naturalHeight || source.height;
+    return width === metadata.width && height === metadata.height ? source : null;
+  }
+
+  /** Small floor-specific paint on valid passage tiles; art only, never geometry. */
+  private drawOrdinaryThresholdMark(context: CanvasRenderingContext2D, floor: number) {
+    const treatment = ordinaryThresholdTreatment(floor);
+    if (!treatment) return;
+    context.save();
+    context.fillStyle = `#${treatment.color.toString(16).padStart(6, '0')}`;
+    context.strokeStyle = context.fillStyle;
+    context.globalAlpha = treatment.alpha;
+    switch (treatment.style) {
+      case 'orderly':
+        context.fillRect(-10, -10, 20, 1);
+        context.fillRect(-10, 9, 20, 1);
+        break;
+      case 'worn':
+        context.fillRect(-9, -10, 7, 1);
+        context.fillRect(3, -10, 5, 1);
+        context.fillRect(-6, 9, 12, 1);
+        break;
+      case 'hazard':
+        for (const x of [-9, -3, 3, 9]) {
+          context.fillRect(x - 1, -11, 2, 3);
+          context.fillRect(x - 1, 8, 2, 3);
+        }
+        break;
+      case 'fracture':
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(-9, -10);
+        context.lineTo(-3, -6);
+        context.lineTo(-5, 0);
+        context.lineTo(2, 4);
+        context.lineTo(0, 10);
+        context.stroke();
+        break;
+      default:
+        break;
+    }
+    context.restore();
+  }
+
+  private getOrdinaryEnvironmentAssetSource(name: OrdinaryEnvironmentAssetName): CanvasImageSource | null {
+    const asset = ORDINARY_ENVIRONMENT_ASSET_MANIFEST[name];
+    if (!this.textures.exists(asset.key)) return null;
+    const texture = this.textures.get(asset.key);
+    texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+    const source = texture.getSourceImage() as CanvasImageSource & { width?: number; height?: number; naturalWidth?: number; naturalHeight?: number };
+    const width = source.naturalWidth || source.width;
+    const height = source.naturalHeight || source.height;
+    return width === asset.width && height === asset.height ? source : null;
+  }
+
+  /** Apply a restrained floor-identity hue to material pixels without changing luminance. */
+  private applySurfaceColorGrade(context: CanvasRenderingContext2D, floor: number, tileX: number, tileY: number, walkable: boolean) {
+    const grade = surfaceColorGrade(floor, walkable);
+    context.save();
+    context.globalCompositeOperation = 'color';
+    context.globalAlpha = grade.alpha;
+    context.fillStyle = `#${grade.tint.toString(16).padStart(6, '0')}`;
+    context.fillRect(tileX * this.tileSize, tileY * this.tileSize, this.tileSize, this.tileSize);
+    context.restore();
+  }
+
+  private drawTileDressingOnCanvas(
+    context: CanvasRenderingContext2D,
+    dressing: ReturnType<typeof tileDressingAt>,
+    tileX: number,
+    tileY: number,
+    walkable: boolean,
+    profile: ReturnType<typeof floorVisualProfile>,
+  ) {
+    const x = tileX * this.tileSize, y = tileY * this.tileSize;
+    const color = (value: number) => `#${value.toString(16).padStart(6, '0')}`;
+    switch (dressing) {
+      case 'stain':
+        context.fillStyle = color(profile.stain);
+        context.globalAlpha = 0.72;
+        context.beginPath();
+        context.ellipse(x + 15 + ((tileX * 7 + tileY * 3) % 7), y + 15 + ((tileX * 2 + tileY * 5) % 7), 8.5, 4.5, 0, 0, Math.PI * 2);
+        context.fill();
+        context.globalAlpha = 1;
+        break;
+      case 'crack':
+        context.strokeStyle = color(profile.grime);
+        context.globalAlpha = walkable ? 0.62 : 0.72;
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(x + 6, y + 8);
+        context.lineTo(x + 13, y + 14);
+        context.lineTo(x + 10, y + 22);
+        context.moveTo(x + 13, y + 14);
+        context.lineTo(x + 22, y + 18);
+        context.stroke();
+        context.globalAlpha = 1;
+        break;
+      case 'pipe':
+        context.strokeStyle = color(profile.grime);
+        context.globalAlpha = 0.72;
+        context.lineWidth = 3;
+        context.beginPath();
+        context.moveTo(x + 5, y + 4);
+        context.lineTo(x + 5, y + 28);
+        context.stroke();
+        context.strokeStyle = color(profile.accent);
+        context.globalAlpha = 0.25;
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(x + 8, y + 4);
+        context.lineTo(x + 8, y + 28);
+        context.stroke();
+        context.globalAlpha = 1;
+        break;
+      case 'warning':
+        context.fillStyle = color(profile.accent);
+        context.globalAlpha = 0.48;
+        context.fillRect(x + 5, y + 6, 20, 3);
+        context.fillRect(x + 5, y + 23, 20, 3);
+        context.globalAlpha = 1;
+        break;
+      case 'corruption':
+        context.strokeStyle = color(profile.corruption);
+        context.globalAlpha = 0.64;
+        context.lineWidth = 2;
+        context.beginPath();
+        context.moveTo(x + 4, y + 7);
+        context.lineTo(x + 13, y + 12);
+        context.lineTo(x + 9, y + 20);
+        context.lineTo(x + 27, y + 25);
+        context.stroke();
+        context.fillStyle = color(profile.corruption);
+        context.globalAlpha = 0.28;
+        context.beginPath();
+        context.arc(x + 22, y + 9, 2, 0, Math.PI * 2);
+        context.fill();
+        context.globalAlpha = 1;
+        break;
+      case 'none':
+        break;
+    }
+  }
+
+  private drawArchitecturalMarkOnCanvas(
+    context: CanvasRenderingContext2D,
+    mark: ReturnType<typeof architecturalMarkAt>,
+    tileX: number,
+    tileY: number,
+    profile: ReturnType<typeof floorVisualProfile>,
+  ) {
+    const x = tileX * this.tileSize, y = tileY * this.tileSize;
+    const color = (value: number) => `#${value.toString(16).padStart(6, '0')}`;
+    switch (mark) {
+      case 'orderly_seam':
+        context.fillStyle = color(profile.grid);
+        context.globalAlpha = 0.52;
+        context.fillRect(x + 4, y + 27, 24, 1);
+        break;
+      case 'clean_wall':
+        context.fillStyle = color(profile.accent);
+        context.globalAlpha = 0.2;
+        context.fillRect(x + 4, y + 3, 24, 1);
+        context.fillStyle = '#080b10';
+        context.globalAlpha = 0.22;
+        context.fillRect(x + 4, y + 28, 24, 2);
+        break;
+      case 'peel':
+        context.fillStyle = color(profile.grime);
+        context.globalAlpha = 0.78;
+        context.fillRect(x + 6, y + 7, 12, 2);
+        context.fillRect(x + 8, y + 9, 8, 2);
+        context.fillRect(x + 20, y + 18, 5, 2);
+        context.fillStyle = color(profile.accent);
+        context.globalAlpha = 0.2;
+        context.fillRect(x + 6, y + 6, 10, 1);
+        break;
+      case 'warning_repeat':
+        context.fillStyle = color(profile.accent);
+        context.globalAlpha = 0.68;
+        context.fillRect(x + 6, y + 8, 3, 12);
+        context.fillRect(x + 14, y + 8, 3, 12);
+        context.fillRect(x + 22, y + 8, 3, 12);
+        context.fillStyle = color(profile.wallBase);
+        context.globalAlpha = 0.8;
+        context.fillRect(x + 6, y + 11, 3, 3);
+        context.fillRect(x + 14, y + 15, 3, 3);
+        context.fillRect(x + 22, y + 11, 3, 3);
+        break;
+      case 'fracture':
+        context.fillStyle = color(profile.corruption);
+        context.globalAlpha = 0.68;
+        context.fillRect(x + 14, y + 3, 2, 6);
+        context.fillRect(x + 10, y + 9, 6, 2);
+        context.fillRect(x + 10, y + 11, 2, 7);
+        context.fillRect(x + 10, y + 17, 9, 2);
+        context.fillRect(x + 17, y + 17, 2, 9);
+        context.fillRect(x + 17, y + 24, 8, 2);
+        break;
+      default:
+        break;
+    }
+    context.globalAlpha = 1;
+  }
+
+  /** Block 13 art composites to a single static texture; tile/object state stays simulation-owned. */
+  private drawAuthoredBlock13Floor(tiles: boolean[][]): boolean {
+    const floorBase = this.getBlock13AssetSource('floor_base');
+    const wallBase = this.getBlock13AssetSource('wall_base');
+    if (!floorBase || !wallBase) return false;
+
+    if (this.textures.exists(BLOCK13_MAP_TEXTURE_KEY)) this.textures.remove(BLOCK13_MAP_TEXTURE_KEY);
+    const mapWidth = this.floorData.width * this.tileSize;
+    const mapHeight = this.floorData.height * this.tileSize;
+    const composed = this.textures.createCanvas(BLOCK13_MAP_TEXTURE_KEY, mapWidth, mapHeight);
+    if (!composed) return false;
+
+    const context = composed.getContext();
+    context.imageSmoothingEnabled = false;
+    context.clearRect(0, 0, mapWidth, mapHeight);
+
+    const sources = new Map<string, CanvasImageSource>();
+    for (const name of Object.keys(BLOCK13_ASSET_MANIFEST) as (keyof typeof BLOCK13_ASSET_MANIFEST)[]) {
+      const source = this.getBlock13AssetSource(name);
+      if (source) sources.set(name, source);
+    }
+
+    const drawAsset = (name: string, centerX: number, centerY: number, rotation = 0): boolean => {
+      const source = sources.get(name);
+      if (!source) return false;
+      const asset = BLOCK13_ASSET_MANIFEST[name as keyof typeof BLOCK13_ASSET_MANIFEST];
+      const width = asset?.width ?? this.tileSize;
+      const height = asset?.height ?? this.tileSize;
+      context.save();
+      if (rotation !== 0) {
+        context.translate(centerX, centerY);
+        context.rotate(rotation);
+        context.drawImage(source, -width / 2, -height / 2, width, height);
+      } else {
+        context.drawImage(source, centerX - width / 2, centerY - height / 2, width, height);
+      }
+      context.restore();
+      return true;
+    };
+
+    const profile = floorVisualProfile(0);
+    const importantTiles = new Set<string>([
+      `${this.floorData.start[0]},${this.floorData.start[1]}`,
+      `${this.floorData.key[0]},${this.floorData.key[1]}`,
+      `${this.floorData.exit[0]},${this.floorData.exit[1]}`,
+      ...this.floorData.searchables.map(item => `${item.x},${item.y}`),
+    ]);
+    const hub = this.floorData.block13Hub;
+
+    for (let y = 0; y < tiles.length; y++) {
+      for (let x = 0; x < tiles[y].length; x++) {
+        const walkable = tiles[y][x];
+        const centerX = x * this.tileSize + this.tileSize / 2;
+        const centerY = y * this.tileSize + this.tileSize / 2;
+        const tileAsset = block13SurfaceAssetAt(0, x, y, walkable);
+        const didDrawBase = tileAsset ? drawAsset(tileAsset, centerX, centerY) : false;
+        if (didDrawBase) this.applySurfaceColorGrade(context, 0, x, y, walkable);
+        if (!didDrawBase) {
+          context.fillStyle = `#${(walkable ? profile.floorBase : profile.wallBase).toString(16).padStart(6, '0')}`;
+          context.fillRect(x * this.tileSize, y * this.tileSize, this.tileSize, this.tileSize);
+          context.strokeStyle = `#${profile.grid.toString(16).padStart(6, '0')}`;
+          context.globalAlpha = walkable ? 0.18 : 0.54;
+          context.strokeRect(x * this.tileSize + 0.5, y * this.tileSize + 0.5, this.tileSize - 1, this.tileSize - 1);
+          context.globalAlpha = 1;
+        }
+
+        if (walkable) continue;
+        const edgeRotations = block13WallEdgeRotations({
+          up: Boolean(tiles[y - 1]?.[x]),
+          right: Boolean(tiles[y]?.[x + 1]),
+          down: Boolean(tiles[y + 1]?.[x]),
+          left: Boolean(tiles[y]?.[x - 1]),
+        });
+        for (const rotation of edgeRotations) drawAsset('wall_edge', centerX, centerY, rotation);
+      }
+    }
+
+    // Sparse authored fractures and impossible seams are coordinate-derived and stay off objectives.
+    for (let y = 0; y < tiles.length; y++) {
+      for (let x = 0; x < tiles[y].length; x++) {
+        const walkable = tiles[y][x];
+        const asset = block13OverlayAssetAt(0, x, y, walkable);
+        if (!asset) continue;
+        if (asset === 'corruption_overlay') {
+          if (importantTiles.has(`${x},${y}`)) continue;
+          if (hub && Math.abs(x - hub[0]) <= 2 && Math.abs(y - hub[1]) <= 2) continue;
+        }
+        drawAsset(asset, x * this.tileSize + this.tileSize / 2, y * this.tileSize + this.tileSize / 2);
+      }
+    }
+
+    // Thresholds decorate only the existing passage coordinates and remain visibly open.
+    for (const [x, y] of this.floorData.doors) {
+      if (!tiles[y]?.[x]) continue;
+      const horizontal = Boolean(tiles[y]?.[x - 1] && tiles[y]?.[x + 1]);
+      const vertical = Boolean(tiles[y - 1]?.[x] && tiles[y + 1]?.[x]);
+      if (horizontal === vertical) continue;
+      const centerX = x * this.tileSize + 16;
+      const centerY = y * this.tileSize + 16;
+      if (!drawAsset('threshold', centerX, centerY, horizontal ? 0 : Math.PI / 2)) {
+        context.fillStyle = `#${profile.accent.toString(16).padStart(6, '0')}`;
+        context.globalAlpha = 0.48;
+        if (horizontal) {
+          context.fillRect(x * this.tileSize + 13, y * this.tileSize + 3, 6, 2);
+          context.fillRect(x * this.tileSize + 13, y * this.tileSize + 27, 6, 2);
+        } else {
+          context.fillRect(x * this.tileSize + 3, y * this.tileSize + 13, 2, 6);
+          context.fillRect(x * this.tileSize + 27, y * this.tileSize + 13, 2, 6);
+        }
+        context.globalAlpha = 1;
+      }
+      if (block13HasOffsetThreshold(x, y)) {
+        drawAsset('threshold_offset_echo', centerX, centerY, horizontal ? 0 : Math.PI / 2);
+      }
+    }
+
+    // A larger, interrupted frame echoes only the real final exit coordinate.
+    // Its transparent center leaves the existing stairs and floor readable.
+    drawAsset('exit_echo_frame', this.floorData.exit[0] * this.tileSize + 16, this.floorData.exit[1] * this.tileSize + 16);
+
+    if (hub) {
+      const hubX = hub[0] * this.tileSize + 16;
+      const hubY = hub[1] * this.tileSize + 16;
+      if (!drawAsset('hub_medallion', hubX, hubY)) {
+        const fallback = this.add.graphics().setDepth(1);
+        this.drawBlock13Landmarks(fallback, hub);
+      }
+      for (const placement of block13HubRingPlacements()) {
+        drawAsset(placement.asset, hubX + placement.xOffset, hubY + placement.yOffset, placement.rotation);
+      }
+
+      const branches = block13BranchPlacements(hub, [this.floorData.start, this.floorData.key, this.floorData.exit]);
+      const placed = new Set<string>();
+      for (const branch of branches) {
+        const id = `${branch.x},${branch.y}`;
+        if (placed.has(id) || !tiles[branch.y]?.[branch.x] || importantTiles.has(id)) continue;
+        placed.add(id);
+        drawAsset(branch.asset, branch.x * this.tileSize + 16, branch.y * this.tileSize + 16, branch.rotation);
+      }
+    }
+
+    composed.refresh();
+    composed.setFilter(Phaser.Textures.FilterMode.NEAREST);
+    this.add.image(0, 0, BLOCK13_MAP_TEXTURE_KEY).setOrigin(0).setDepth(0);
+    return true;
+  }
+
+  private getBlock13AssetSource(name: keyof typeof BLOCK13_ASSET_MANIFEST): CanvasImageSource | null {
+    const asset = BLOCK13_ASSET_MANIFEST[name];
+    if (!this.textures.exists(asset.key)) return null;
+    const texture = this.textures.get(asset.key);
+    texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+    const source = texture.getSourceImage() as CanvasImageSource & { width?: number; height?: number; naturalWidth?: number; naturalHeight?: number };
+    const width = source.naturalWidth || source.width;
+    const height = source.naturalHeight || source.height;
+    return width === asset.width && height === asset.height ? source : null;
+  }
+
+  private drawProceduralFloor(tiles: boolean[][]) {
     const graphics = this.add.graphics();
     const floor = this.authoritativeSimulation.state.floor;
     const profile = floorVisualProfile(floor);
@@ -1223,12 +3124,12 @@ export class FloorScene extends Phaser.Scene {
         if (walkable) {
           graphics.fillStyle(profile.floorBase, 1);
           graphics.fillRect(posX, posY, this.tileSize, this.tileSize);
-          graphics.lineStyle(1, profile.grid, 0.24);
+          graphics.lineStyle(1, profile.grid, floor === 4 ? 0.12 : 0.18);
           graphics.strokeRect(posX, posY, this.tileSize, this.tileSize);
         } else {
           graphics.fillStyle(profile.wallBase, 1);
           graphics.fillRect(posX, posY, this.tileSize, this.tileSize);
-          graphics.lineStyle(1, profile.grid, 0.72);
+          graphics.lineStyle(1, profile.grid, 0.54);
           graphics.strokeRect(posX, posY, this.tileSize, this.tileSize);
         }
 
@@ -1267,9 +3168,93 @@ export class FloorScene extends Phaser.Scene {
           case 'none':
             break;
         }
+
+        this.drawArchitecturalMark(graphics, architecturalMarkAt(floor, x, y, walkable), posX, posY, profile);
       }
     }
+    this.drawThresholdMarks(graphics, tiles, profile);
     if (floor === 0 && this.floorData.block13Hub) this.drawBlock13Landmarks(graphics, this.floorData.block13Hub);
+  }
+
+  private drawArchitecturalMark(
+    graphics: Phaser.GameObjects.Graphics,
+    mark: ReturnType<typeof architecturalMarkAt>,
+    x: number,
+    y: number,
+    profile: ReturnType<typeof floorVisualProfile>,
+  ) {
+    switch (mark) {
+      case 'orderly_seam':
+        graphics.fillStyle(profile.grid, 0.52);
+        graphics.fillRect(x + 4, y + 27, 24, 1);
+        break;
+      case 'clean_wall':
+        graphics.fillStyle(profile.accent, 0.2);
+        graphics.fillRect(x + 4, y + 3, 24, 1);
+        graphics.fillStyle(0x080b10, 0.22);
+        graphics.fillRect(x + 4, y + 28, 24, 2);
+        break;
+      case 'peel':
+        graphics.fillStyle(profile.grime, 0.78);
+        graphics.fillRect(x + 6, y + 7, 12, 2);
+        graphics.fillRect(x + 8, y + 9, 8, 2);
+        graphics.fillRect(x + 20, y + 18, 5, 2);
+        graphics.fillStyle(profile.accent, 0.2);
+        graphics.fillRect(x + 6, y + 6, 10, 1);
+        break;
+      case 'warning_repeat':
+        graphics.fillStyle(profile.accent, 0.68);
+        graphics.fillRect(x + 6, y + 8, 3, 12);
+        graphics.fillRect(x + 14, y + 8, 3, 12);
+        graphics.fillRect(x + 22, y + 8, 3, 12);
+        graphics.fillStyle(profile.wallBase, 0.8);
+        graphics.fillRect(x + 6, y + 11, 3, 3);
+        graphics.fillRect(x + 14, y + 15, 3, 3);
+        graphics.fillRect(x + 22, y + 11, 3, 3);
+        break;
+      case 'fracture':
+        graphics.fillStyle(profile.corruption, 0.68);
+        graphics.fillRect(x + 14, y + 3, 2, 6);
+        graphics.fillRect(x + 10, y + 9, 6, 2);
+        graphics.fillRect(x + 10, y + 11, 2, 7);
+        graphics.fillRect(x + 10, y + 17, 9, 2);
+        graphics.fillRect(x + 17, y + 17, 2, 9);
+        graphics.fillRect(x + 17, y + 24, 8, 2);
+        break;
+      case 'paradox_wall':
+        // Broken, offset wall lines imply impossible repetition without drawing an opening.
+        graphics.fillStyle(profile.accent, 0.46);
+        graphics.fillRect(x + 4, y + 5, 19, 2);
+        graphics.fillRect(x + 21, y + 5, 2, 8);
+        graphics.fillRect(x + 9, y + 12, 14, 2);
+        graphics.fillRect(x + 9, y + 12, 2, 8);
+        graphics.fillRect(x + 9, y + 19, 19, 2);
+        graphics.fillRect(x + 26, y + 19, 2, 7);
+        break;
+      case null:
+        break;
+    }
+  }
+
+  private drawThresholdMarks(graphics: Phaser.GameObjects.Graphics, tiles: boolean[][], profile: ReturnType<typeof floorVisualProfile>) {
+    const seen = new Set<string>();
+    graphics.fillStyle(profile.accent, 0.48);
+    for (const [tileX, tileY] of this.floorData.doors) {
+      const id = `${tileX},${tileY}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const horizontal = Boolean(tiles[tileY]?.[tileX - 1] && tiles[tileY]?.[tileX + 1]);
+      const vertical = Boolean(tiles[tileY - 1]?.[tileX] && tiles[tileY + 1]?.[tileX]);
+      if (horizontal === vertical) continue;
+      const x = tileX * this.tileSize, y = tileY * this.tileSize;
+      if (horizontal) {
+        graphics.fillRect(x + 13, y + 3, 6, 2);
+        graphics.fillRect(x + 13, y + 27, 6, 2);
+      } else {
+        graphics.fillRect(x + 3, y + 13, 2, 6);
+        graphics.fillRect(x + 27, y + 13, 2, 6);
+      }
+    }
   }
 
   /** Static floor markings establish a hub/branch/escape shape without map UI. */
@@ -1277,23 +3262,55 @@ export class FloorScene extends Phaser.Scene {
     const centerX = hub[0] * this.tileSize + this.tileSize / 2;
     const centerY = hub[1] * this.tileSize + this.tileSize / 2;
     const accent = floorVisualProfile(0).accent;
-    graphics.lineStyle(2, accent, 0.16);
-    graphics.strokeCircle(centerX, centerY, 48);
-    graphics.lineStyle(1, accent, 0.24);
-    graphics.strokeCircle(centerX, centerY, 74);
-    graphics.lineStyle(2, accent, 0.12);
-    graphics.lineBetween(centerX - 112, centerY, centerX - 86, centerY);
-    graphics.lineBetween(centerX + 86, centerY, centerX + 112, centerY);
-    graphics.lineBetween(centerX, centerY - 96, centerX, centerY - 72);
-    graphics.lineBetween(centerX, centerY + 72, centerX, centerY + 96);
+    this.drawPixelRing(graphics, centerX, centerY, 78, accent, 0.3);
+    this.drawPixelRing(graphics, centerX, centerY, 52, 0xe0a5b0, 0.42);
+    this.drawPixelRing(graphics, centerX, centerY, 26, accent, 0.5);
+    graphics.fillStyle(0xe0a5b0, 0.48);
+    for (let i = 0; i < 8; i++) {
+      const angle = i * Math.PI / 4;
+      const inner = 84, outer = 112;
+      this.drawPixelLine(graphics,
+        centerX + Math.round(Math.cos(angle) * inner), centerY + Math.round(Math.sin(angle) * inner),
+        centerX + Math.round(Math.cos(angle) * outer), centerY + Math.round(Math.sin(angle) * outer), 2);
+    }
 
     const entryX = this.floorData.start[0] * this.tileSize + this.tileSize / 2;
     const entryY = this.floorData.start[1] * this.tileSize + this.tileSize / 2;
-    graphics.lineStyle(2, 0xb28aa8, 0.22);
-    graphics.lineBetween(entryX - 18, entryY - 16, entryX - 18, entryY + 16);
-    graphics.lineBetween(entryX + 18, entryY - 16, entryX + 18, entryY + 16);
-    graphics.lineBetween(entryX - 18, entryY - 16, entryX + 18, entryY - 16);
+    graphics.fillStyle(0xe0a5b0, 0.44);
+    graphics.fillRect(entryX - 20, entryY - 16, 3, 34);
+    graphics.fillRect(entryX + 17, entryY - 16, 3, 34);
+    graphics.fillRect(entryX - 20, entryY - 16, 40, 3);
+  }
 
+  private drawPixelRing(graphics: Phaser.GameObjects.Graphics, cx: number, cy: number, radius: number, color: number, alpha: number) {
+    const thickness = 2;
+    const chamfer = 8;
+    graphics.fillStyle(color, alpha);
+    graphics.fillRect(cx - radius + chamfer, cy - radius, radius * 2 - chamfer * 2, thickness);
+    graphics.fillRect(cx - radius + chamfer, cy + radius - thickness, radius * 2 - chamfer * 2, thickness);
+    graphics.fillRect(cx - radius, cy - radius + chamfer, thickness, radius * 2 - chamfer * 2);
+    graphics.fillRect(cx + radius - thickness, cy - radius + chamfer, thickness, radius * 2 - chamfer * 2);
+    for (let i = 0; i < chamfer; i += 2) {
+      graphics.fillRect(cx - radius + i, cy - radius + chamfer - i, 2, 2);
+      graphics.fillRect(cx + radius - chamfer + i, cy - radius + i, 2, 2);
+      graphics.fillRect(cx - radius + i, cy + radius - chamfer + i, 2, 2);
+      graphics.fillRect(cx + radius - chamfer + i, cy + radius - i, 2, 2);
+    }
+  }
+
+  private drawPixelLine(graphics: Phaser.GameObjects.Graphics, x0: number, y0: number, x1: number, y1: number, size = 2) {
+    let x = x0, y = y0;
+    const dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    const dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    let error = dx + dy;
+    graphics.fillStyle(0xe0a5b0, 0.48);
+    while (true) {
+      graphics.fillRect(x - size / 2, y - size / 2, size, size);
+      if (x === x1 && y === y1) break;
+      const twiceError = 2 * error;
+      if (twiceError >= dy) { error += dy; x += sx; }
+      if (twiceError <= dx) { error += dx; y += sy; }
+    }
   }
 
   private setupAtmosphereOverlays() {
@@ -1339,7 +3356,7 @@ export class FloorScene extends Phaser.Scene {
     const veil = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x140b19, 0.64)
       .setScrollFactor(0).setDepth(92);
     this.cameras.main.ignore(veil);
-    const reveal = this.add.text(this.scale.width / 2, this.scale.height / 2, 'BLOCK 13\nFIND THE KEY', {
+    const reveal = this.add.text(this.scale.width / 2, this.scale.height / 2, 'FLOOR 13\nRECOVER THE FINAL MEMORY', {
       fontFamily: 'monospace', fontSize: '23px', color: '#e5c7d2', align: 'center',
       backgroundColor: '#100d18', padding: { x: 14, y: 10 },
     }).setOrigin(0.5).setScrollFactor(0).setDepth(93).setAlpha(0);
@@ -1359,22 +3376,7 @@ export class FloorScene extends Phaser.Scene {
     const posX = x * this.tileSize + this.tileSize / 2;
     const posY = y * this.tileSize + this.tileSize / 2;
 
-    // Create key texture
-    const graphics = this.add.graphics();
-    graphics.fillStyle(0xffd700, 1);
-
-    // Key head (circle)
-    graphics.fillCircle(0, -6, 5);
-
-    // Key shaf
-    graphics.fillRect(-2, -2, 4, 12);
-
-    // Key teeth
-    graphics.fillRect(2, 6, 3, 2);
-    graphics.fillRect(2, 9, 3, 2);
-
-    graphics.generateTexture('key', 16, 20);
-    graphics.destroy();
+    this.generatePixelTexture('key', 20, 28, KEY_PIXEL_RECTS);
 
     const keySprite = this.add.sprite(posX, posY, 'key');
     keySprite.setDepth(5);
@@ -1416,42 +3418,8 @@ export class FloorScene extends Phaser.Scene {
     const posX = x * this.tileSize + this.tileSize / 2;
     const posY = y * this.tileSize + this.tileSize / 2;
 
-    // Create stairs texture (locked)
-    const graphics = this.add.graphics();
-
-    // Stairs base (dark gray)
-    graphics.fillStyle(0x4a5568, 1);
-    for (let i = 0; i < 4; i++) {
-      graphics.fillRect(-10 + i * 2, 6 - i * 3, 20 - i * 4, 3);
-    }
-
-    // Lock icon (red when locked)
-    graphics.fillStyle(0xff4444, 1);
-    graphics.fillRect(-4, -8, 8, 6);
-    graphics.fillCircle(0, -8, 3);
-
-    graphics.generateTexture('stairs_locked', 24, 24);
-    graphics.destroy();
-
-    // Create stairs texture (unlocked)
-    const graphics2 = this.add.graphics();
-
-    // Stairs base (cyan/teal when unlocked)
-    graphics2.fillStyle(0x70d4c6, 1);
-    for (let i = 0; i < 4; i++) {
-      graphics2.fillRect(-10 + i * 2, 6 - i * 3, 20 - i * 4, 3);
-    }
-
-    // Open lock icon (green)
-    graphics2.fillStyle(0x44ff44, 1);
-    graphics2.fillRect(-4, -6, 8, 6);
-    graphics2.lineStyle(2, 0x44ff44, 1);
-    graphics2.beginPath();
-    graphics2.arc(0, -6, 3, Math.PI, 0, true);
-    graphics2.strokePath();
-
-    graphics2.generateTexture('stairs_unlocked', 24, 24);
-    graphics2.destroy();
+    this.generatePixelTexture('stairs_locked', 32, 32, STAIR_PIXEL_RECTS(false));
+    this.generatePixelTexture('stairs_unlocked', 32, 32, STAIR_PIXEL_RECTS(true));
 
     const stairsSprite = this.add.sprite(posX, posY, 'stairs_locked');
     stairsSprite.setDepth(5);
@@ -1474,27 +3442,60 @@ export class FloorScene extends Phaser.Scene {
     const posX = x * this.tileSize + this.tileSize / 2;
     const posY = y * this.tileSize + this.tileSize / 2;
 
-    // Create player sprite (simple rectangle placeholder)
-    const graphics = this.add.graphics();
-    graphics.fillStyle(0xd9f3ea, 1);
-    graphics.fillRect(-8, -12, 16, 24); // Rectangular body
-    graphics.fillStyle(0xe9f5f1, 1);
-    graphics.fillCircle(0, -8, 6); // Head
-    graphics.generateTexture('player', 20, 28);
-    graphics.destroy();
+    this.generatePixelTexture('player', 20, 28, PLAYER_PIXEL_RECTS);
 
-    const player = this.add.sprite(posX, posY, 'player');
+    const state = this.authoritativeSimulation.state;
+    const authoredTexture = playerTextureKeyForFacing(state.facingX, state.facingY);
+    const textureKey = this.textures.exists(authoredTexture) ? authoredTexture : 'player';
+    if (textureKey !== 'player') this.markTextureNearest(textureKey);
+
+    const player = this.add.sprite(posX, posY, textureKey);
     player.setDepth(10);
+    player.setOrigin(0.5, 0.5);
+    if (textureKey === 'player') player.setRotation(Math.atan2(state.facingY, state.facingX) + Math.PI / 2);
 
     return player;
   }
 
+  private updatePlayerPresentationFacing(previous: AuthoritativeState, state: AuthoritativeState) {
+    if (state.facingX !== 0 || state.facingY !== 0) this.playerFacingAngle = Math.atan2(state.facingY, state.facingX);
+
+    const moving = playerMovedBetween(previous, state);
+    if (moving !== this.playerIsMoving) this.playerWalkAnimationElapsedMs = 0;
+    this.playerIsMoving = moving;
+
+    const textureKey = playerTextureKeyForPresentation(
+      state.facingX,
+      state.facingY,
+      moving,
+      this.playerWalkAnimationElapsedMs,
+      key => this.textures.exists(key),
+    );
+    if (textureKey !== 'player') {
+      if (this.player.texture.key !== textureKey) {
+        this.markTextureNearest(textureKey);
+        this.player.setTexture(textureKey);
+      }
+      this.player.setRotation(0);
+      return;
+    }
+
+    if (this.player.texture.key !== 'player') this.player.setTexture('player');
+    this.player.setRotation(this.playerFacingAngle + Math.PI / 2);
+  }
+
   private completeFloor(previous: AuthoritativeState, current: AuthoritativeState) {
+    this.clearFinalChaseAmbience();
+    this.clearAmbusherJumpscare();
+    this.clearContainerScare();
+    this.clearHauntingPresentation();
     this.isTransitioning = true; // Block scares and damage during transition
 
     // Schedule the renderer restart before optional presentation work. The sim
     // already owns the next floor; this timer only swaps what the scene renders.
     this.time.delayedCall(2800, () => this.scene.restart({ runState: this.runState }));
+    this.audioDirector?.fadeOutCategory('music', 850);
+    this.audioDirector?.fadeOutCategory('ambience', 850);
 
     // The simulation has already advanced. Optional audio cannot stop the next floor.
     try { this.audioDirector?.playWithCooldown(AUDIO_KEYS.interaction.floorTransition, 'sfx', 1500, { volume: 0.6 }); } catch { /* optional audio */ }
@@ -1576,7 +3577,75 @@ export class FloorScene extends Phaser.Scene {
     } catch { /* presentation failure cannot hold floor progression */ }
   }
 
+  private startFloorMusic(track: FloorMusicTrack, fadeMs: number) {
+    if (!this.audioDirector) return;
+    // Stop any prior floor/preview loop before creating a single replacement.
+    this.audioDirector.stopCategory('music');
+    if (this.audioDirector.play(track.key, 'music', { loop: true, volume: track.gain })) {
+      this.audioDirector.fadeInCategory('music', fadeMs);
+    }
+  }
+
+  /** Local development-only listening controls; excluded from production builds. */
+  private bindDevelopmentAudioPreview() {
+    this.audioPreviewKeyHandler = (event: KeyboardEvent) => {
+      const cueByKey: Readonly<Record<string, { key: string; volume: number }>> = {
+        F1: { key: 'sfx_ambusher_warning', volume: 0.28 },
+        F2: { key: 'sfx_stalker_presence', volume: 0.38 },
+        F3: { key: 'sfx_stalker_hunt', volume: 0.34 },
+        F4: { key: 'sfx_watcher_presence', volume: 0.32 },
+        F5: { key: 'sfx_watcher_gaze', volume: 0.22 },
+        F12: { key: 'sfx_mimic_reveal', volume: 0.35 },
+      };
+      const cue = cueByKey[event.code];
+      if (cue) {
+        event.preventDefault();
+        const reducedScale = event.code === 'F1' && this.audioDirector.getSettings().reduceJumpscareIntensity ? 0.56 : 1;
+        const offset = this.tileSize * 4;
+        this.audioDirector.playPositionalWithCooldown({
+          key: cue.key,
+          x: this.player.x + offset,
+          y: this.player.y,
+          maxDistance: cue.key === 'sfx_stalker_hunt' ? 520 : 420,
+          category: 'sfx',
+          volume: cue.volume * reducedScale,
+        }, this.player.x, this.player.y, 500);
+      } else if (event.code === 'F11') {
+        event.preventDefault();
+        this.audioDirector.playPositionalVariantWithCooldown('sfx_crawler_skitter', 2, {
+          x: this.player.x + this.tileSize * 4,
+          y: this.player.y,
+          maxDistance: 420,
+          category: 'sfx',
+          volume: 0.42,
+        }, this.player.x, this.player.y, 500);
+      } else if (event.code === 'F6') {
+        event.preventDefault();
+        this.audioPreviewIndex = (this.audioPreviewIndex + 1) % FLOOR_MUSIC_PREVIEW.length;
+        this.startFloorMusic(FLOOR_MUSIC_PREVIEW[this.audioPreviewIndex], 180);
+      } else if (event.code === 'F7') {
+        event.preventDefault();
+        this.startAmbusherJumpscare(0, this.authoritativeSimulation.state.tick);
+      } else if (event.code === 'F10') {
+        event.preventDefault();
+        this.audioDirector.stop('sfx_jumpscare_hit');
+        playAmbusherImpact(this.audioDirector, this.audioDirector.getSettings().reduceJumpscareIntensity);
+      } else if (event.code === 'F9') {
+        event.preventDefault();
+        this.audioDirector.stop('sfx_ambusher_impact');
+        this.audioDirector.stop('sfx_jumpscare_hit');
+        const reduced = this.audioDirector.getSettings().reduceJumpscareIntensity;
+        this.audioDirector.playWithCooldown('sfx_jumpscare_hit', 'sfx', 0, { volume: reduced ? 0.56 : 1.2 });
+      }
+    };
+    this.input.keyboard?.on('keydown', this.audioPreviewKeyHandler);
+  }
+
   private beginVictoryEpilogue() {
+    this.clearFinalChaseAmbience();
+    this.clearAmbusherJumpscare();
+    this.clearHauntingPresentation();
+    this.clearContainerScare();
     if (this.endingEpilogueOpen || !shouldBeginVictoryEpilogue(this.authoritativeSimulation.state.status)) return;
     this.endingEpilogueOpen = true;
     this.endingEpilogueIndex = 0;
@@ -1587,6 +3656,14 @@ export class FloorScene extends Phaser.Scene {
 
     const { width, height } = this.cameras.main;
     const exterior = this.drawEndingExterior(width, height).setScrollFactor(0).setDepth(498).setAlpha(0);
+    let exteriorPlayer: Phaser.GameObjects.Sprite | undefined;
+    if (exterior instanceof Phaser.GameObjects.Image) {
+      const playerTexture = this.textures.exists('player_idle_left') ? 'player_idle_left' : 'player';
+      if (playerTexture !== 'player') this.markTextureNearest(playerTexture);
+      exteriorPlayer = this.add.sprite(width * 0.73, height * 0.82 - 21, playerTexture)
+        .setOrigin(0.5, 0.5).setScale(1.2).setScrollFactor(0).setDepth(499).setAlpha(0);
+      this.endingExteriorPlayer = exteriorPlayer;
+    }
     const veil = this.add.rectangle(width / 2, height / 2, width, height, 0x020407, 0)
       .setScrollFactor(0).setDepth(500).setInteractive();
     const text = this.add.text(width / 2, height / 2 - 14, '', {
@@ -1599,7 +3676,7 @@ export class FloorScene extends Phaser.Scene {
     this.endingExterior = exterior;
     this.endingEpilogueVeil = veil;
     this.endingEpilogueText = text;
-    this.endingEpilogueElements = [exterior, veil, text, hint];
+    this.endingEpilogueElements = [exterior, ...(exteriorPlayer ? [exteriorPlayer] : []), veil, text, hint];
     this.cameras.main.ignore(this.endingEpilogueElements);
     veil.on('pointerdown', () => this.advanceVictoryEpilogue());
 
@@ -1617,7 +3694,20 @@ export class FloorScene extends Phaser.Scene {
     this.showVictoryEpilogueBeat();
   }
 
-  private drawEndingExterior(width: number, height: number): Phaser.GameObjects.Graphics {
+  private drawEndingExterior(width: number, height: number): Phaser.GameObjects.Graphics | Phaser.GameObjects.Image {
+    const asset = NARRATIVE_ASSET_MANIFEST.victory_exterior_bg;
+    if (this.textures.exists(asset.key)) {
+      const texture = this.textures.get(asset.key);
+      const source = texture.getSourceImage() as CanvasImageSource & { width?: number; height?: number; naturalWidth?: number; naturalHeight?: number };
+      const sourceWidth = source.naturalWidth || source.width;
+      const sourceHeight = source.naturalHeight || source.height;
+      if (sourceWidth === asset.width && sourceHeight === asset.height) {
+        this.markTextureNearest(asset.key);
+        const scale = victoryExteriorScale(width, height);
+        return this.add.image(0, 0, asset.key).setOrigin(0, 0).setScale(scale.x, scale.y);
+      }
+    }
+
     const graphics = this.add.graphics();
     graphics.fillStyle(0x07111b, 1);
     graphics.fillRect(0, 0, width, height);
@@ -1674,6 +3764,7 @@ export class FloorScene extends Phaser.Scene {
     const exterior = this.endingExterior;
     if (beat.visual === 'outside') {
       this.tweens.add({ targets: exterior, alpha: 1, duration: 900, ease: 'Sine.easeInOut' });
+      if (this.endingExteriorPlayer) this.tweens.add({ targets: this.endingExteriorPlayer, alpha: 1, duration: 900, ease: 'Sine.easeInOut' });
       this.tweens.add({ targets: veil, alpha: 0.24, duration: 900, ease: 'Sine.easeInOut' });
     } else if (beat.visual === 'look-back') {
       this.tweens.add({ targets: veil, alpha: 0.68, duration: 700, ease: 'Sine.easeInOut' });
@@ -1705,6 +3796,7 @@ export class FloorScene extends Phaser.Scene {
     this.endingEpilogueTimer = undefined;
     if (this.endingEpilogueVeil) this.tweens.killTweensOf(this.endingEpilogueVeil);
     if (this.endingExterior) this.tweens.killTweensOf(this.endingExterior);
+    if (this.endingExteriorPlayer) this.tweens.killTweensOf(this.endingExteriorPlayer);
     if (this.endingEpilogueText) this.tweens.killTweensOf(this.endingEpilogueText);
     this.endingEpilogueText?.setText('');
     this.endingEpilogueVeil?.setAlpha(1);
@@ -1797,7 +3889,7 @@ export class FloorScene extends Phaser.Scene {
       fontStyle: 'bold',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(299);
 
-    const subtitle = this.add.text(width / 2, height / 2 - 95, 'YOU SURVIVED BLOCK 13', {
+    const subtitle = this.add.text(width / 2, height / 2 - 95, 'YOU SURVIVED FLOOR 13', {
       fontFamily: 'monospace',
       fontSize: '14px',
       color: '#a5d4c8',
@@ -1880,23 +3972,89 @@ export class FloorScene extends Phaser.Scene {
 
   // ====== SEARCHABLE OBJECTS ======
 
+  private searchableTextureName(searchable: Searchable, open = false): string {
+    if (searchable.objectType === 'maintenance_lockbox') {
+      const authored = ORDINARY_ENVIRONMENT_ASSET_MANIFEST[open ? 'container_lockbox_open' : 'container_lockbox_closed'].key;
+      return this.textures.exists(authored) ? authored : open ? 'searchable_maintenance_lockbox_open' : 'searchable_maintenance_lockbox';
+    }
+    const proceduralFallback = searchable.isMimic
+      ? `mimic_${searchable.x}_${searchable.y}`
+      : `searchable_${searchable.objectType}`;
+    if (searchable.isMimic) {
+      return mimicTextureKey(false, key => this.textures.exists(key), proceduralFallback);
+    }
+    return resolveOrdinaryContainerTexture(
+      this.authoritativeSimulation.state.floor,
+      searchable.objectType,
+      name => this.textures.exists(ORDINARY_ENVIRONMENT_ASSET_MANIFEST[name].key),
+      open ? `${proceduralFallback}_open` : proceduralFallback,
+      searchable.x,
+      searchable.y,
+      open,
+    );
+  }
+
   private createSearchables(searchables: Searchable[]) {
     this.createRevealedMimicTexture();
-    const accent = floorVisualProfile(this.authoritativeSimulation.state.floor).accent;
     searchables.forEach((searchable, index) => {
       const sprite = this.createSearchableSprite(searchable, index);
-      const halo = this.createInteractableHalo(sprite.x, sprite.y, accent, 22);
+      if (!searchable.isMimic && !this.textures.exists(this.searchableTextureName(searchable, true))) {
+        this.createOpenContainerFallbackTexture(searchable);
+      }
+      const accent = searchable.objectType === 'maintenance_lockbox'
+        ? 0x8d6548
+        : searchable.objectiveStep !== undefined ? 0xc69bc9 : floorVisualProfile(this.authoritativeSimulation.state.floor).accent;
+      const isBlock2Evidence = this.authoritativeSimulation.state.floor === 2 && searchable.objectiveStep !== undefined;
+      const halo = this.createInteractableHalo(sprite.x, sprite.y, isBlock2Evidence ? 0xf0c86d : accent, isBlock2Evidence ? 30 : 22);
+      if (isBlock2Evidence) halo.setStrokeStyle(3, 0xffdc88, 0.96).setFillStyle(0xe6b953, 0.16);
+      const evidenceLabel = isBlock2Evidence
+        ? this.add.text(sprite.x, sprite.y - 18, 'PUZZLE EVIDENCE', {
+          fontFamily: 'monospace', fontSize: '8px', color: '#ffe3a0',
+          backgroundColor: 'rgba(18, 21, 23, 0.94)', padding: { x: 3, y: 2 },
+        }).setOrigin(0.5, 1).setDepth(51).setVisible(false)
+        : undefined;
       this.searchableSprites.push({
         sprite,
         halo,
+        evidenceLabel,
         data: searchable,
         searched: false,
       });
     });
   }
 
+  /** A visible open-state fallback for missing optional production art. */
+  private createOpenContainerFallbackTexture(searchable: Searchable) {
+    const key = searchable.objectType === 'maintenance_lockbox'
+      ? 'searchable_maintenance_lockbox_open'
+      : `searchable_${searchable.objectType}_open`;
+    if (this.textures.exists(key)) return;
+    const graphics = this.add.graphics();
+    const shell = searchable.objectType === 'maintenance_lockbox' ? 0x51463d
+      : searchable.objectType === 'box' ? 0x755c45
+        : searchable.objectType === 'locker' ? 0x47574e
+          : 0x555057;
+    graphics.fillStyle(0x17171a, 1);
+    graphics.fillRect(-10, -8, 20, 16);
+    graphics.fillStyle(shell, 1);
+    graphics.fillRect(-9, -8, 18, 7);
+    graphics.fillRect(-9, 4, 18, 4);
+    graphics.fillStyle(0x08090c, 1);
+    graphics.fillRect(-7, 0, 14, 5);
+    graphics.lineStyle(1, searchable.objectType === 'maintenance_lockbox' ? 0x987047 : 0x91877a, 1);
+    graphics.lineBetween(-9, -1, 9, -1);
+    graphics.fillStyle(searchable.objectType === 'maintenance_lockbox' ? 0x987047 : 0xaaa08f, 1);
+    graphics.fillRect(-2, 5, 4, 2);
+    graphics.generateTexture(key, 24, 24);
+    graphics.destroy();
+    this.markTextureNearest(key);
+  }
+
   private createRevealedMimicTexture() {
-    if (this.textures.exists('mimic_revealed')) return;
+    if (this.textures.exists('mimic_revealed')) {
+      this.markTextureNearest('mimic_revealed');
+      return;
+    }
     const graphics = this.add.graphics();
     graphics.fillStyle(0x28202a, 1);
     graphics.fillEllipse(0, 3, 24, 16);
@@ -1909,6 +4067,7 @@ export class FloorScene extends Phaser.Scene {
     graphics.fillCircle(4, -5, 2);
     graphics.generateTexture('mimic_revealed', 28, 24);
     graphics.destroy();
+    this.markTextureNearest('mimic_revealed');
   }
 
   private createSearchableSprite(searchable: Searchable, searchableIndex: number): Phaser.GameObjects.Sprite {
@@ -1916,7 +4075,22 @@ export class FloorScene extends Phaser.Scene {
     const posY = searchable.y * this.tileSize + this.tileSize / 2;
 
     // Create texture based on object type
-    const textureName = searchable.isMimic ? `mimic_${searchable.x}_${searchable.y}` : `searchable_${searchable.objectType}`;
+    const textureName = this.searchableTextureName(searchable);
+
+    // Keep a per-searchable generated disguise available even when authored
+    // Mimic art is loaded, so a missing-file fallback is always ready.
+    const mimicFallback = `mimic_${searchable.x}_${searchable.y}`;
+    if (searchable.isMimic && textureName !== mimicFallback && !this.textures.exists(mimicFallback)) {
+      const graphics = this.add.graphics();
+      graphics.fillStyle(0x6e665c, 1);
+      graphics.fillRect(-8, -8, 16, 16);
+      graphics.lineStyle(2, 0x998f85, 1);
+      graphics.strokeRect(-8, -8, 16, 16);
+      graphics.lineStyle(2, 0xccc3b9, 1);
+      graphics.lineBetween(-8, -3, 8, 3);
+      graphics.generateTexture(mimicFallback, 24, 24);
+      graphics.destroy();
+    }
 
     if (!this.textures.exists(textureName)) {
       const graphics = this.add.graphics();
@@ -1978,12 +4152,36 @@ export class FloorScene extends Phaser.Scene {
             graphics.fillStyle(0xa8a29e, 1);
             graphics.fillRect(-4, -2, 8, 4);
             break;
+
+          case 'maintenance_lockbox': {
+            // Temporary authored-style procedural fallback; restrained and
+            // readable only at close range under the existing lightmap.
+            const floor = this.authoritativeSimulation.state.floor;
+            const shell = floor <= 1 ? 0x302b31 : floor === 2 ? 0x373536 : 0x403d3b;
+            graphics.fillStyle(0x19191c, 1);
+            graphics.fillRect(-10, -7, 20, 15);
+            graphics.fillStyle(shell, 1);
+            graphics.fillRect(-9, -7, 18, 13);
+            graphics.lineStyle(1, 0x625b56, 1);
+            graphics.strokeRect(-9, -7, 18, 13);
+            graphics.fillStyle(floor <= 1 ? 0x80523e : 0x987047, 1);
+            graphics.fillRect(-7, -4, 14, 2);
+            graphics.fillStyle(0x8b8274, 1);
+            graphics.fillRect(-2, 1, 4, 3);
+            graphics.fillStyle(0x1a1918, 1);
+            graphics.fillRect(-1, 2, 2, 1);
+            graphics.fillStyle(0x55463d, 1);
+            graphics.fillRect(-7, 4, 2, 1);
+            graphics.fillRect(5, -6, 2, 1);
+            break;
+          }
         }
       }
 
       graphics.generateTexture(textureName, 24, 24);
       graphics.destroy();
     }
+    if (textureName.startsWith('env_') || textureName === 'mimic_disguise' || textureName === 'searchable_maintenance_lockbox') this.markTextureNearest(textureName);
 
     const sprite = this.add.sprite(posX, posY, textureName);
     sprite.setDepth(4);
@@ -2001,6 +4199,10 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private playerDeath() {
+    this.clearFinalChaseAmbience();
+    this.clearHauntingPresentation();
+    this.clearAmbusherJumpscare();
+    this.clearContainerScare();
     // Disable inpu
     if (this.input.keyboard) {
       this.input.keyboard.enabled = false;
@@ -2044,8 +4246,11 @@ export class FloorScene extends Phaser.Scene {
       graphics.fillCircle(2, -2, 1.7);
       graphics.generateTexture(`crawler_${crawler.id}`, 28, 20);
       graphics.destroy();
+      this.markTextureNearest(`crawler_${crawler.id}`);
 
-      const sprite = this.add.sprite(crawler.x / FIXED_SCALE, crawler.y / FIXED_SCALE, `crawler_${crawler.id}`);
+      const textureKey = crawlerTextureKeyForPresentation(false, 0, key => this.textures.exists(key), `crawler_${crawler.id}`);
+      if (textureKey !== `crawler_${crawler.id}`) this.markTextureNearest(textureKey);
+      const sprite = this.add.sprite(crawler.x / FIXED_SCALE, crawler.y / FIXED_SCALE, textureKey).setOrigin(0.5, 0.5);
       sprite.setDepth(8);
       const exposure = enemyPresentationExposure(this.floorData, state, crawler.x, crawler.y);
       sprite.setAlpha(exposure * 0.76);
@@ -2066,12 +4271,27 @@ export class FloorScene extends Phaser.Scene {
       graphics.fillCircle(4, -7, 1.9);
       graphics.generateTexture(`watcher_${watcher.id}`, 34, 44);
       graphics.destroy();
+      this.markTextureNearest(`watcher_${watcher.id}`);
 
-      const sprite = this.add.sprite(watcher.x / FIXED_SCALE, watcher.y / FIXED_SCALE, `watcher_${watcher.id}`);
+      const textureKey = watcherTextureKey(key => this.textures.exists(key), `watcher_${watcher.id}`);
+      if (textureKey !== `watcher_${watcher.id}`) this.markTextureNearest(textureKey);
+      const sprite = this.add.sprite(watcher.x / FIXED_SCALE, watcher.y / FIXED_SCALE, textureKey).setOrigin(0.5, 0.5);
       sprite.setDepth(8);
       const exposure = enemyPresentationExposure(this.floorData, state, watcher.x, watcher.y);
       sprite.setAlpha(watcher.active ? exposure * 0.76 : 0);
       this.watcherSprites.push(sprite);
+
+      // Two crisp two-pixel glints only appear while this Watcher is actually
+      // contributing curse, making the gaze readable without a screen effect.
+      const eyes = this.add.graphics();
+      eyes.fillStyle(0x8f748d, 0.9);
+      eyes.fillRect(-5, -9, 2, 2);
+      eyes.fillRect(3, -9, 2, 2);
+      eyes.fillStyle(0xd3a7bb, 0.9);
+      eyes.fillRect(-5, -9, 1, 1);
+      eyes.fillRect(3, -9, 1, 1);
+      eyes.setPosition(watcher.x / FIXED_SCALE, watcher.y / FIXED_SCALE).setDepth(8.1).setVisible(false);
+      this.watcherEyeGlints.push(eyes);
     });
   }
 
@@ -2093,8 +4313,11 @@ export class FloorScene extends Phaser.Scene {
       graphics.lineBetween(5, 3, 9, 12);
       graphics.generateTexture(`ambusher_${ambusher.id}`, 28, 38);
       graphics.destroy();
+      this.markTextureNearest(`ambusher_${ambusher.id}`);
 
-      const sprite = this.add.sprite(ambusher.x / FIXED_SCALE, ambusher.y / FIXED_SCALE, `ambusher_${ambusher.id}`);
+      const textureKey = ambusherTextureKey(key => this.textures.exists(key), `ambusher_${ambusher.id}`);
+      if (textureKey !== `ambusher_${ambusher.id}`) this.markTextureNearest(textureKey);
+      const sprite = this.add.sprite(ambusher.x / FIXED_SCALE, ambusher.y / FIXED_SCALE, textureKey).setOrigin(0.5, 0.5);
       sprite.setDepth(9);
       sprite.setAlpha(0); // Start invisible
       this.ambusherSprites.push(sprite);
@@ -2247,29 +4470,16 @@ export class FloorScene extends Phaser.Scene {
 
   private createStalker(worldWidth: number, worldHeight: number) {
     void worldWidth; void worldHeight;
-    const graphics = this.add.graphics();
-    graphics.fillStyle(0x141116, 1);
-    graphics.fillEllipse(0, -10, 14, 16);
-    graphics.fillStyle(0x38232c, 1);
-    graphics.fillTriangle(-9, -7, 9, -7, 0, 18);
-    graphics.lineStyle(1, 0x9b707b, 0.78);
-    graphics.strokeEllipse(0, -10, 15, 17);
-    graphics.lineStyle(3, 0x29212a, 1);
-    graphics.lineBetween(-4, 0, -11, 17);
-    graphics.lineBetween(4, 0, 11, 17);
-    graphics.lineBetween(-2, 11, -4, 24);
-    graphics.lineBetween(2, 11, 5, 24);
-    graphics.lineStyle(2, 0x55404a, 0.9);
-    graphics.lineBetween(-10, 15, -12, 24);
-    graphics.lineBetween(10, 15, 12, 24);
-    graphics.fillStyle(0xe3a1a0, 0.96);
-    graphics.fillCircle(-3.5, -12, 1.8);
-    graphics.fillCircle(3.5, -12, 1.8);
-    graphics.generateTexture('stalker', 32, 52);
-    graphics.destroy();
+    this.stalkerVisualFacing = 'down';
+    this.stalkerIsMoving = false;
+    this.stalkerWalkAnimationElapsedMs = 0;
+    this.generatePixelTexture('stalker', 32, 52, STALKER_PIXEL_RECTS);
 
     const stalker = this.authoritativeSimulation.state.stalker;
-    this.stalkerSprite = this.add.sprite(stalker.x / FIXED_SCALE, stalker.y / FIXED_SCALE, 'stalker');
+    const texture = stalkerTextureKeyForFacing(this.stalkerVisualFacing, key => this.textures.exists(key));
+    if (texture !== 'stalker') this.markTextureNearest(texture);
+    this.stalkerSprite = this.add.sprite(stalker.x / FIXED_SCALE, stalker.y / FIXED_SCALE, texture);
+    this.stalkerSprite.setOrigin(0.5, 0.5);
     this.stalkerSprite.setDepth(9); // Just below player
     this.stalkerSprite.setAlpha(stalker.visible ? enemyPresentationExposure(this.floorData, this.authoritativeSimulation.state, stalker.x, stalker.y) * 0.76 : 0);
   }
@@ -2448,6 +4658,16 @@ export class FloorScene extends Phaser.Scene {
   }
 
   shutdown() {
+    this.clearFinalChaseAmbience();
+    this.clearAmbusherJumpscare();
+    this.clearHauntingPresentation();
+    this.clearContainerScare();
+    if (this.audioPreviewKeyHandler) this.input.keyboard?.off('keydown', this.audioPreviewKeyHandler);
+    this.audioPreviewKeyHandler = undefined;
+    if (this.hauntingDebugKeyHandler) this.input.keyboard?.off('keydown', this.hauntingDebugKeyHandler);
+    this.hauntingDebugKeyHandler = undefined;
+    if (this.block3VisualKeyHandler) this.input.keyboard?.off('keydown', this.block3VisualKeyHandler);
+    this.block3VisualKeyHandler = undefined;
     // Clean up event listeners to prevent memory leaks
     if (this.pauseKey) {
       this.pauseKey.removeAllListeners();
@@ -2455,7 +4675,12 @@ export class FloorScene extends Phaser.Scene {
     this.storyCloseKey?.removeAllListeners();
     this.openingAdvanceKey?.removeAllListeners();
     this.closeOpeningStory();
+    this.closeNotebook();
     this.closeStoryPopup?.();
+    this.notebookToggleKey?.removeAllListeners();
+    this.puzzleHintKey?.removeAllListeners();
+    this.notebookToggleKey = undefined;
+    this.puzzleHintKey = undefined;
     if (this.interactKey) {
       this.interactKey.removeAllListeners();
     }
@@ -2477,10 +4702,20 @@ export class FloorScene extends Phaser.Scene {
     if (this.lightmapGraphics) {
       this.lightmapGraphics.destroy();
     }
+    if (this.textures.exists(BLOCK13_MAP_TEXTURE_KEY)) {
+      this.textures.remove(BLOCK13_MAP_TEXTURE_KEY);
+    }
+    this.ordinaryEnvironmentImage?.destroy();
+    this.ordinaryEnvironmentImage = undefined;
+    if (this.textures.exists('ordinary_composed_environment')) {
+      this.textures.remove('ordinary_composed_environment');
+    }
 
     this.crawlerSprites = [];
     this.watcherSprites = [];
+    this.watcherEyeGlints = [];
     this.ambusherSprites = [];
+    this.mimicRevealElapsedMs.clear();
 
     // Clear searchable sprites
     this.searchableSprites = [];

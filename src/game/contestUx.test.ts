@@ -3,24 +3,26 @@ import { blockTransitionBeats, EpilogueAdvanceGate, hudWarningCopy, nextEpilogue
 import { BLOCK_13_FLOOR, nextProgressionFloor, OUTSIDE_FLOOR, START_FLOOR } from '../core/progression';
 
 describe('contest UX presentation helpers', () => {
-  it('uses Block labels without changing the canonical progression IDs', () => {
+  it('uses Floor labels without changing the canonical progression IDs', () => {
     expect([START_FLOOR, 3, 2, 1, BLOCK_13_FLOOR, OUTSIDE_FLOOR]).toEqual([4, 3, 2, 1, 0, -1]);
     expect([4, 3, 2, 1, 0, -1].map(playerBlockName)).toEqual([
-      'BLOCK 4', 'BLOCK 3', 'BLOCK 2', 'BLOCK 1', 'BLOCK 13', 'OUTSIDE',
+      'FLOOR 4', 'FLOOR 3', 'FLOOR 2', 'FLOOR 1', 'FLOOR 13', 'OUTSIDE',
     ]);
     expect([4, 3, 2, 1, 0].map(nextProgressionFloor)).toEqual([3, 2, 1, 0, -1]);
   });
 
-  it('provides a short opening story and only uses the fake-out for Block 1 to Block 13', () => {
+  it('provides the new premise and only uses the fake-out for Floor 1 to Floor 13', () => {
     expect(OPENING_STORY_LINES).toHaveLength(5);
-    expect(OPENING_STORY_LINES[0]).toBe('11:47 PM');
+    expect(OPENING_STORY_LINES[0]).toContain('building disappeared');
     expect(nextOpeningStoryIndex(0)).toBe(1);
     expect(nextOpeningStoryIndex(OPENING_STORY_LINES.length - 1)).toBe(-1);
     expect(nextOpeningStoryIndex(1, true)).toBe(-1);
     expect(blockTransitionBeats(1, 0).map(beat => beat.text)).toEqual([
-      'BLOCK 1 CLEARED', 'GROUND FLOOR', '…', 'ROUTE NOT FOUND', '…', 'BLOCK 13', 'THIS BLOCK DOES NOT EXIST.',
+      'FLOOR 1', 'GROUND FLOOR', '…', 'ROUTE NOT FOUND', '…', 'FLOOR 13', 'THIS FLOOR DOES NOT EXIST.',
     ]);
-    expect(blockTransitionBeats(4, 3)).toEqual([]);
+    expect(blockTransitionBeats(4, 3).map(beat => beat.text)).toEqual([
+      'FLOOR 4', 'THE STAIRWELL IS COLDER.', 'THE DOOR SHUTS BEHIND YOU.', 'THE LIGHTS GO OUT.', 'FLOOR 3',
+    ]);
     expect(blockTransitionBeats(2, 1)).toEqual([]);
   });
 
@@ -36,12 +38,12 @@ describe('contest UX presentation helpers', () => {
     const lines = VICTORY_EPILOGUE.map(beat => beat.text).filter(Boolean);
     expect(lines).toEqual([
       'You push through the final door.', 'For the first time tonight...', 'everything is quiet.',
-      '12:13 AM', 'Cold air fills your lungs.', "You're outside.", 'Four blocks.', 'Four keys.',
-      'One way down.', 'You should have reached the ground floor.', 'But you remember the hallway.',
-      'The thing that followed you.', 'The door marked 13.', 'You look back.', 'Four blocks.',
-      'Just like there have always been.', 'There is no Block 13.',
+      '12:13 AM', 'Cold air fills your lungs.', "You're outside.", 'Four floors.', 'One address.',
+      'One way down.', 'You should have reached the street.', 'But you remember the hallway.',
+      'The thing that followed you.', 'The door marked 13.', 'You look back.', 'Four floors.',
+      'Just like there have always been.', 'There is no Floor 13.',
     ]);
-    expect(lines.at(-1)).toBe('There is no Block 13.');
+    expect(lines.at(-1)).toBe('There is no Floor 13.');
     expect(VICTORY_EPILOGUE_DURATION_MS).toBeLessThanOrEqual(35_000);
     expect(VICTORY_EPILOGUE_DURATION_MS).toBeGreaterThanOrEqual(25_000);
   });
@@ -98,10 +100,10 @@ describe('contest UX presentation helpers', () => {
     expect(startupErrorCopy(new Error('Bitcoin entropy unavailable'))).toContain('retry');
   });
 
-  it('shows clear objectives on ordinary floors and Block 13', () => {
-    expect(objectiveCopy(4, false)).toBe('OBJECTIVE: FIND THE KEY');
-    expect(objectiveCopy(1, true)).toBe('OBJECTIVE: RETURN TO STAIRS');
-    expect(objectiveCopy(0, false)).toBe('OBJECTIVE: FIND THE KEY');
+  it('shows clear objectives on ordinary floors and Floor 13', () => {
+    expect(objectiveCopy(4, false)).toBe('OBJECTIVE: OPEN THE MAINTENANCE LOCKBOX');
+    expect(objectiveCopy(1, true)).toBe('OBJECTIVE: REACH THE EXIT');
+    expect(objectiveCopy(0, false)).toBe('OBJECTIVE: RECOVER THE FINAL MEMORY');
     expect(objectiveCopy(0, true)).toBe('OBJECTIVE: GET OUT');
     expect(objectiveCopy(0, true, true)).toBe('OBJECTIVE: GET OUT NOW');
   });

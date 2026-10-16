@@ -1,4 +1,11 @@
-# Environment Tiles
+# Historical Environment Tile Specification
+
+> Superseded. Production environment artwork lives in
+> `../shared/` and `../blocks/`, with active paths and
+> dimensions in `src/game/environmentAssets.ts` and
+> `src/game/block13Assets.ts`. The descriptions below are an old planning
+> palette/specification, not a list of missing assets. Current rights status
+> is in [ASSET_CREDITS.md](../../../../../ASSET_CREDITS.md).
 
 **Size**: 32×32 pixels  
 **Format**: PNG with transparency (if needed) or opaque PNG  

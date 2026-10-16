@@ -31,6 +31,13 @@ export class SimulationEngine {
     this.simulationTick = 0;
   }
 
+  /** Set a verified replay boundary after the authoritative simulation was replayed to that tick. */
+  restoreTick(tick: number) {
+    if (!Number.isSafeInteger(tick) || tick < 0 || tick > 0xffffffff) throw new RangeError('tick must fit uint32');
+    this.accumulatorUnits = 0;
+    this.simulationTick = tick;
+  }
+
   /**
    * Update simulation with variable delta
    * Runs fixed updates until caught up

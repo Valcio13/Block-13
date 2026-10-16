@@ -1,6 +1,7 @@
-import { generateFloor, type Floor, type FloorLootRng } from './floor';
+import { chooseMaintenanceLockboxPosition, generateFloor, type Floor, type FloorLootRng } from './floor';
 import type { InputState } from './inputRecorder';
 import { PCG32 } from './pcg32';
+import { validateProceduralPuzzle } from './proceduralPuzzles';
 import { nextProgressionFloor, isOutsideFloor, isBlock13Arrival } from './progression';
 
 /** Deterministic gameplay world. No Phaser, DOM, timers, or wall clock imports. */
@@ -10,6 +11,8 @@ export const PLAYER_SPEED_SUBPIXELS_PER_SECOND = 160 * FIXED_SCALE;
 export const INTERACTION_RANGE_SUBPIXELS = 48 * FIXED_SCALE;
 export const PLAYER_RADIUS_SUBPIXELS = 7 * FIXED_SCALE;
 export const PLAYER_COLLISION_HALF_EXTENT_SUBPIXELS = PLAYER_RADIUS_SUBPIXELS;
+/** Enemies use the same compact authoritative footprint for wall occupancy. */
+export const ENEMY_COLLISION_HALF_EXTENT_SUBPIXELS = PLAYER_COLLISION_HALF_EXTENT_SUBPIXELS;
 export const STALKER_CONTACT_DAMAGE_HP = 30;
 export const STALKER_CONTACT_CURSE = 20 * FIXED_SCALE;
 export const FLOOR_TRANSITION_CURSE = 8 * FIXED_SCALE;
@@ -17,13 +20,19 @@ export const BLOCK13_ENTRY_CURSE_CAP = 85 * FIXED_SCALE;
 export const AMBUSHER_WARNING_MIN_TICKS = 24;
 export const AMBUSHER_WARNING_MAX_TICKS = 36;
 export const WATCHER_PEAK_CURSE_SUBUNITS_PER_TICK = 384;
-export const FLASHLIGHT_DRAIN_SUBUNITS_PER_TICK = 8;
+export const FLASHLIGHT_DRAIN_SUBUNITS_PER_TICK = 4;
 export const STALKER_RECOVERY_COOLDOWN_TICKS = 900;
 export const MIMIC_REVEAL_TICKS = 36;
 export const MIMIC_CHASE_DURATION_TICKS = 120;
 
 export type SimulationEvent =
   | { type: 'loot_searched'; index: number; result: Floor['searchables'][number]['result'] }
+  | { type: 'objective_updated'; floor: number; progress: number; total: number; complete: boolean }
+  | { type: 'puzzle_opened'; floor: number }
+  | { type: 'puzzle_closed'; floor: number }
+  | { type: 'puzzle_wrong_answer'; floor: number; failures: number; attemptsRemaining: number; fallbackActivated: boolean }
+  | { type: 'puzzle_fallback_item_found'; floor: number }
+  | { type: 'puzzle_solved'; floor: number }
   | { type: 'key_collected' }
   | { type: 'floor_transition'; fromFloor: number; toFloor: number; floorsCompleted: number }
   | { type: 'damage'; amount: number; hp: number }
@@ -51,7 +60,9 @@ export interface AuthoritativeState {
   status: 'playing' | 'won' | 'lost';
   flashlightOn: boolean;
   hasKey: boolean;
+  objectiveComplete: boolean;
   searched: boolean[];
+  puzzle: PuzzleRunState;
   invulnerableUntilTick: number;
   scareLockoutUntilTick: number;
   facingX: number;
@@ -66,6 +77,32 @@ export interface AuthoritativeState {
   scareEventId: number;
   damageEventId: number;
   lastDamage: number;
+}
+
+export interface PuzzleRunState {
+  active: boolean;
+  solved: boolean;
+  attemptsRemaining: number;
+  failures: number;
+  fallbackActive: boolean;
+  fallbackItemFound: boolean;
+  selectedIndex: number;
+  enteredCode: number[];
+  switchMask: number;
+  circuitSequence: number[];
+  recordOrder: number[];
+  memoryAnswers: number[];
+  memoryConfirmedMask: number;
+  directionMask: number;
+}
+
+function createPuzzleRunState(floor: number): PuzzleRunState {
+  return {
+    active: false, solved: false, attemptsRemaining: floor === 4 || floor === 3 ? 3 : 0,
+    failures: 0, fallbackActive: false, fallbackItemFound: false, selectedIndex: 0,
+    enteredCode: [0, 0, 0], switchMask: 0, circuitSequence: [], recordOrder: [], memoryAnswers: [0, 0, 0],
+    memoryConfirmedMask: 0, directionMask: 0,
+  };
 }
 
 export type StalkerSnapshot = {
@@ -89,6 +126,7 @@ export interface SimulationSnapshot {
 
 const cloneState = (s: AuthoritativeState): AuthoritativeState => ({
   ...s, searched: [...s.searched], stalker: { ...s.stalker }, crawlers: s.crawlers.map(e => ({ ...e })),
+  puzzle: { ...s.puzzle, enteredCode: [...s.puzzle.enteredCode], circuitSequence: [...s.puzzle.circuitSequence], recordOrder: [...s.puzzle.recordOrder], memoryAnswers: [...s.puzzle.memoryAnswers] },
   watchers: s.watchers.map(e => ({ ...e })), ambushers: s.ambushers.map(e => ({ ...e })),
   mimics: s.mimics.map(e => ({ ...e })), corruption: { ...s.corruption }, boxScare: { ...s.boxScare, availableTypes: [...s.boxScare.availableTypes] },
 });
@@ -98,16 +136,41 @@ const cloneFloor = (floor: Floor): Floor => ({
   ...(floor.block13Hub ? { block13Hub: [...floor.block13Hub] as [number, number] } : {}),
   rooms: floor.rooms.map(room => ({ ...room })), doors: floor.doors.map(door => [...door]),
   searchables: floor.searchables.map(item => ({ ...item, result: { ...item.result } })),
+  objectives: { ...floor.objectives, clues: [...floor.objectives.clues], searchableIndices: [...floor.objectives.searchableIndices] },
+  puzzleDevice: [...floor.puzzleDevice], ...(floor.puzzleFallbackSite ? { puzzleFallbackSite: [...floor.puzzleFallbackSite] } : {}),
+  puzzle: {
+    ...floor.puzzle, clueTexts: [...floor.puzzle.clueTexts],
+    ...(floor.puzzle.solutionCode ? { solutionCode: [...floor.puzzle.solutionCode] } : {}),
+    ...(floor.puzzle.combinationExpressions ? { combinationExpressions: floor.puzzle.combinationExpressions.map(expression => ({ ...expression })) } : {}),
+    ...(floor.puzzle.residents ? { residents: floor.puzzle.residents.map(resident => ({ ...resident })) } : {}),
+    ...(floor.puzzle.residentClueReferences ? { residentClueReferences: [...floor.puzzle.residentClueReferences] as [number, number] } : {}),
+    ...(floor.puzzle.circuitLabels ? { circuitLabels: [...floor.puzzle.circuitLabels] } : {}),
+    ...(floor.puzzle.circuitOrder ? { circuitOrder: [...floor.puzzle.circuitOrder] } : {}),
+    ...(floor.puzzle.recordEvents ? { recordEvents: [...floor.puzzle.recordEvents] } : {}),
+    ...(floor.puzzle.recordOrder ? { recordOrder: [...floor.puzzle.recordOrder] } : {}),
+    ...(floor.puzzle.memoryFragments ? { memoryFragments: [...floor.puzzle.memoryFragments] } : {}),
+    ...(floor.puzzle.memoryChoices ? { memoryChoices: [...floor.puzzle.memoryChoices] } : {}),
+    ...(floor.puzzle.memoryAnswers ? { memoryAnswers: [...floor.puzzle.memoryAnswers] } : {}),
+  },
 });
 const square = (n: number) => n * n;
 const TILE = 32 * FIXED_SCALE;
 const CENTER = 16 * FIXED_SCALE;
 const STALKER_SPECS = {
-  4: { dormant: 9500, roam: 40, hunt: 120, detect: 120, investigate: 120 },
-  3: { dormant: 8500, roam: 50, hunt: 140, detect: 150, investigate: 180 },
-  2: { dormant: 5000, roam: 70, hunt: 160, detect: 200, investigate: 240 },
-  1: { dormant: 2000, roam: 90, hunt: 180, detect: 250, investigate: 300 },
-  0: { dormant: 1000, roam: 100, hunt: 200, detect: 300, investigate: 360 },
+  4: { dormant: 10000, roam: 40, hunt: 120, detect: 120, investigate: 120 },
+  3: { dormant: 9900, roam: 50, hunt: 140, detect: 150, investigate: 180 },
+  2: { dormant: 9700, roam: 70, hunt: 160, detect: 200, investigate: 240 },
+  1: { dormant: 9400, roam: 90, hunt: 180, detect: 250, investigate: 300 },
+  0: { dormant: 9000, roam: 100, hunt: 200, detect: 300, investigate: 360 },
+} as const;
+
+/** Enemy rosters are deliberately sparse under Floor 13 rules v1. */
+export const ENCOUNTER_ROSTER_BOUNDS = {
+  4: { crawlers: [0, 0], watchers: [0, 0], ambushers: [0, 0] },
+  3: { crawlers: [0, 1], watchers: [0, 0], ambushers: [0, 1] },
+  2: { crawlers: [1, 1], watchers: [0, 1], ambushers: [0, 1] },
+  1: { crawlers: [1, 2], watchers: [1, 1], ambushers: [1, 1] },
+  0: { crawlers: [2, 2], watchers: [1, 2], ambushers: [1, 1] },
 } as const;
 
 export class AuthoritativeSimulation {
@@ -140,14 +203,16 @@ export class AuthoritativeSimulation {
     this.boxScareRng = new PCG32((seed ^ 0x424f585343415245n) & mask);
     const floorNumber = state?.floor ?? 4;
     this.floorValue = generateFloor(this.floorSeed(), floorNumber, this.economyLootRng());
+    if (!validateProceduralPuzzle(this.floorValue.puzzle)) throw new Error(`Invalid generated Floor ${floorNumber} puzzle.`);
     this.stateValue = {
       tick: 0, playerMoveRemainderX: 0, playerMoveRemainderY: 0, floor: floorNumber,
       floorsCompleted: 0,
       x: (this.floorValue.start[0] * 32 + 16) * FIXED_SCALE,
       y: (this.floorValue.start[1] * 32 + 16) * FIXED_SCALE,
       hp: 100, battery: 100 * FIXED_SCALE, curse: 0, score: 0,
-      status: 'playing', flashlightOn: false, hasKey: false,
+      status: 'playing', flashlightOn: false, hasKey: false, objectiveComplete: false,
       searched: this.floorValue.searchables.map(() => false),
+      puzzle: createPuzzleRunState(floorNumber),
       invulnerableUntilTick: 0, scareLockoutUntilTick: 0,
       facingX: 0, facingY: 1,
       stalker: { state: 'dormant', x: 0, y: 0, targetX: 0, targetY: 0, ticksRemaining: 0, chaseStartTick: 0, lastChaseEndTick: -600, visible: false, moveRemainder: 0 },
@@ -168,16 +233,25 @@ export class AuthoritativeSimulation {
     const tiles = this.floorValue.tiles;
     const walkable: Array<[number, number]> = [];
     for (let y = 0; y < tiles.length; y++) for (let x = 0; x < tiles[y].length; x++) if (tiles[y][x]) walkable.push([x, y]);
+    const reservedPuzzleCells = new Set<string>([
+      `${this.floorValue.puzzleDevice[0]},${this.floorValue.puzzleDevice[1]}`,
+      ...(this.floorValue.puzzleFallbackSite ? [`${this.floorValue.puzzleFallbackSite[0]},${this.floorValue.puzzleFallbackSite[1]}`] : []),
+      ...this.floorValue.objectives.searchableIndices.map(index => {
+        const item = this.floorValue.searchables[index];
+        return `${item.x},${item.y}`;
+      }),
+    ]);
     const farTile = (minimumPixels: number, maximumPixels = Number.MAX_SAFE_INTEGER, rng = this.worldRng): [number, number] => {
       const min2 = square(minimumPixels * FIXED_SCALE), max2 = square(maximumPixels * FIXED_SCALE);
       const eligible = walkable.filter(([x, y]) => {
+        if (reservedPuzzleCells.has(`${x},${y}`)) return false;
         const dx = (x * 32 + 16) * FIXED_SCALE - s.x;
         const dy = (y * 32 + 16) * FIXED_SCALE - s.y;
         const d2 = square(dx) + square(dy);
         return d2 >= min2 && d2 <= max2;
       });
       if (eligible.length) return eligible[rng.nextRange(0, eligible.length - 1)];
-      return walkable.reduce((best, cell) => {
+      return walkable.filter(([x, y]) => !reservedPuzzleCells.has(`${x},${y}`)).reduce((best, cell) => {
         const d = square((cell[0] * 32 + 16) * FIXED_SCALE - s.x) + square((cell[1] * 32 + 16) * FIXED_SCALE - s.y);
         const bd = square((best[0] * 32 + 16) * FIXED_SCALE - s.x) + square((best[1] * 32 + 16) * FIXED_SCALE - s.y);
         return d > bd ? cell : best;
@@ -197,11 +271,11 @@ export class AuthoritativeSimulation {
 
     let crawlerCount = 0, watcherCount = 0, ambusherCount = 0;
     switch (s.floor) {
-      case 4: ambusherCount = this.ambusherRng.nextInt() % 2; break;
-      case 3: crawlerCount = this.crawlerRng.nextInt() % 2; watcherCount = this.watcherRng.nextInt() % 2; ambusherCount = 1; break;
-      case 2: crawlerCount = 1 + this.crawlerRng.nextRange(0, 1); watcherCount = 1; ambusherCount = 1 + this.ambusherRng.nextRange(0, 1); break;
-      case 1: crawlerCount = 2 + this.crawlerRng.nextRange(0, 1); watcherCount = 1 + this.watcherRng.nextRange(0, 1); ambusherCount = 2; break;
-      case 0: crawlerCount = 3 + this.crawlerRng.nextRange(0, 1); watcherCount = 2 + this.watcherRng.nextRange(0, 1); ambusherCount = 2 + this.ambusherRng.nextRange(0, 1); break;
+      case 4: break;
+      case 3: crawlerCount = this.crawlerRng.nextInt() % 2; ambusherCount = this.ambusherRng.nextInt() % 2; break;
+      case 2: crawlerCount = 1; watcherCount = this.watcherRng.nextInt() % 2; ambusherCount = this.ambusherRng.nextInt() % 2; break;
+      case 1: crawlerCount = 1 + this.crawlerRng.nextRange(0, 1); watcherCount = 1; ambusherCount = 1; break;
+      case 0: crawlerCount = 2; watcherCount = 1 + this.watcherRng.nextRange(0, 1); ambusherCount = 1; break;
       default: break;
     }
     s.crawlers = Array.from({ length: crawlerCount }, (_, id) => {
@@ -236,6 +310,28 @@ export class AuthoritativeSimulation {
       const [x, y] = center(valid.length ? valid[this.ambusherRng.nextRange(0, valid.length - 1)] : farTile(200, Number.MAX_SAFE_INTEGER, this.ambusherRng));
       return { id, x, y, state: 'hidden' as const, warningTicks: 0, damageAtTick: -1, damage: 5 + this.ambusherRng.nextRange(0, 3), hasTriggered: false };
     });
+    this.placeLockboxAwayFromSpawnedEntities();
+  }
+
+  private placeLockboxAwayFromSpawnedEntities() {
+    if (this.stateValue.floor === 0) return;
+    const occupied: [number, number][] = [];
+    const add = (x: number, y: number) => occupied.push([Math.floor(x / TILE), Math.floor(y / TILE)]);
+    const state = this.stateValue;
+    add(state.stalker.x, state.stalker.y);
+    state.crawlers.forEach(entity => add(entity.x, entity.y));
+    state.watchers.forEach(entity => add(entity.x, entity.y));
+    state.ambushers.forEach(entity => add(entity.x, entity.y));
+    state.mimics.forEach(entity => add(entity.x, entity.y));
+    const position = chooseMaintenanceLockboxPosition({
+      ...this.floorValue, floor: state.floor, occupied,
+    });
+    this.floorValue.key = [...position];
+    const lockbox = this.floorValue.searchables.find(item => item.objectType === 'maintenance_lockbox');
+    if (lockbox) { lockbox.x = position[0]; lockbox.y = position[1]; }
+    // On Floor 4 the lockbox itself is the puzzle device. Keep its authoritative
+    // interaction target in sync when enemy placement moves the box.
+    if (state.floor === 4) this.floorValue.puzzleDevice = [...position];
   }
 
   private pickStalkerRoamTarget() {
@@ -270,6 +366,21 @@ export class AuthoritativeSimulation {
     const s = this.stateValue;
     if (s.status !== 'playing') return { state: this.state, events: [] };
     const tick = s.tick;
+    const directionMask = (input.left ? 1 : 0) | (input.right ? 2 : 0) | (input.up ? 4 : 0) | (input.down ? 8 : 0);
+    const pressedDirections = directionMask & ~s.puzzle.directionMask;
+    s.puzzle.directionMask = directionMask;
+    if (s.puzzle.active) {
+      if (input.flashlight) {
+        s.puzzle.active = false;
+        this.tickEvents.push({ type: 'puzzle_closed', floor: s.floor });
+      } else {
+        this.handlePuzzleInput(input, pressedDirections);
+      }
+      // Puzzle panels are a deterministic safe interaction: no movement,
+      // enemy updates, flashlight drain, or curse accumulation while open.
+      s.tick++;
+      return { state: this.state, events: [...this.tickEvents] };
+    }
     if (tick >= s.scareLockoutUntilTick) this.movePlayer(input);
     if (input.right !== input.left && (input.right || input.left)) { s.facingX = input.right ? 1 : -1; s.facingY = 0; }
     if (input.down !== input.up && (input.down || input.up)) { s.facingX = 0; s.facingY = input.down ? 1 : -1; }
@@ -277,7 +388,7 @@ export class AuthoritativeSimulation {
     // the authoritative drain below to reach the exact zero boundary.
     if (input.flashlight && s.battery > 0) s.flashlightOn = !s.flashlightOn;
     if (s.flashlightOn && s.battery > 0) {
-      // Drain 8/256 percent per tick (0.03125%), rounded down to the
+      // Drain 4/256 percent per tick (0.015625%), rounded down to the
       // integer subpercent scale; exact integer arithmetic avoids float drift.
       s.battery = Math.max(0, s.battery - FLASHLIGHT_DRAIN_SUBUNITS_PER_TICK);
     }
@@ -377,6 +488,7 @@ export class AuthoritativeSimulation {
 
   private updateStalker(tick: number) {
     const e = this.stateValue.stalker, s = this.stateValue;
+    if (s.floor === 4 && !s.objectiveComplete) { e.visible = false; return; }
     const spec = STALKER_SPECS[s.floor as keyof typeof STALKER_SPECS] ?? STALKER_SPECS[4];
     const dx = e.x - s.x, dy = e.y - s.y, d2 = square(dx) + square(dy);
     const cooldown = tick - e.lastChaseEndTick < STALKER_RECOVERY_COOLDOWN_TICKS;
@@ -548,13 +660,43 @@ export class AuthoritativeSimulation {
       if (!next) return;
       [nextX, nextY] = next;
       const destX = nextX * TILE + CENTER, destY = nextY * TILE + CENTER;
-      if (nextX !== currentX) actor.x += Math.sign(destX - actor.x) * Math.min(amount, Math.abs(destX - actor.x));
-      else actor.y += Math.sign(destY - actor.y) * Math.min(amount, Math.abs(destY - actor.y));
+      if (nextX !== currentX) {
+        const x = actor.x + Math.sign(destX - actor.x) * Math.min(amount, Math.abs(destX - actor.x));
+        if (this.isEntityFootprintWalkable(x, actor.y)) actor.x = x;
+      } else {
+        const y = actor.y + Math.sign(destY - actor.y) * Math.min(amount, Math.abs(destY - actor.y));
+        if (this.isEntityFootprintWalkable(actor.x, y)) actor.y = y;
+      }
     } else {
       const dx = actor.targetX - actor.x, dy = actor.targetY - actor.y;
-      if (Math.abs(dx) >= Math.abs(dy)) actor.x += Math.sign(dx) * Math.min(amount, Math.abs(dx));
-      else actor.y += Math.sign(dy) * Math.min(amount, Math.abs(dy));
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        const x = actor.x + Math.sign(dx) * Math.min(amount, Math.abs(dx));
+        if (this.isEntityFootprintWalkable(x, actor.y)) actor.x = x;
+        else {
+          const y = actor.y + Math.sign(dy) * Math.min(amount, Math.abs(dy));
+          if (this.isEntityFootprintWalkable(actor.x, y)) actor.y = y;
+        }
+      } else {
+        const y = actor.y + Math.sign(dy) * Math.min(amount, Math.abs(dy));
+        if (this.isEntityFootprintWalkable(actor.x, y)) actor.y = y;
+        else {
+          const x = actor.x + Math.sign(dx) * Math.min(amount, Math.abs(dx));
+          if (this.isEntityFootprintWalkable(x, actor.y)) actor.x = x;
+        }
+      }
     }
+  }
+
+  private isEntityFootprintWalkable(x: number, y: number): boolean {
+    const half = ENEMY_COLLISION_HALF_EXTENT_SUBPIXELS;
+    const minTileX = Math.floor((x - half) / TILE);
+    const maxTileX = Math.floor((x + half - 1) / TILE);
+    const minTileY = Math.floor((y - half) / TILE);
+    const maxTileY = Math.floor((y + half - 1) / TILE);
+    for (let ty = minTileY; ty <= maxTileY; ty++) for (let tx = minTileX; tx <= maxTileX; tx++) {
+      if (!this.isTileWalkable(tx, ty)) return false;
+    }
+    return true;
   }
 
   private nextPathCell(sx: number, sy: number, gx: number, gy: number): [number, number] | null {
@@ -602,8 +744,160 @@ export class AuthoritativeSimulation {
     return cells[rng.nextRange(0, Math.max(0, cells.length - 1))] ?? this.randomWalkableCell(rng);
   }
 
+  private puzzleCluesComplete(): boolean {
+    return this.floorValue.objectives.searchableIndices.every(index => this.stateValue.searched[index]);
+  }
+
+  private handlePuzzleInput(input: InputState, pressed: number) {
+    const s = this.stateValue, run = s.puzzle, puzzle = this.floorValue.puzzle;
+    // Third-failure fallbacks permanently disable normal entry for this run.
+    if (run.fallbackActive) return;
+    if (puzzle.kind === 'combination') {
+      if (pressed & 1) run.selectedIndex = (run.selectedIndex + 2) % 3;
+      if (pressed & 2) run.selectedIndex = (run.selectedIndex + 1) % 3;
+      if (pressed & 4) run.enteredCode[run.selectedIndex] = (run.enteredCode[run.selectedIndex] + 1) % 10;
+      if (pressed & 8) run.enteredCode[run.selectedIndex] = (run.enteredCode[run.selectedIndex] + 9) % 10;
+      if (input.interact) {
+        if (!this.puzzleCluesComplete()) return;
+        const correct = run.enteredCode.every((digit, index) => digit === puzzle.solutionCode?.[index]);
+        if (correct) this.solvePuzzle(); else this.recordPuzzleFailure();
+      }
+      return;
+    }
+    if (puzzle.kind === 'resident') {
+      const count = puzzle.residents!.length;
+      if (pressed & 4) run.selectedIndex = (run.selectedIndex + count - 1) % count;
+      if (pressed & 8) run.selectedIndex = (run.selectedIndex + 1) % count;
+      if (input.interact) {
+        if (!this.puzzleCluesComplete()) return;
+        if (run.selectedIndex === puzzle.correctResident) this.solvePuzzle(); else this.recordPuzzleFailure();
+      }
+      return;
+    }
+    if (puzzle.kind === 'circuit') {
+      const count = puzzle.circuitLabels!.length;
+      if (pressed & 1) run.selectedIndex = (run.selectedIndex + count - 1) % count;
+      if (pressed & 2) run.selectedIndex = (run.selectedIndex + 1) % count;
+      if (pressed & 4) {
+        const bit = 1 << run.selectedIndex;
+        if (run.switchMask & bit) {
+          run.switchMask ^= bit;
+          run.circuitSequence = run.circuitSequence.filter(index => index !== run.selectedIndex);
+        } else {
+          run.switchMask |= bit;
+          run.circuitSequence.push(run.selectedIndex);
+        }
+      }
+      if (input.interact) {
+        if (!this.puzzleCluesComplete()) return;
+        if (run.switchMask === puzzle.circuitMask
+          && run.circuitSequence.length === puzzle.circuitOrder?.length
+          && run.circuitSequence.every((index, sequenceIndex) => index === puzzle.circuitOrder?.[sequenceIndex])) this.solvePuzzle();
+        else this.recordPuzzleFailure();
+      }
+      return;
+    }
+    if (puzzle.kind === 'records') {
+      const count = puzzle.recordEvents!.length;
+      if (pressed & 4) run.selectedIndex = (run.selectedIndex + count - 1) % count;
+      if (pressed & 8) run.selectedIndex = (run.selectedIndex + 1) % count;
+      if (!input.interact) return;
+      if (!this.puzzleCluesComplete()) return;
+      if (run.recordOrder.includes(run.selectedIndex)) return;
+      run.recordOrder.push(run.selectedIndex);
+      if (run.recordOrder.length === 3) {
+        if (run.recordOrder.every((event, index) => event === puzzle.recordOrder?.[index])) this.solvePuzzle();
+        else {
+          this.recordPuzzleFailure();
+          run.recordOrder = [];
+        }
+      } else run.selectedIndex = 0;
+      return;
+    }
+    const fragments = puzzle.memoryFragments!, choices = puzzle.memoryChoices!;
+    if (pressed & 1) run.selectedIndex = (run.selectedIndex + fragments.length - 1) % fragments.length;
+    if (pressed & 2) run.selectedIndex = (run.selectedIndex + 1) % fragments.length;
+    if (pressed & 4) {
+      run.memoryAnswers[run.selectedIndex] = (run.memoryAnswers[run.selectedIndex] + choices.length - 1) % choices.length;
+      run.memoryConfirmedMask &= ~(1 << run.selectedIndex);
+    }
+    if (pressed & 8) {
+      run.memoryAnswers[run.selectedIndex] = (run.memoryAnswers[run.selectedIndex] + 1) % choices.length;
+      run.memoryConfirmedMask &= ~(1 << run.selectedIndex);
+    }
+    if (input.interact) {
+      if (!this.puzzleCluesComplete()) return;
+      run.memoryConfirmedMask |= 1 << run.selectedIndex;
+      if (run.memoryConfirmedMask === (1 << fragments.length) - 1) {
+        if (run.memoryAnswers.every((answer, index) => answer === puzzle.memoryAnswers?.[index])) this.solvePuzzle();
+        else {
+          this.recordPuzzleFailure();
+          run.memoryConfirmedMask = 0;
+        }
+      } else run.selectedIndex = (run.selectedIndex + 1) % fragments.length;
+    }
+  }
+
+  private recordPuzzleFailure() {
+    const s = this.stateValue, run = s.puzzle;
+    run.failures++;
+    if (s.floor === 4 || s.floor === 3) run.attemptsRemaining = Math.max(0, run.attemptsRemaining - 1);
+    const fallbackActivated = (s.floor === 4 || s.floor === 3) && run.attemptsRemaining === 0;
+    if (fallbackActivated) {
+      run.fallbackActive = true;
+      run.active = false;
+    }
+    this.tickEvents.push({
+      type: 'puzzle_wrong_answer', floor: s.floor, failures: run.failures,
+      attemptsRemaining: run.attemptsRemaining, fallbackActivated,
+    });
+  }
+
+  private solvePuzzle() {
+    const s = this.stateValue;
+    if (s.puzzle.solved) return;
+    s.puzzle.active = false;
+    s.puzzle.solved = true;
+    s.objectiveComplete = true;
+    if (s.floor === 4 || s.floor === 3) {
+      s.hasKey = true;
+      if (s.floor === 4) {
+        const boxIndex = this.floorValue.searchables.findIndex(item => item.objectType === 'maintenance_lockbox');
+        if (boxIndex >= 0 && !s.searched[boxIndex]) {
+          s.searched[boxIndex] = true;
+          s.battery = Math.min(100 * FIXED_SCALE, s.battery + 20 * FIXED_SCALE);
+          this.tickEvents.push({ type: 'loot_searched', index: boxIndex, result: { type: 'battery', amount: 20 } });
+        }
+      }
+      this.tickEvents.push({ type: 'key_collected' });
+    }
+    this.tickEvents.push({ type: 'puzzle_solved', floor: s.floor });
+    this.tickEvents.push({
+      type: 'objective_updated', floor: s.floor,
+      progress: this.floorValue.objectives.searchableIndices.filter(index => s.searched[index]).length,
+      total: this.floorValue.objectives.searchableIndices.length, complete: true,
+    });
+  }
+
   private interact() {
     const s = this.stateValue;
+    const [deviceX, deviceY] = this.floorValue.puzzleDevice;
+    if (!s.puzzle.solved && this.inRange((deviceX * 32 + 16) * FIXED_SCALE, (deviceY * 32 + 16) * FIXED_SCALE)) {
+      if (s.puzzle.fallbackActive && s.puzzle.fallbackItemFound) this.solvePuzzle();
+      else {
+        s.puzzle.active = true;
+        this.tickEvents.push({ type: 'puzzle_opened', floor: s.floor });
+      }
+      return;
+    }
+    const fallbackSite = this.floorValue.puzzleFallbackSite;
+    if (fallbackSite && s.puzzle.fallbackActive && !s.puzzle.fallbackItemFound
+      && this.inRange((fallbackSite[0] * 32 + 16) * FIXED_SCALE, (fallbackSite[1] * 32 + 16) * FIXED_SCALE)) {
+      s.puzzle.fallbackItemFound = true;
+      this.tickEvents.push({ type: 'puzzle_fallback_item_found', floor: s.floor });
+      return;
+    }
+    if (s.floor === 0) {
     const keyX = (this.floorValue.key[0] * 32 + 16) * FIXED_SCALE;
     const keyY = (this.floorValue.key[1] * 32 + 16) * FIXED_SCALE;
     if (!s.hasKey && this.inRange(keyX, keyY)) {
@@ -612,14 +906,25 @@ export class AuthoritativeSimulation {
       if (s.stalker.state === 'dormant') { s.stalker.state = 'roaming'; this.pickStalkerRoamTarget(); }
       else if (s.stalker.state === 'roaming') { s.stalker.state = 'investigating'; s.stalker.targetX = s.x; s.stalker.targetY = s.y; s.stalker.ticksRemaining = (STALKER_SPECS[s.floor as keyof typeof STALKER_SPECS] ?? STALKER_SPECS[4]).investigate; }
     }
-    for (let i = 0; i < this.floorValue.searchables.length; i++) {
+    }
+    const searchableOrder = [
+      ...this.floorValue.objectives.searchableIndices,
+      ...this.floorValue.searchables.map((_, index) => index).filter(index => !this.floorValue.objectives.searchableIndices.includes(index)),
+    ];
+    for (const i of searchableOrder) {
       if (s.searched[i]) continue;
       const item = this.floorValue.searchables[i];
       if (!this.inRange((item.x * 32 + 16) * FIXED_SCALE, (item.y * 32 + 16) * FIXED_SCALE)) continue;
       s.searched[i] = true;
       this.tickEvents.push({ type: 'loot_searched', index: i, result: { ...item.result } });
+      if (item.objectiveStep !== undefined) {
+        const progress = this.floorValue.objectives.searchableIndices.filter(index => s.searched[index]).length;
+        const total = this.floorValue.objectives.searchableIndices.length;
+        const complete = s.objectiveComplete;
+        this.tickEvents.push({ type: 'objective_updated', floor: s.floor, progress, total, complete });
+      }
       if (item.result.type !== 'mimic_reveal') this.maybeTriggerBoxScare(s.tick);
-      if (s.stalker.state === 'dormant' && this.stalkerRng.nextRange(0, 999) < 300) {
+      if (s.floor !== 4 && s.stalker.state === 'dormant' && this.stalkerRng.nextRange(0, 999) < 300) {
         s.stalker.state = 'investigating'; s.stalker.targetX = s.x; s.stalker.targetY = s.y;
         s.stalker.ticksRemaining = (STALKER_SPECS[s.floor as keyof typeof STALKER_SPECS] ?? STALKER_SPECS[4]).investigate;
       }
@@ -645,7 +950,8 @@ export class AuthoritativeSimulation {
       return;
     }
     const [ex, ey] = this.floorValue.exit;
-    if (s.hasKey && this.inRange((ex * 32 + 16) * FIXED_SCALE, (ey * 32 + 16) * FIXED_SCALE)) {
+    const exitUnlocked = s.floor === 0 ? s.hasKey && s.objectiveComplete : s.objectiveComplete;
+    if (exitUnlocked && this.inRange((ex * 32 + 16) * FIXED_SCALE, (ey * 32 + 16) * FIXED_SCALE)) {
       const fromFloor = s.floor;
       s.score += 100 * Math.max(0, s.floor);
       // The transition's danger bonus must not make arrival in Block 13
@@ -663,7 +969,9 @@ export class AuthoritativeSimulation {
       s.x = (this.floorValue.start[0] * 32 + 16) * FIXED_SCALE;
       s.y = (this.floorValue.start[1] * 32 + 16) * FIXED_SCALE;
       s.hasKey = false;
+      s.objectiveComplete = false;
       s.searched = this.floorValue.searchables.map(() => false);
+      s.puzzle = createPuzzleRunState(s.floor);
       s.mimics = this.floorValue.searchables.flatMap((item, searchableIndex) => item.isMimic ? [{ searchableIndex, x: (item.x * 32 + 16) * FIXED_SCALE, y: (item.y * 32 + 16) * FIXED_SCALE, targetX: (item.x * 32 + 16) * FIXED_SCALE, targetY: (item.y * 32 + 16) * FIXED_SCALE, moveRemainder: 0, revealed: false, revealUntilTick: 0, chaseUntilTick: 0, active: true }] : []);
       this.stateValue.corruption.lastTriggerTick = -1_000_000;
       this.resetBoxScares();

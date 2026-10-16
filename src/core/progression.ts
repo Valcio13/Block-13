@@ -1,4 +1,4 @@
-/** Canonical internal floor progression. 0 is Block 13; -1 is Outside. */
+/** Canonical internal progression IDs. 0 is Floor 13; -1 is Outside. */
 export const START_FLOOR = 4;
 export const BLOCK_13_FLOOR = 0;
 export const OUTSIDE_FLOOR = -1;
@@ -18,7 +18,7 @@ export const floorsCompletedAt = (floor: number): number => START_FLOOR - floor;
 
 export function progressionName(floor: number): string {
   if (isOutsideFloor(floor)) return 'OUTSIDE';
-  if (isBlock13Floor(floor)) return 'BLOCK 13';
+  if (isBlock13Floor(floor)) return 'FLOOR 13';
   if (floor >= 1 && floor <= START_FLOOR) return `FLOOR ${floor}`;
   throw new RangeError(`invalid progression floor: ${floor}`);
 }

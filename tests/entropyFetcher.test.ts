@@ -145,14 +145,22 @@ describe('browser entropy acquisition', () => {
       'https://btc.test': BTC_HASH,
     }));
     const ethHash = hash('f');
+    const stageUpdates: Array<[string, string]> = [];
     const bundle = await fetchEntropyBundle(hemiClient, '0x1111111111111111111111111111111111111111', {
       btcProviders: ['https://btc.test'], fetchImpl,
       ethRpcUrls: ['https://eth.test'],
       createEthReader: () => ({ getBlock: vi.fn(async () => ({ number: 50n, hash: ethHash })) }),
+      onStage: (stage, status) => stageUpdates.push([stage, status]),
     });
 
     expect(bundle).toEqual({ btcBlockHash: `0x${BTC_HASH}`, hemiBlockHash: hemiHash, ethBlockHash: ethHash, hemiTxHash });
     expect(getBlock).toHaveBeenCalledWith({ blockNumber: 98n });
+    expect(stageUpdates.filter(([, status]) => status === 'active').map(([stage]) => stage).sort()).toEqual([
+      'bitcoin-reference', 'ethereum-reference', 'hemi-reference', 'hemi-transaction',
+    ]);
+    expect(stageUpdates.filter(([, status]) => status === 'completed').map(([stage]) => stage).sort()).toEqual([
+      'bitcoin-reference', 'ethereum-reference', 'hemi-reference', 'hemi-transaction',
+    ]);
     const seeds = deriveSeeds({
       runId: 7n,
       player: '0x1111111111111111111111111111111111111111',

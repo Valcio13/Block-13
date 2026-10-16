@@ -36,11 +36,14 @@ const HEX32 = /^0x[0-9a-f]{64}$/i;
 type EthBlockReader = {
   getBlock: (args: { blockTag: 'latest' }) => Promise<{ number: bigint | null; hash: `0x${string}` | null }>;
 };
+export type EntropyFetchStage = 'hemi-reference' | 'bitcoin-reference' | 'ethereum-reference' | 'hemi-transaction';
+export type EntropyFetchStageStatus = 'active' | 'completed' | 'failed';
 type EntropyFetchOptions = {
   btcProviders?: string[];
   ethRpcUrls?: string[];
   fetchImpl?: typeof fetch;
   createEthReader?: (url: string) => EthBlockReader;
+  onStage?: (stage: EntropyFetchStage, status: EntropyFetchStageStatus) => void;
 };
 
 function uniqueUrls(urls: Array<string | undefined>): string[] {
@@ -228,14 +231,33 @@ export async function fetchEntropyBundle(
 ): Promise<EntropyBundle> {
   console.log('[EntropyFetcher] Fetching entropy sources');
   try {
-    const hemiReference = await fetchHemiBlockReference(hemiClient);
+    options.onStage?.('hemi-reference', 'active');
+    let hemiReference: { height: bigint; hash: `0x${string}` };
+    try {
+      hemiReference = await fetchHemiBlockReference(hemiClient);
+      options.onStage?.('hemi-reference', 'completed');
+    } catch (error) {
+      options.onStage?.('hemi-reference', 'failed');
+      throw error;
+    }
     console.log(`[EntropyFetcher] Hemi reference acquired at ${hemiReference.height}`);
+    const fetchStage = async <T,>(stage: EntropyFetchStage, work: () => Promise<T>): Promise<T> => {
+      options.onStage?.(stage, 'active');
+      try {
+        const result = await work();
+        options.onStage?.(stage, 'completed');
+        return result;
+      } catch (error) {
+        options.onStage?.(stage, 'failed');
+        throw error;
+      }
+    };
     const [btcReference, ethReference, hemiTxHash] = await Promise.all([
-      fetchBitcoinBlockReference({ providers: options.btcProviders, fetchImpl: options.fetchImpl })
+      fetchStage('bitcoin-reference', () => fetchBitcoinBlockReference({ providers: options.btcProviders, fetchImpl: options.fetchImpl }))
         .then(reference => { console.log(`[EntropyFetcher] BTC reference acquired at ${reference.height}`); return reference; }),
-      fetchEthereumBlockReference({ rpcUrls: options.ethRpcUrls, createReader: options.createEthReader })
+      fetchStage('ethereum-reference', () => fetchEthereumBlockReference({ rpcUrls: options.ethRpcUrls, createReader: options.createEthReader }))
         .then(reference => { console.log(`[EntropyFetcher] Ethereum reference acquired at ${reference.height}`); return reference; }),
-      selectCanonicalHemiTx(hemiClient, hemiReference.height, userAddress),
+      fetchStage('hemi-transaction', () => selectCanonicalHemiTx(hemiClient, hemiReference.height, userAddress)),
     ]);
     const bundle: EntropyBundle = {
       btcBlockHash: btcReference.hash,

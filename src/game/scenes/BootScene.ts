@@ -1,6 +1,13 @@
 import Phaser from 'phaser';
 import { AUDIO_ASSET_MANIFEST } from '../../core/audioAssetManifest';
 import type { RunState } from '../../core/run';
+import { BLOCK13_ASSET_MANIFEST } from '../block13Assets';
+import { PLAYER_ASSET_MANIFEST, PLAYER_WALK_ASSET_MANIFEST } from '../playerAssets';
+import { ORDINARY_ENVIRONMENT_ASSET_MANIFEST } from '../environmentAssets';
+import { STALKER_IDLE_ASSET_MANIFEST, STALKER_WALK_ASSET_MANIFEST } from '../stalkerAssets';
+import { AMBUSHER_JUMPSCARE_VARIANT_ASSETS, ENEMY_ASSET_MANIFEST } from '../enemyAssets';
+import { NARRATIVE_ASSET_MANIFEST } from '../narrativeAssets';
+import { BLOCK3_REFINED_EXPERIMENT_ASSETS } from '../block3VisualExperiment';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -37,12 +44,65 @@ export class BootScene extends Phaser.Scene {
 
     // Load audio assets
     this.loadAudioAssets();
+    this.loadBlock13VisualAssets();
+    this.loadOrdinaryEnvironmentAssets();
+    this.loadDevelopmentBlock3ExperimentAssets();
+    this.loadPlayerVisualAssets();
+    this.loadStalkerVisualAssets();
+    this.loadRemainingVisualAssets();
   }
   
   private loadAudioAssets() {
     const entries = Object.entries(AUDIO_ASSET_MANIFEST);
     for (const [key, path] of entries) this.load.audio(key, path);
     console.log(`[BootScene] Preloading ${entries.length} available audio assets...`);
+  }
+
+  private loadBlock13VisualAssets() {
+    for (const asset of Object.values(BLOCK13_ASSET_MANIFEST)) {
+      this.load.image(asset.key, asset.path);
+    }
+  }
+
+  private loadOrdinaryEnvironmentAssets() {
+    for (const asset of Object.values(ORDINARY_ENVIRONMENT_ASSET_MANIFEST)) {
+      this.load.image(asset.key, asset.path);
+    }
+  }
+
+  /** These files are outside public/ and are queued only by the Vite dev server. */
+  private loadDevelopmentBlock3ExperimentAssets() {
+    if (!import.meta.env.DEV) return;
+    for (const asset of BLOCK3_REFINED_EXPERIMENT_ASSETS) {
+      this.load.image(
+        asset.key,
+        `/art-experiments/block3-redesign/assets/refined_candidate/${asset.file}`,
+      );
+    }
+  }
+
+  private loadPlayerVisualAssets() {
+    for (const asset of [...Object.values(PLAYER_ASSET_MANIFEST), ...Object.values(PLAYER_WALK_ASSET_MANIFEST)]) {
+      this.load.image(asset.key, asset.path);
+    }
+  }
+
+  private loadStalkerVisualAssets() {
+    for (const asset of [...Object.values(STALKER_IDLE_ASSET_MANIFEST), ...Object.values(STALKER_WALK_ASSET_MANIFEST)]) {
+      this.load.image(asset.key, asset.path);
+    }
+  }
+
+  private loadRemainingVisualAssets() {
+    for (const asset of Object.values(ENEMY_ASSET_MANIFEST)) this.load.image(asset.key, asset.path);
+    // Missing optional compositions fail closed to the face/world/procedural chain.
+    for (const asset of Object.values(AMBUSHER_JUMPSCARE_VARIANT_ASSETS)) this.load.image(asset.key, asset.path);
+    for (const asset of Object.values(NARRATIVE_ASSET_MANIFEST)) this.load.image(asset.key, asset.path);
+    this.load.on('filecomplete', (_key: string, _type: string, _data: unknown) => {
+      for (const asset of Object.values(NARRATIVE_ASSET_MANIFEST)) {
+        if (this.textures.exists(asset.key)) this.textures.get(asset.key).setFilter(Phaser.Textures.FilterMode.NEAREST);
+      }
+    });
   }
 
   create() {

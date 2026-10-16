@@ -66,7 +66,7 @@ export interface RunManifest {
 }
 ```
 
-### Current rules identity encoding
+### Historical `0.4.0` rules identity encoding
 
 The human-readable rules identifier for game version `0.4.0` is
 `classic-static-walls-balance-v1-stalker-mimic-v1`. The manifest's `rulesHash`
@@ -77,7 +77,18 @@ terminator or padding:
 rulesHash = keccak256(toBytes('classic-static-walls-balance-v1-stalker-mimic-v1'));
 ```
 
-Only this digest is supplied to the TX1 `bytes32 rulesHash` argument, seed
+This is the historical identity for existing `0.4.0` manifests. The `0.4.1`
+identity `classic-static-walls-balance-v2-stalker-mimic-v1` and the `0.4.2`
+identity `classic-maintenance-lockbox-v1-static-walls-balance-v2-stalker-mimic-v1`
+are also retained unchanged for historical records. Current Floor 13 runs use
+version `0.6.0` and identifier
+`floor13-procedural-puzzles-floor-progression-v1`; its canonical
+hash is computed the same way. Current code retains earlier identifiers/hashes
+and refuses to replay unfinished checkpoints under incompatible rules. No
+identity change modifies the manifest schema, RunRegistry ABI, seed derivation
+format, or InputLogV2.
+
+Only the selected identity's digest is supplied to the TX1 `bytes32 rulesHash` argument, seed
 derivation, and FinalStateV1. The human-readable identifier remains metadata
 and is not itself ABI-encoded as `bytes32`. This clarifies the existing frozen
 field meaning and does not change the manifest schema or seed-derivation

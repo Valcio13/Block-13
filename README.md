@@ -1,6 +1,6 @@
-# Block 13
+# Floor 13 — The Building That Never Existed
 
-Block 13 is a survival horror game built for the **Hemi Arcade Contest 2: Turbo Edition**. Players descend through a procedurally generated building while managing health, flashlight battery, and curse, then escape from Outside. The current project is **deterministic and auditable**: a Phaser-free simulation owns gameplay outcomes, and recorded inputs can be replayed against that simulation.
+Floor 13 is a psychological survival horror game built for the **Hemi Arcade Contest 2: Turbo Edition**. An unknown message brings the protagonist to a building erased from official records. The current project is **deterministic and auditable**: a Phaser-free simulation owns gameplay outcomes, and recorded inputs can be replayed against that simulation.
 
 > **Verification status:** TX2 stores the player's result and canonical replay hashes. It does not independently prove that gameplay was honestly executed. No verifier, backend, or signing service is implemented.
 
@@ -8,9 +8,9 @@ Block 13 is a survival horror game built for the **Hemi Arcade Contest 2: Turbo 
 
 The route is:
 
-**Floor 4 → Floor 3 → Floor 2 → Floor 1 → Block 13 → Outside**
+**Floor 4 → Floor 3 → Floor 2 → Floor 1 → Floor 13 → Outside**
 
-On each floor, explore the maze, search containers for supplies and score, find the key, and reach the stairs. Enemies, traps, and gameplay scares make the return route dangerous. Progression, loot, damage, resources, score, and the ending are decided by the authoritative simulation.
+Explore the building, search for evidence and supplies, and find a way onward. The current authoritative build still uses staircase-key progression; distinct mandatory floor investigations and reduced encounter rates are planned as a versioned rules migration before they become active.
 
 ### Controls
 
@@ -19,13 +19,18 @@ On each floor, explore the maze, search containers for supplies and score, find 
 - **E:** interact with containers, keys, and stairs
 - **Escape:** pause
 
+Audio and accessibility settings are available from the main menu and pause
+menu. Volume, mute, and **Reduce Jumpscare Intensity** preferences are saved
+in this browser. The intensity option changes the rendered flash, camera
+kick, and scale punch only; it does not change warning timing or outcomes.
+
 ### Gameplay systems
 
 - Procedurally generated connected floor layouts and deterministic search results
 - Health, battery, curse, invulnerability, and score systems
 - Stalker pursuit, Crawler chase/contact, Watcher curse, Ambusher warnings, and Mimic encounters
 - Corruption events and gameplay scare lockouts
-- Key and stair progression from Floor 4 through Block 13 to Outside
+- Archive objective and stair progression from Floor 4 through Floor 13 to Outside
 - Phaser lighting, enemy sprites, HUD, audio, camera effects, and scare visuals
 
 ## Deterministic architecture
@@ -36,11 +41,11 @@ Resource values remain exact in simulation state. The HUD and transition rewards
 
 World generation, economy, events, and gameplay subsystems use separated deterministic PCG32 streams. Cosmetic effects are presentation-only and do not decide gameplay. Phaser samples live keyboard input through `InputSource`, sends the resulting inputs into the simulation, and renders simulation snapshots. Replay uses `InputReplayer` as the same input source for the same simulation path.
 
-`InputLogV2` stores canonical binary input events and the terminal simulation tick. Its canonical hash is Ethereum Keccak-256 over the binary log. `FinalStateV1` is a compact canonical result containing run binding, terminal tick, outcome, score, progression, and final resources; it does not hash the internal simulation snapshot. See [ARCHITECTURE.md](ARCHITECTURE.md), [INPUT_LOG_V2_SPEC.md](INPUT_LOG_V2_SPEC.md), and [FINAL_STATE_V1_SPEC.md](FINAL_STATE_V1_SPEC.md).
+`InputLogV2` stores canonical binary input events and the terminal simulation tick. Its canonical hash is Ethereum Keccak-256 over the binary log. `FinalStateV1` is a compact canonical result containing run binding, terminal tick, outcome, score, progression, and final resources; it does not hash the internal simulation snapshot. See [ARCHITECTURE.md](ARCHITECTURE.md), [INPUT_LOG_V2_SPEC.md](INPUT_LOG_V2_SPEC.md), [FINAL_STATE_V1_SPEC.md](FINAL_STATE_V1_SPEC.md), and [run recovery behavior](docs/run-recovery.md).
 
 ## Web3 status
 
-- **TX1 — Run Manifest:** Implemented for starting a Hemi Testnet run. New manifests bind player/run identity, game version `0.4.0`, the rules hash `keccak256(UTF-8("classic-static-walls-balance-v1-stalker-mimic-v1"))`, and selected multi-chain entropy sources. Seed derivation uses domain-separated Keccak-256 digests for WORLD, ECONOMY, and EVENT streams. The frozen manifest structure and encoding did not change.
+- **TX1 — Run Manifest:** Current procedural puzzle progression rules use game version `0.6.3` and the canonical rules hash `keccak256(UTF-8("floor13-procedural-puzzles-floor-progression-v4-spaced-searchables"))`. This version adds deterministic spacing for searchable containers while preserving map dimensions, RNG draw cadence, and puzzle progression; older identities remain historical. In-progress older-rule checkpoints are not migrated or replayed under the new rules. The RunRegistry ABI, manifest layout, InputLogV2 encoding, FinalStateV1 layout, and seed derivation algorithm remain unchanged.
 - **Gameplay and replay:** Implemented locally in the game and covered by deterministic tests. InputLogV2 and FinalStateV1 are committed by TX2.
 - **TX2 — completion/result commitment:** The contract accepts canonical score, outcome, terminal tick, InputLogV2 hash, and FinalStateV1 hash after an explicit player action. This commitment is deterministic and auditable, but does not independently prove honest execution.
 - **Independent verifier/backend/signing:** Not implemented and not part of the current contest flow.
@@ -81,13 +86,33 @@ The deterministic simulation, InputLogV2, TX1 manifest integration, FinalStateV1
 Current local validation commands:
 
 ```bash
-npm install
+npm ci
 npm test
 npm run build
 npm run dev
 ```
 
-Tests use Vitest. The production build runs TypeScript project checks and Vite.
+Use Node.js `^20.19.0` or `>=22.12.0` (the Vite engine requirement), with a
+compatible npm release. Tests use Vitest. The production build runs TypeScript
+project checks and Vite. To smoke-test the built output locally, run
+`npm run preview -- --host 127.0.0.1` after `npm run build`.
+
+### Hosting
+
+The built client expects to be served from the web origin root (`/`): runtime
+Asset manifests use a base-aware helper. Root hosting is the default; set
+`VITE_BASE_PATH=/contest/block13/` at build time to target a nested path. The
+configured prefix must match the path where the built files are served.
+
+### Environment and wallet
+
+Copy `.env.example` to `.env.local` for local configuration. Its `VITE_`
+values are public client configuration (Hemi/Ethereum RPC URLs and the public
+RunRegistry address), not secrets. Never put a wallet private key, seed
+phrase, or other credential in a `VITE_` variable or commit an environment
+file. Hemi runs require an injected wallet, Hemi Testnet (chain ID `743111`),
+and testnet gas funds for the user's explicit start and completion
+transactions. Local runs require no wallet and do not use Hemi.
 
 ## Project structure
 
@@ -103,6 +128,16 @@ Tests use Vitest. The production build runs TypeScript project checks and Vite.
 
 Current protocol and architecture documentation is indexed in [ARCHITECTURE.md](ARCHITECTURE.md). Older audit and implementation reports are retained as historical records; their headings identify reports that describe superseded behavior.
 
+The current pre-release blockers and handoff checklist are in
+[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). The npm package is marked
+`private`; its `0.2.0` package metadata is internal project metadata and is
+intentionally independent from the onchain game version `0.6.1`.
+The current dependency advisory triage is in
+[docs/dependency-audit-2026-10.md](docs/dependency-audit-2026-10.md).
+
 ## License
 
-MIT. See [LICENSE](LICENSE).
+The software is MIT-licensed; see [LICENSE](LICENSE). Bundled art/audio have
+separate rights and are not automatically covered by MIT. See
+[ASSET_CREDITS.md](ASSET_CREDITS.md), [AUDIO_LICENSES.md](AUDIO_LICENSES.md),
+and [the third-party audio record](docs/audio/THIRD_PARTY_AUDIO.md).

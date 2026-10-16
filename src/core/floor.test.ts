@@ -96,6 +96,31 @@ describe('Floor Generation', () => {
     }
   });
 
+  it('places every mandatory clue on a distinct reachable walkable tile for all floors', () => {
+    const reachable = (floor: ReturnType<typeof generateFloor>) => {
+      const queue: [number, number][] = [floor.start];
+      const seen = new Set([`${floor.start[0]},${floor.start[1]}`]);
+      for (let i = 0; i < queue.length; i++) {
+        const [x, y] = queue[i];
+        for (const [nx, ny] of [[x, y - 1], [x + 1, y], [x, y + 1], [x - 1, y]] as [number, number][]) {
+          const id = `${nx},${ny}`;
+          if (floor.tiles[ny]?.[nx] && !seen.has(id)) { seen.add(id); queue.push([nx, ny]); }
+        }
+      }
+      return seen;
+    };
+    for (const seed of [1, 7, 42, 54321, 0xabcde123]) for (const floorNumber of [4, 3, 2, 1, 0]) {
+      const floor = generateFloor(seed, floorNumber);
+      const seen = reachable(floor);
+      expect(floor.objectives.searchableIndices).toHaveLength(floor.objectives.clues.length);
+      for (const index of floor.objectives.searchableIndices) {
+        const node = floor.searchables[index];
+        expect(node.objectiveStep).toBeDefined();
+        expect(seen.has(`${node.x},${node.y}`), `unreachable evidence at seed ${seed}, floor ${floorNumber}`).toBe(true);
+      }
+    }
+  });
+
   it('gives Block 13 a deterministic hub with connected arrival, key and escape branches', () => {
     const reachable = (floor: ReturnType<typeof generateFloor>, target: [number, number]) => {
       const pending: [number, number][] = [floor.start];

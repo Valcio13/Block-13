@@ -12,6 +12,14 @@
 import Phaser from 'phaser';
 import { AUDIO_ASSET_MANIFEST } from './audioAssetManifest';
 import { SeededRng } from './rng';
+import {
+  AUDIO_PREFERENCES_CHANGED_EVENT,
+  AUDIO_PREFERENCES_DEFAULTS,
+  loadAudioPreferences,
+  normalizeAudioPreferences,
+  saveAudioPreferences,
+  type AudioPreferences,
+} from './audioPreferences';
 
 export type AudioCategory = 'master' | 'sfx' | 'ambience' | 'music';
 
@@ -20,16 +28,7 @@ export interface AudioConfig {
   scene: Phaser.Scene;
 }
 
-export interface AudioSettings {
-  masterVolume: number; // 0-1
-  sfxVolume: number; // 0-1
-  ambienceVolume: number; // 0-1
-  musicVolume: number; // 0-1
-  masterMuted: boolean;
-  sfxMuted: boolean;
-  ambienceMuted: boolean;
-  musicMuted: boolean;
-}
+export type AudioSettings = AudioPreferences;
 
 interface PositionalAudioConfig {
   key: string;
@@ -51,19 +50,15 @@ export class AudioDirector {
   private rng: SeededRng;
   
   // Volume settings
-  private settings: AudioSettings = {
-    masterVolume: 0.7,
-    sfxVolume: 0.8,
-    ambienceVolume: 0.6,
-    musicVolume: 0.5,
-    masterMuted: false,
-    sfxMuted: false,
-    ambienceMuted: false,
-    musicMuted: false,
-  };
+  private settings: AudioSettings = { ...AUDIO_PREFERENCES_DEFAULTS };
+  private preferenceChangeHandler?: (event: Event) => void;
   
   // Active sounds tracking
   private activeSounds: Map<string, Phaser.Sound.BaseSound> = new Map();
+  private activeSoundMix = new Map<Phaser.Sound.BaseSound, { category: AudioCategory; baseVolume: number }>();
+  private pausedSounds = new Set<Phaser.Sound.BaseSound>();
+  private presentationPaused = false;
+  private categoryDucks = new Map<AudioCategory, Map<string, number>>();
   private static warnedUnavailableAudio = new Set<string>();
   
   // Cooldown tracking for audio events
@@ -78,27 +73,34 @@ export class AudioDirector {
     
     // Load settings from localStorage if available
     this.loadSettings();
+    if (typeof window !== 'undefined') {
+      this.preferenceChangeHandler = event => {
+        this.applyPreferences((event as CustomEvent<unknown>).detail, false);
+      };
+      window.addEventListener(AUDIO_PREFERENCES_CHANGED_EVENT, this.preferenceChangeHandler);
+    }
   }
   
   // ====== SETTINGS ======
   
   private loadSettings() {
-    try {
-      const saved = localStorage.getItem('block13_audio_settings');
-      if (saved) {
-        this.settings = { ...this.settings, ...JSON.parse(saved) };
-      }
-    } catch (e) {
-      // Ignore, use defaults
-    }
+    this.settings = loadAudioPreferences();
   }
   
   public saveSettings() {
-    try {
-      localStorage.setItem('block13_audio_settings', JSON.stringify(this.settings));
-    } catch (e) {
-      // Ignore
-    }
+    this.settings = saveAudioPreferences(this.settings);
+  }
+
+  /** Apply persistent UI preferences to active sounds without multiplying base gains. */
+  public applyPreferences(value: unknown, persist = true) {
+    this.settings = normalizeAudioPreferences(value);
+    if (persist) this.saveSettings();
+    this.updateAllVolumes();
+  }
+
+  public setReduceJumpscareIntensity(enabled: boolean) {
+    this.settings.reduceJumpscareIntensity = enabled;
+    this.saveSettings();
   }
   
   public setVolume(category: AudioCategory, volume: number) {
@@ -142,6 +144,42 @@ export class AudioDirector {
     this.saveSettings();
     this.updateAllVolumes();
   }
+
+  /** Presentation-only temporary category gain; does not alter saved user settings. */
+  public setCategoryDucking(category: AudioCategory, multiplier: number, source = 'presentation') {
+    const bounded = Phaser.Math.Clamp(multiplier, 0, 1);
+    let ducks = this.categoryDucks.get(category);
+    if (!ducks) {
+      if (bounded === 1) return;
+      ducks = new Map();
+      this.categoryDucks.set(category, ducks);
+    }
+    if (bounded === 1) ducks.delete(source);
+    else ducks.set(source, bounded);
+    if (ducks.size === 0) this.categoryDucks.delete(category);
+    this.updateAllVolumes();
+  }
+
+  /** Fade a category in through the same live settings-aware gain path as playback. */
+  public fadeInCategory(category: AudioCategory, durationMs: number) {
+    this.setCategoryDucking(category, 0, 'fade-in');
+    if (durationMs <= 0 || !this.scene.tweens) {
+      this.setCategoryDucking(category, 1, 'fade-in');
+      return;
+    }
+    const progress = { value: 0 };
+    try {
+      this.scene.tweens.add({
+        targets: progress,
+        value: 1,
+        duration: durationMs,
+        onUpdate: () => this.setCategoryDucking(category, progress.value, 'fade-in'),
+        onComplete: () => this.setCategoryDucking(category, 1, 'fade-in'),
+      });
+    } catch {
+      this.setCategoryDucking(category, 1, 'fade-in');
+    }
+  }
   
   public getSettings(): AudioSettings {
     return { ...this.settings };
@@ -170,18 +208,15 @@ export class AudioDirector {
     
     if (categoryMuted) return 0;
     
-    return this.settings.masterVolume * categoryVolume * baseVolume;
+    const categoryDuck = [...(this.categoryDucks.get(category)?.values() ?? [])].reduce((gain, duck) => gain * duck, 1);
+    return this.settings.masterVolume * categoryVolume * baseVolume * categoryDuck;
   }
   
   private updateAllVolumes() {
-    // Update all active sounds
-    this.activeSounds.forEach((sound, key) => {
+    this.activeSoundMix.forEach((mix, sound) => {
       if (sound.isPlaying) {
-        const category = this.getSoundCategory(key);
-        const newVolume = this.calculateVolume(category);
-        // Volume is read-only on BaseSound, but we can set it via config
-        // For now, just track for future sounds
-        // (Active sounds will play at their original volume)
+        (sound as Phaser.Sound.BaseSound & { setVolume(value: number): unknown })
+          .setVolume(this.calculateVolume(mix.category, mix.baseVolume));
       }
     });
   }
@@ -214,12 +249,17 @@ export class AudioDirector {
       return null;
     }
     
-    const volume = this.calculateVolume(category, config?.volume);
+    const baseVolume = config?.volume ?? 1;
+    const volume = this.calculateVolume(category, baseVolume);
     
     let sound: Phaser.Sound.BaseSound;
     try {
       sound = this.scene.sound.add(key, { ...config, volume });
       sound.play();
+      if (this.presentationPaused) {
+        sound.pause();
+        this.pausedSounds.add(sound);
+      }
     } catch (error) {
       this.warnUnavailableAudio(key, error);
       return null;
@@ -227,9 +267,11 @@ export class AudioDirector {
     
     // Track active sound
     this.activeSounds.set(key, sound);
+    this.activeSoundMix.set(sound, { category, baseVolume });
     
     sound.once('complete', () => {
-      this.activeSounds.delete(key);
+      if (this.activeSounds.get(key) === sound) this.activeSounds.delete(key);
+      this.activeSoundMix.delete(sound);
     });
     
     return sound;
@@ -259,7 +301,8 @@ export class AudioDirector {
     // Calculate volume based on distance (linear falloff)
     const distanceVolume = 1 - (distance / config.maxDistance);
     const baseVolume = (config.volume !== undefined) ? config.volume : 1.0;
-    const volume = this.calculateVolume(config.category, baseVolume * distanceVolume);
+    const effectiveBaseVolume = baseVolume * distanceVolume;
+    const volume = this.calculateVolume(config.category, effectiveBaseVolume);
     
     // Calculate pan (-1 left, 0 center, 1 right)
     // Pan based on relative X position, clamped to reasonable values
@@ -287,9 +330,11 @@ export class AudioDirector {
     // Track active sound
     const trackingKey = `${config.key}_${config.x}_${config.y}`;
     this.activeSounds.set(trackingKey, sound);
+    this.activeSoundMix.set(sound, { category: config.category, baseVolume: effectiveBaseVolume });
     
     sound.once('complete', () => {
-      this.activeSounds.delete(trackingKey);
+      if (this.activeSounds.get(trackingKey) === sound) this.activeSounds.delete(trackingKey);
+      this.activeSoundMix.delete(sound);
     });
     
     return sound;
@@ -314,11 +359,15 @@ export class AudioDirector {
     category: AudioCategory,
     cooldownMs: number,
     config?: Phaser.Types.Sound.SoundConfig,
+    variantBaseVolumes?: readonly number[],
   ): Phaser.Sound.BaseSound | null {
     if (!Number.isInteger(variantCount) || variantCount < 1) return null;
     if (this.isOnCooldown(baseKey)) return null;
-    const key = `${baseKey}_${this.rng.int(variantCount) + 1}`;
-    const sound = this.play(key, category, config);
+    const variantIndex = this.rng.int(variantCount);
+    const key = `${baseKey}_${variantIndex + 1}`;
+    const variantBaseVolume = variantBaseVolumes?.[variantIndex];
+    const variantConfig = variantBaseVolume === undefined ? config : { ...config, volume: variantBaseVolume };
+    const sound = this.play(key, category, variantConfig);
     if (sound && cooldownMs > 0) this.setCooldown(baseKey, cooldownMs);
     return sound;
   }
@@ -335,9 +384,24 @@ export class AudioDirector {
     return sound;
   }
 
+  /** Select a positional variant using only AudioDirector's isolated presentation RNG. */
+  public playPositionalVariantWithCooldown(
+    baseKey: string,
+    variantCount: number,
+    config: Omit<PositionalAudioConfig, 'key'>,
+    playerX: number,
+    playerY: number,
+    cooldownMs: number,
+  ): Phaser.Sound.BaseSound | null {
+    if (!Number.isInteger(variantCount) || variantCount < 1 || this.isOnCooldown(baseKey)) return null;
+    const key = `${baseKey}_${this.rng.int(variantCount) + 1}`;
+    const sound = this.playPositional({ ...config, key }, playerX, playerY);
+    if (sound && cooldownMs > 0) this.setCooldown(baseKey, cooldownMs);
+    return sound;
+  }
+
   private isAudioAvailable(key: string): boolean {
-    // Keys outside the allowlist are intentionally silent (the current
-    // manifest is empty until real audio files are checked in).
+    // Keys outside the checked-in asset allowlist are intentionally silent.
     if (!Object.hasOwn(AUDIO_ASSET_MANIFEST, key)) return false;
 
     try {
@@ -349,6 +413,13 @@ export class AudioDirector {
 
     this.warnUnavailableAudio(key);
     return false;
+  }
+
+  /** Silent availability probe for optional presentation audio and its fallback. */
+  public hasLoadedAsset(key: string): boolean {
+    if (!Object.hasOwn(AUDIO_ASSET_MANIFEST, key)) return false;
+    try { return this.scene.cache.audio.exists(key); }
+    catch { return false; }
   }
 
   private warnUnavailableAudio(key: string, error?: unknown) {
@@ -368,26 +439,55 @@ export class AudioDirector {
   
   public stop(key: string) {
     const sound = this.activeSounds.get(key);
-    if (sound && sound.isPlaying) {
-      sound.stop();
+    if (sound) {
+      if (sound.isPlaying || this.pausedSounds.has(sound)) sound.stop();
       this.activeSounds.delete(key);
+      this.activeSoundMix.delete(sound);
+      this.pausedSounds.delete(sound);
     }
   }
   
   public stopAll() {
     this.activeSounds.forEach((sound, key) => {
-      if (sound.isPlaying) {
+      if (sound.isPlaying || this.pausedSounds.has(sound)) {
         sound.stop();
       }
     });
     this.activeSounds.clear();
+    this.activeSoundMix.clear();
+    this.pausedSounds.clear();
+    this.presentationPaused = false;
+    this.categoryDucks.clear();
+  }
+
+  /** Pause/resume active presentation audio without changing settings or run state. */
+  public pausePresentation() {
+    this.presentationPaused = true;
+    this.activeSounds.forEach(sound => {
+      if (!sound.isPlaying) return;
+      try {
+        sound.pause();
+        this.pausedSounds.add(sound);
+      } catch { /* audio pause support is optional on the active backend */ }
+    });
+  }
+
+  public resumePresentation() {
+    this.presentationPaused = false;
+    this.pausedSounds.forEach(sound => {
+      try { sound.resume(); } catch { /* a stopped sound is not resumed */ }
+    });
+    this.pausedSounds.clear();
+    this.updateAllVolumes();
   }
   
   public stopCategory(category: AudioCategory) {
     this.activeSounds.forEach((sound, key) => {
       if (this.getSoundCategory(key) === category) {
-        if (sound.isPlaying) sound.stop();
+        if (sound.isPlaying || this.pausedSounds.has(sound)) sound.stop();
         this.activeSounds.delete(key);
+        this.activeSoundMix.delete(sound);
+        this.pausedSounds.delete(sound);
       }
     });
   }
@@ -400,6 +500,8 @@ export class AudioDirector {
       if (!sound.isPlaying || fade === 0 || !this.scene.tweens) {
         sound.stop();
         this.activeSounds.delete(key);
+        this.activeSoundMix.delete(sound);
+        this.pausedSounds.delete(sound);
         return;
       }
       try {
@@ -410,11 +512,15 @@ export class AudioDirector {
           onComplete: () => {
             sound.stop();
             if (this.activeSounds.get(key) === sound) this.activeSounds.delete(key);
+            this.activeSoundMix.delete(sound);
+            this.pausedSounds.delete(sound);
           },
         });
       } catch {
         sound.stop();
         this.activeSounds.delete(key);
+        this.activeSoundMix.delete(sound);
+        this.pausedSounds.delete(sound);
       }
     });
   }
@@ -470,6 +576,10 @@ export class AudioDirector {
   // ====== CLEANUP ======
   
   public shutdown() {
+    if (this.preferenceChangeHandler && typeof window !== 'undefined') {
+      window.removeEventListener(AUDIO_PREFERENCES_CHANGED_EVENT, this.preferenceChangeHandler);
+    }
+    this.preferenceChangeHandler = undefined;
     this.stopAll();
     this.cooldowns.clear();
   }
