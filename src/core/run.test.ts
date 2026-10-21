@@ -91,7 +91,7 @@ describe('Run State Management', () => {
 
     run.curse = 92;
     run = completeFloor(run);
-    expect(run.curse).toBe(85); // The Floor 1 -> Block 13 arrival cap only.
+    expect(run.curse).toBe(75); // The Floor 1 -> Block 13 arrival cap only.
     run.curse = 99;
     run = completeFloor(run);
     expect(run.curse).toBe(107); // Block 13 exit is not subject to the entry cap.

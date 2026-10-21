@@ -75,7 +75,10 @@ export const LOOT_THRESHOLDS = {
 } as const;
 
 /** Keep searchable containers readable as separate exploration beats. */
-const SEARCHABLE_MIN_MANHATTAN_DISTANCE = 2;
+// Keep containers and mandatory evidence from reading as one crowded threat
+// cluster. Three tiles also prevents diagonal one-tile overlaps in the
+// flashlight view while retaining a deterministic fallback on compact maps.
+const SEARCHABLE_MIN_MANHATTAN_DISTANCE = 3;
 
 function searchableSpacingAllowed(x: number, y: number, occupied: ReadonlySet<string>): boolean {
   for (const key of occupied) {
@@ -293,9 +296,9 @@ function placeObjectiveSearchables(
   const indices: number[] = [];
   for (let step = 0; step < clues.length; step++) {
     const cell = candidates.find(candidate => !used.has(`${candidate.x},${candidate.y}`)
-      && searchableClusterAllowed(candidate.x, candidate.y, used))
+      && searchableSpacingAllowed(candidate.x, candidate.y, used))
       ?? candidates.find(candidate => !used.has(`${candidate.x},${candidate.y}`)
-        && searchableSpacingAllowed(candidate.x, candidate.y, used))
+        && searchableClusterAllowed(candidate.x, candidate.y, used))
       ?? candidates.find(candidate => !used.has(`${candidate.x},${candidate.y}`));
     if (!cell) throw new Error('Generated floor cannot place all mandatory evidence nodes.');
     const index = searchables.length;
@@ -556,6 +559,7 @@ function chooseUniqueSearchablePosition(
   // draw here. Keep that count stable so a placement collision cannot shift
   // subsequent loot types, Mimic decisions, or floor generation.
   const candidate = candidateAt(rng.int(4));
+  if (!occupied.has(`${candidate[0]},${candidate[1]}`) && searchableSpacingAllowed(candidate[0], candidate[1], occupied)) return candidate;
   if (!occupied.has(`${candidate[0]},${candidate[1]}`) && searchableClusterAllowed(candidate[0], candidate[1], occupied)) return candidate;
 
   // A room has several valid wall cells even at the minimum generated size.
@@ -570,14 +574,16 @@ function chooseUniqueSearchablePosition(
   }
   const available = candidates.filter(([x, y]) => !occupied.has(`${x},${y}`));
   if (available.length === 0) throw new Error('No unoccupied wall tile available for searchable object');
-  const spaced = available.filter(([x, y]) => searchableClusterAllowed(x, y, occupied));
-  if (spaced.length) {
-    let best = spaced[0];
+  const spaced = available.filter(([x, y]) => searchableSpacingAllowed(x, y, occupied));
+  const clustered = available.filter(([x, y]) => searchableClusterAllowed(x, y, occupied));
+  const preferred = spaced.length ? spaced : clustered;
+  if (preferred.length) {
+    let best = preferred[0];
     let bestDistance = Math.min(...[...occupied].map(key => {
       const [ox, oy] = key.split(',').map(Number);
       return Math.abs(best[0] - ox) + Math.abs(best[1] - oy);
     }));
-    for (const current of spaced.slice(1)) {
+    for (const current of preferred.slice(1)) {
       const distance = Math.min(...[...occupied].map(key => {
         const [ox, oy] = key.split(',').map(Number);
         return Math.abs(current[0] - ox) + Math.abs(current[1] - oy);

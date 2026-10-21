@@ -34,7 +34,11 @@ export interface ProceduralPuzzle {
 const RESIDENT_NAMES = ['Mara Venn', 'Elias Rook', 'Nadiya Pell', 'Jonas Vale'] as const;
 const APARTMENTS = ['2A', '3C', '4B', '5D'] as const;
 const CIRCUIT_LABELS = ['LANTERN', 'PAPER', 'HOLLOW', 'NORTH'] as const;
-const RECORD_EVENTS = ['The tenant register was sealed', 'The stairwell was inspected', 'The building vanished from the city index'] as const;
+const RECORD_EVENTS = [
+  'MAINTENANCE COMPLAINT // 21:10 — Resident reports failing emergency lights and asks management to inspect the wiring.',
+  'SECURITY MEMO // 23:40 — Caretaker notes residents remain inside; emergency exits are locked under a management order.',
+  'INCIDENT REPORT // 00:15 — Fire reported. The filed copy states the building was evacuated, but the final page was replaced afterward.',
+] as const;
 
 /**
  * Puzzle RNG is domain-separated from the map, loot, enemy, and presentation
@@ -72,11 +76,16 @@ function createCombination(rng: PCG32): ProceduralPuzzle {
   }
   const ordinals = ['FIRST', 'SECOND', 'THIRD'];
   const sources = ['CALENDAR', 'PHOTOGRAPH', 'APARTMENT MARK'];
+  const narrativeNotes = [
+    'The repair schedule has been altered twice. The failure was logged before the repair was ordered.',
+    'A maintenance complaint is clipped behind the photograph. Someone removed the reply.',
+    'The mark is written beside a vacancy number for a resident the register says never lived here.',
+  ];
   return {
     floor: 4, kind: 'combination', title: 'THE LOCKED BOX', deviceLabel: 'MAINTENANCE LOCKBOX', solutionCode,
     clueTexts: solutionCode.map((digit, index) => ({
       title: `${sources[index]} // ${ordinals[index]} DIGIT`,
-      content: `CODE RULE: calculate ${combinationExpressions[index].left} ${combinationExpressions[index].operator} ${combinationExpressions[index].right}, then keep only the final digit. That digit is the ${ordinals[index]} number and position ${index + 1} of the lock code.`,
+      content: `CODE RULE: calculate ${combinationExpressions[index].left} ${combinationExpressions[index].operator} ${combinationExpressions[index].right}, then keep only the final digit. That digit is the ${ordinals[index]} number and position ${index + 1} of the lock code. ${narrativeNotes[index]}`,
     })).map(clue => `${clue.title}: ${clue.content}`),
     combinationExpressions,
   };
@@ -112,7 +121,7 @@ function createResidentDeduction(rng: PCG32): ProceduralPuzzle {
     residents, correctResident: correct, residentClueReferences: references,
     clueTexts: [
       `RULE 1 — BICYCLE: the missing resident has the SAME bicycle status as apartment ${bicycleReference.apartment}.`,
-      `RULE 2 — NIGHT SHIFT: the missing resident has the OPPOSITE night-shift status from apartment ${shiftReference.apartment}. Apply BOTH rules to the directory.`,
+      `RULE 2 — NIGHT SHIFT: the missing resident has the OPPOSITE night-shift status from apartment ${shiftReference.apartment}. Apply BOTH rules to the directory.\n\n“They removed my name from the directory yesterday. I asked the caretaker why. He said nobody had ever lived in my apartment.”`,
     ],
   };
 }
@@ -125,7 +134,7 @@ function createCircuit(rng: PCG32): ProceduralPuzzle {
   return {
     floor: 2, kind: 'circuit', title: 'THE ARCHIVE CIRCUIT', deviceLabel: 'BREAKER PANEL',
     circuitLabels: labels, circuitMask, circuitOrder,
-    clueTexts: [`RELAY RULE: switch ON exactly two feeds in sequence. Sequence 1 is ${labels[circuitOrder[0]]}; sequence 2 is ${labels[circuitOrder[1]]}. Leave the other two OFF, then TEST CIRCUIT.`],
+    clueTexts: [`ARCHIVE CIRCUIT DIAGRAM — MAINTENANCE COPY\n\nRELAY RULE: switch ON exactly two feeds in sequence. Sequence 1 is ${labels[circuitOrder[0]]}; sequence 2 is ${labels[circuitOrder[1]]}. Leave the other two OFF, then TEST CIRCUIT.\n\nHANDWRITTEN ADDENDUM: emergency lighting and exit controls were marked DISABLED. The warning was filed, then crossed out. Do not restore the panel without recording who ordered the change.`],
   };
 }
 
@@ -151,13 +160,13 @@ function createMemory(rng: PCG32, worldSeed: number): ProceduralPuzzle {
   const residents = floor3.residents!;
   const missingResident = residents[floor3.correctResident!];
   const memoryFragments = [
-    'THE MESSAGE HAD NO SENDER',
-    `THE ERASED NAME: ${missingResident.name} / ${missingResident.apartment}`,
-    `YOUR HANDWRITING IN THE SEALED RECORD`,
+    'A PHOTOGRAPH WITH A TORN EDGE. SOMEONE WROTE: “GO TO THE FOURTH FLOOR.”',
+    `A DIRECTORY LINE SCRAPED AWAY: ${missingResident.name} / ${missingResident.apartment}. THE VACANCY WAS A LIE.`,
+    'A COPY OF YOUR HANDWRITING BESIDE THE WORDS: KEEP THE EXITS OPEN.',
   ];
-  const memoryChoices = rng.shuffle(['THE VISIT — FLOOR 4', 'THE MISSING RESIDENT — FLOOR 3', 'THE SEALED RECORD — FLOOR 1']);
+  const memoryChoices = rng.shuffle(['THE FIRST WARNING — FLOOR 4', 'THE ERASED DIRECTORY — FLOOR 3', 'THE LAST RECORD — FLOOR 1']);
   const correctChoiceFor = [
-    'THE VISIT — FLOOR 4', 'THE MISSING RESIDENT — FLOOR 3', 'THE SEALED RECORD — FLOOR 1',
+    'THE FIRST WARNING — FLOOR 4', 'THE ERASED DIRECTORY — FLOOR 3', 'THE LAST RECORD — FLOOR 1',
   ];
   const memoryAnswers = correctChoiceFor.map(choice => memoryChoices.indexOf(choice));
   return {
@@ -166,7 +175,7 @@ function createMemory(rng: PCG32, worldSeed: number): ProceduralPuzzle {
     clueTexts: [
       `The anonymous message names the photograph, not its sender. The code ${floor4.solutionCode!.join('')} is written on the same torn edge.`,
       `The erased resident was ${missingResident.name}, apartment ${missingResident.apartment}. The record repeats a signature in your handwriting.`,
-      'FINAL RULE: match each fragment to the place it names. The sender was already inside the photograph.',
+      'FINAL RULE: match each fragment to the place it remembers. The sender remains unnamed. The last message was written from behind a locked door.',
     ],
   };
 }

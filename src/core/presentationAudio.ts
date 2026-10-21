@@ -80,7 +80,7 @@ export function audioCuesForStateChange(previous: AuthoritativeState, current: A
 
   current.crawlers.forEach((enemy, index) => {
     const old = previous.crawlers.find(candidate => candidate.id === enemy.id) ?? previous.crawlers[index];
-    if (old && !old.chasing && enemy.chasing) cues.push(cue('sfx_crawler_skitter', 900, { x: enemy.x, y: enemy.y }, 0.42));
+    if (old && !old.chasing && enemy.chasing) cues.push(cue('sfx_crawler_skitter', 900, { x: enemy.x, y: enemy.y }, 0.5));
   });
   current.watchers.forEach((enemy, index) => {
     const old = previous.watchers.find(candidate => candidate.id === enemy.id) ?? previous.watchers[index];

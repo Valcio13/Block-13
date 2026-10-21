@@ -6,32 +6,56 @@ export interface Clue {
   content: string;
 }
 
+/** Earliest progression floor on which an optional note may appear. The
+ * numeric floor IDs descend toward Floor 13 (0), so later revelations use a
+ * lower threshold and cannot surface during earlier investigations. */
+const CLUE_REVEAL_FLOOR: Record<string, number> = {
+  missing_tenants: 4,
+  elevator_log: 4,
+  security_incident: 4,
+  previous_resident: 4,
+  contractor_warning: 2,
+  box_warning: 4,
+  emergency_exit: 2,
+  something_below: 2,
+  light_behavior: 4,
+  outside_doesnt_exist: 1,
+  wall_observation: 4,
+  box_instructions: 4,
+  floor_thirteen: 0,
+  resident_408: 0,
+  corrupted_log: 3,
+  research_fragment: 0,
+  janitor_recording: 0,
+  warning_scrawl: 4,
+};
+
 // 18 authored horror story fragments for Block 13 (mix of complete and fragmented)
 const ALL_CLUES: Clue[] = [
   {
     id: 'missing_tenants',
-    title: 'MISSING PERSONS REPORT',
-    content: 'Building management reports three tenants failed to return from Floor 13. Security footage shows them entering the elevator. The elevator never arrived at Floor 13. It doesn\'t exist on any blueprint.',
+    title: 'REDEVELOPMENT MEMO',
+    content: 'Property value review: several long-term tenants refuse to leave. Recommend continued pressure through delayed repairs and revised vacancy notices. Do not circulate outside management.',
   },
   {
     id: 'elevator_log',
-    title: 'ELEVATOR MAINTENANCE LOG',
-    content: 'Technician Note: Elevator #3 keeps stopping between floors. Display shows "13" but shaft inspection confirms no 13th floor exists. Passengers report hearing walls move. Recommended: full system replacement.',
+    title: 'ELECTRICAL MAINTENANCE LOG',
+    content: 'Technician note: emergency circuits failed again after the scheduled repair. The replacement order was marked complete before anyone inspected the panel. Resident complaints attached. Recommended: do not close this ticket.',
   },
   {
     id: 'security_incident',
-    title: 'SECURITY GUARD REPORT',
-    content: 'Night shift, 3:47 AM. Heard footsteps on empty Floor 2. Investigated. Found wet footprints leading to stairwell. Stairs only go down. Followed them. They led back to where I started. I quit tomorrow.',
+    title: 'CARETAKER REPORT',
+    content: 'Night shift: resident from the fourth floor returned with another photograph of the failed lights. I was told to remove the complaint from the folder. The request was not empty. I signed nothing.',
   },
   {
     id: 'previous_resident',
-    title: 'RECOVERED NOTE',
-    content: 'If you\'re reading this, you\'re trapped too. The floors go: 4, 3, 2, 1, then Floor 13. You can\'t skip it. You have to go through. I tried going back up. The stairs only go down now. Always down.',
+    title: 'RESIDENT COMPLAINT',
+    content: 'Fourth-floor lights failed three times this week. The exit sign was removed during the repair and never returned. Management says the building is safe. The maintenance log says otherwise.',
   },
   {
     id: 'contractor_warning',
     title: 'CONTRACTOR MEMO',
-    content: 'DO NOT accept renovation work in this building. Walls move when you\'re not looking. Measured a corridor at 40 feet. Turned around to get materials. Same corridor now 65 feet. Blueprints are useless here.',
+    content: 'Do not sign off on the emergency-exit work. The locks are being replaced with hardware that cannot be opened from the stairwell. Management says the change is temporary. It is not on the approved plan.',
   },
   {
     id: 'box_warning',
@@ -41,12 +65,12 @@ const ALL_CLUES: Clue[] = [
   {
     id: 'emergency_exit',
     title: 'BUILDING EVACUATION PLAN',
-    content: 'In case of emergency, proceed to nearest stairwell and exit building. DO NOT use stairs marked "Emergency Exit Only." Those stairs lead to Floor 13. Once you enter Floor 13, the only exit is through.',
+    content: 'In case of emergency, proceed to the nearest stairwell. The marked exits must remain unlocked whenever residents are inside. Handwritten note: management removed this paragraph from the posted copy.',
   },
   {
     id: 'something_below',
     title: 'ENGINEER\'S JOURNAL',
-    content: 'The foundation doesn\'t make sense. Building has 12 floors but the elevator shaft goes down 15 stories. Foreman says don\'t ask questions. At night, you can hear something breathing in the sub-basement. Something big.',
+    content: 'The foundation does not match the approved plan. Management ordered the lower service routes sealed before the inspection was complete. Foreman says do not ask questions. At night, someone keeps testing the locked doors.',
   },
   {
     id: 'light_behavior',
@@ -55,8 +79,8 @@ const ALL_CLUES: Clue[] = [
   },
   {
     id: 'outside_doesnt_exist',
-    title: 'LAST TRANSMISSION',
-    content: 'Made it to ground floor. Door says "EXIT." Opened it. Saw Floor 1 again. Tried windows. Same thing. Every window, every door - leads back inside. I think I understand now. There is no outside. There never was.',
+    title: 'INCIDENT SUMMARY',
+    content: 'The official report states that the building was evacuated before the fire. Attached complaints and the exit inspection disagree. Several pages were removed before filing.',
   },
   // NEW FRAGMENTED/CORRUPTED ENTRIES
   {
@@ -72,7 +96,7 @@ const ALL_CLUES: Clue[] = [
   {
     id: 'floor_thirteen',
     title: 'MAINTENANCE REQUEST',
-    content: 'Floor 13 isn\'t on the panel.\n\nIt appeared after midnight.\n\nI pressed it and',
+    content: 'The emergency stairwell is missing from the revised panel.\n\nA handwritten arrow points down to a line marked Floor 13.\n\nThe final instruction was torn away.',
   },
   {
     id: 'resident_408',
@@ -82,7 +106,7 @@ const ALL_CLUES: Clue[] = [
   {
     id: 'corrupted_log',
     title: '█████ PERSONNEL FILE',
-    content: '██/██/20██: Subject exhibited [REDACTED] after 72 hours below Floor 1. Psychological eval: ███████. Recommendation: ████████ ██ ███████ ███. Note: "Floor 13" was not part of original design.',
+    content: '██/██/20██: Resident complaint file removed after management review. Psychological evaluation: [REDACTED]. Recommendation: do not return the original to the tenant folder.',
   },
   {
     id: 'research_fragment',
@@ -106,8 +130,13 @@ export function getAuthoredClueForSearchId(id: string): Clue | null {
   const match = /^clue_(\d+)_([0-9]+)_([0-9]+)$/.exec(id);
   if (!match) return null;
   const [, floor, room, item] = match;
-  const index = (Number(floor) + Number(room) + Number(item)) % ALL_CLUES.length;
-  return { ...ALL_CLUES[index] };
+  const currentFloor = Number(floor);
+  const available = currentFloor >= 0 && currentFloor <= 4
+    ? ALL_CLUES.filter(clue => (CLUE_REVEAL_FLOOR[clue.id] ?? 4) >= currentFloor)
+    : ALL_CLUES;
+  if (available.length === 0) return null;
+  const index = (currentFloor + Number(room) + Number(item)) % available.length;
+  return { ...available[index] };
 }
 
 export class ClueManager {

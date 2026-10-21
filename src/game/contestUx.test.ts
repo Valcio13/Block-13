@@ -38,12 +38,12 @@ describe('contest UX presentation helpers', () => {
     const lines = VICTORY_EPILOGUE.map(beat => beat.text).filter(Boolean);
     expect(lines).toEqual([
       'You push through the final door.', 'For the first time tonight...', 'everything is quiet.',
-      '12:13 AM', 'Cold air fills your lungs.', "You're outside.", 'Four floors.', 'One address.',
-      'One way down.', 'You should have reached the street.', 'But you remember the hallway.',
-      'The thing that followed you.', 'The door marked 13.', 'You look back.', 'Four floors.',
-      'Just like there have always been.', 'There is no Floor 13.',
+      '12:13 AM', 'Cold air fills your lungs.', "You're outside.", 'OFFICIAL PROPERTY RECORD', 'REGISTERED FLOORS: 4',
+      'RECORDED FATALITIES: 0', 'INCIDENT REPORT: NONE', 'But you remember the hallway.',
+      'The thing that followed you.', 'The door marked 13.', 'You look back.', 'There is no Floor 13.', 'FLOOR 13: THE BUILDING THAT NEVER EXISTED',
+      'They erased the people. Not what happened to them.',
     ]);
-    expect(lines.at(-1)).toBe('There is no Floor 13.');
+    expect(lines.at(-1)).toBe('They erased the people. Not what happened to them.');
     expect(VICTORY_EPILOGUE_DURATION_MS).toBeLessThanOrEqual(35_000);
     expect(VICTORY_EPILOGUE_DURATION_MS).toBeGreaterThanOrEqual(25_000);
   });

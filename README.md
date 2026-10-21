@@ -127,6 +127,9 @@ transactions. Local runs require no wallet and do not use Hemi.
 - `tests/` and `src/core/*.test.ts` — replay, determinism, and core tests
 - `docs/` — gameplay, art, audio, and design notes
 
+The player-facing explanation of every floor puzzle is in
+[docs/puzzle-guide.md](docs/puzzle-guide.md).
+
 Current protocol and architecture documentation is indexed in [ARCHITECTURE.md](ARCHITECTURE.md). Older audit and implementation reports are retained as historical records; their headings identify reports that describe superseded behavior.
 
 The current pre-release blockers and handoff checklist are in

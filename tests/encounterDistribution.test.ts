@@ -64,4 +64,34 @@ describe('versioned rare-enemy roster', () => {
     expect(sim.state.watchers).toHaveLength(0);
     expect(sim.state.ambushers).toHaveLength(0);
   });
+
+  it('keeps spawned threats separated from one another and mandatory evidence', () => {
+    // One full tile is the hard floor; the generator prefers 96px and
+    // relaxes only when a compact room cannot satisfy every preference.
+    const minimumPixels = 32;
+    for (const floor of [4, 3, 2, 1, 0]) for (let seed = 1; seed <= 128; seed++) {
+      const sim = new AuthoritativeSimulation(BigInt(seed), { floor });
+      const state = sim.state;
+      const threats = [
+        { x: state.stalker.x, y: state.stalker.y },
+        ...state.crawlers,
+        ...state.watchers,
+        ...state.ambushers,
+        ...state.mimics,
+      ];
+      for (let i = 0; i < threats.length; i++) for (let j = i + 1; j < threats.length; j++) {
+        expect(Math.hypot(threats[i].x - threats[j].x, threats[i].y - threats[j].y) / 256, `floor ${floor}, seed ${seed}, threat pair ${i}/${j}`)
+          .toBeGreaterThanOrEqual(minimumPixels);
+      }
+      for (const index of sim.floor.objectives.searchableIndices) {
+        const evidence = sim.floor.searchables[index];
+        const ex = (evidence.x * 32 + 16) * 256, ey = (evidence.y * 32 + 16) * 256;
+        for (const threat of threats) {
+          const distance = Math.hypot(threat.x - ex, threat.y - ey) / 256;
+          expect(distance, `floor ${floor}, seed ${seed}, evidence ${index}, threat ${threats.indexOf(threat)}`)
+            .toBeGreaterThanOrEqual(minimumPixels);
+        }
+      }
+    }
+  });
 });

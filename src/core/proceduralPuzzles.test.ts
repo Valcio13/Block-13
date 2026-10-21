@@ -52,11 +52,14 @@ describe('procedural floor puzzles', () => {
       combination.combinationExpressions!.forEach(expression => {
         if (expression.operator === '-') expect(expression.left).toBeGreaterThanOrEqual(expression.right);
       });
+      expect(combination.clueTexts.join(' ')).toContain('never lived here');
       expect(combination.clueTexts.join(' ')).not.toMatch(/records?\s+\d+\s+.*\s*=\s*\d/i);
       const circuit = generateProceduralPuzzle(seed, 2);
       expect(circuit.circuitOrder).toHaveLength(2);
       expect(new Set(circuit.circuitOrder)).toEqual(new Set(circuit.circuitLabels!.map((_, index) => index).filter(index => circuit.circuitMask! & (1 << index))));
       expect(circuit.clueTexts[0]).toContain('in sequence');
+      const records = generateProceduralPuzzle(seed, 1);
+      expect(records.recordEvents!.join(' ')).toMatch(/resident|apartment|index|inspection/i);
     }
   });
 

@@ -16,9 +16,11 @@ export const ENEMY_COLLISION_HALF_EXTENT_SUBPIXELS = PLAYER_COLLISION_HALF_EXTEN
 export const STALKER_CONTACT_DAMAGE_HP = 30;
 export const STALKER_CONTACT_CURSE = 20 * FIXED_SCALE;
 export const FLOOR_TRANSITION_CURSE = 8 * FIXED_SCALE;
-export const BLOCK13_ENTRY_CURSE_CAP = 85 * FIXED_SCALE;
-export const AMBUSHER_WARNING_MIN_TICKS = 24;
-export const AMBUSHER_WARNING_MAX_TICKS = 36;
+/** Leave Block 13 threatening while giving a first-time player recovery room. */
+export const BLOCK13_ENTRY_CURSE_CAP = 75 * FIXED_SCALE;
+/** 0.9–1.2 seconds at the fixed 60 Hz simulation rate. */
+export const AMBUSHER_WARNING_MIN_TICKS = 54;
+export const AMBUSHER_WARNING_MAX_TICKS = 72;
 export const WATCHER_PEAK_CURSE_SUBUNITS_PER_TICK = 384;
 export const FLASHLIGHT_DRAIN_SUBUNITS_PER_TICK = 4;
 export const STALKER_RECOVERY_COOLDOWN_TICKS = 900;
@@ -241,15 +243,41 @@ export class AuthoritativeSimulation {
         return `${item.x},${item.y}`;
       }),
     ]);
+    const objectiveCells = this.floorValue.objectives.searchableIndices.map(index => {
+      const item = this.floorValue.searchables[index];
+      return [item.x, item.y] as [number, number];
+    });
+    const occupiedCells = new Set<string>(this.stateValue.mimics.map(mimic => `${Math.floor(mimic.x / TILE)},${Math.floor(mimic.y / TILE)}`));
+    const cellDistanceSquared = (a: [number, number], b: [number, number]) => {
+      const dx = (a[0] - b[0]) * 32 * FIXED_SCALE;
+      const dy = (a[1] - b[1]) * 32 * FIXED_SCALE;
+      return square(dx) + square(dy);
+    };
     const farTile = (minimumPixels: number, maximumPixels = Number.MAX_SAFE_INTEGER, rng = this.worldRng): [number, number] => {
       const min2 = square(minimumPixels * FIXED_SCALE), max2 = square(maximumPixels * FIXED_SCALE);
-      const eligible = walkable.filter(([x, y]) => {
+      const baseEligible = walkable.filter(([x, y]) => {
         if (reservedPuzzleCells.has(`${x},${y}`)) return false;
         const dx = (x * 32 + 16) * FIXED_SCALE - s.x;
         const dy = (y * 32 + 16) * FIXED_SCALE - s.y;
         const d2 = square(dx) + square(dy);
         return d2 >= min2 && d2 <= max2;
       });
+      const spaced = baseEligible.filter(cell => {
+        if (occupiedCells.has(`${cell[0]},${cell[1]}`)) return false;
+        if (objectiveCells.some(objective => cellDistanceSquared(cell, objective) < square(96 * FIXED_SCALE))) return false;
+        return [...occupiedCells].every(key => {
+          const [occupiedX, occupiedY] = key.split(',').map(Number) as [number, number];
+          return cellDistanceSquared(cell, [occupiedX, occupiedY]) >= square(96 * FIXED_SCALE);
+        });
+      });
+      const evidenceSpaced = baseEligible.filter(cell => !occupiedCells.has(`${cell[0]},${cell[1]}`)
+        && !objectiveCells.some(objective => cellDistanceSquared(cell, objective) < square(64 * FIXED_SCALE)));
+      const entitySpaced = baseEligible.filter(cell => !occupiedCells.has(`${cell[0]},${cell[1]}`)
+        && [...occupiedCells].every(key => {
+          const [occupiedX, occupiedY] = key.split(',').map(Number) as [number, number];
+          return cellDistanceSquared(cell, [occupiedX, occupiedY]) >= square(64 * FIXED_SCALE);
+        }));
+      const eligible = spaced.length ? spaced : evidenceSpaced.length ? evidenceSpaced : entitySpaced.length ? entitySpaced : baseEligible;
       if (eligible.length) return eligible[rng.nextRange(0, eligible.length - 1)];
       return walkable.filter(([x, y]) => !reservedPuzzleCells.has(`${x},${y}`)).reduce((best, cell) => {
         const d = square((cell[0] * 32 + 16) * FIXED_SCALE - s.x) + square((cell[1] * 32 + 16) * FIXED_SCALE - s.y);
@@ -267,6 +295,7 @@ export class AuthoritativeSimulation {
       ticksRemaining: dormant ? 300 + this.stalkerRng.nextRange(0, 600) : 0,
       chaseStartTick: 0, lastChaseEndTick: -600, visible: false, moveRemainder: 0,
     };
+    occupiedCells.add(`${stalkerCell[0]},${stalkerCell[1]}`);
     if (!dormant) this.pickStalkerRoamTarget();
 
     let crawlerCount = 0, watcherCount = 0, ambusherCount = 0;
@@ -279,12 +308,16 @@ export class AuthoritativeSimulation {
       default: break;
     }
     s.crawlers = Array.from({ length: crawlerCount }, (_, id) => {
-      const [x, y] = center(farTile(250, Number.MAX_SAFE_INTEGER, this.crawlerRng));
+      const cell = farTile(250, Number.MAX_SAFE_INTEGER, this.crawlerRng);
+      occupiedCells.add(`${cell[0]},${cell[1]}`);
+      const [x, y] = center(cell);
       const [tx, ty] = center(walkable[this.crawlerRng.nextRange(0, walkable.length - 1)]);
       return { id, x, y, targetX: tx, targetY: ty, chasing: false, chaseStartTick: 0, moveRemainder: 0 };
     });
     s.watchers = Array.from({ length: watcherCount }, (_, id) => {
-      const [x, y] = center(farTile(200, Number.MAX_SAFE_INTEGER, this.watcherRng));
+      const cell = farTile(200, Number.MAX_SAFE_INTEGER, this.watcherRng);
+      occupiedCells.add(`${cell[0]},${cell[1]}`);
+      const [x, y] = center(cell);
       return { id, x, y, active: true, illuminatedTicks: 0, decayRemainder: 0, curseRemainder: 0 };
     });
     const hidingCells: [number, number][] = [];
@@ -305,9 +338,17 @@ export class AuthoritativeSimulation {
       const valid = hidingCells.filter(([x, y]) => {
         const wx = (x * 32 + 16) * FIXED_SCALE, wy = (y * 32 + 16) * FIXED_SCALE;
         const d2 = square(wx - playerX) + square(wy - playerY);
-        return d2 > square(200 * FIXED_SCALE) && d2 < square(400 * FIXED_SCALE);
+        if (d2 <= square(200 * FIXED_SCALE) || d2 >= square(400 * FIXED_SCALE)) return false;
+        if (occupiedCells.has(`${x},${y}`)) return false;
+        if (objectiveCells.some(objective => cellDistanceSquared([x, y], objective) < square(96 * FIXED_SCALE))) return false;
+        return [...occupiedCells].every(key => {
+          const [occupiedX, occupiedY] = key.split(',').map(Number) as [number, number];
+          return cellDistanceSquared([x, y], [occupiedX, occupiedY]) >= square(96 * FIXED_SCALE);
+        });
       });
-      const [x, y] = center(valid.length ? valid[this.ambusherRng.nextRange(0, valid.length - 1)] : farTile(200, Number.MAX_SAFE_INTEGER, this.ambusherRng));
+      const cell = valid.length ? valid[this.ambusherRng.nextRange(0, valid.length - 1)] : farTile(200, Number.MAX_SAFE_INTEGER, this.ambusherRng);
+      occupiedCells.add(`${cell[0]},${cell[1]}`);
+      const [x, y] = center(cell);
       return { id, x, y, state: 'hidden' as const, warningTicks: 0, damageAtTick: -1, damage: 5 + this.ambusherRng.nextRange(0, 3), hasTriggered: false };
     });
     this.placeLockboxAwayFromSpawnedEntities();

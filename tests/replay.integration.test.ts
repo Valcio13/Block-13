@@ -9,7 +9,7 @@ import {
 } from '../src/core/inputRecorder';
 import { getPlayerVelocity, nextFlashlightState } from '../src/core/inputSimulation';
 import { SimulationEngine } from '../src/core/simulationEngine';
-import { AuthoritativeSimulation, FIXED_SCALE, MIMIC_REVEAL_TICKS, MIMIC_CHASE_DURATION_TICKS, STALKER_RECOVERY_COOLDOWN_TICKS, PLAYER_COLLISION_HALF_EXTENT_SUBPIXELS, floorSeedFromCanonicalSeed, type AuthoritativeState } from '../src/core/authoritativeSimulation';
+import { AuthoritativeSimulation, FIXED_SCALE, MIMIC_REVEAL_TICKS, MIMIC_CHASE_DURATION_TICKS, STALKER_RECOVERY_COOLDOWN_TICKS, PLAYER_COLLISION_HALF_EXTENT_SUBPIXELS, BLOCK13_ENTRY_CURSE_CAP, AMBUSHER_WARNING_MIN_TICKS, AMBUSHER_WARNING_MAX_TICKS, floorSeedFromCanonicalSeed, type AuthoritativeState } from '../src/core/authoritativeSimulation';
 import { finalStateV1FromSimulation, hashFinalStateV1 } from '../src/core/finalStateV1';
 import type { RunManifest } from '../src/core/seedDerivation';
 import { getAuthoredClueForSearchId } from '../src/core/clues';
@@ -392,8 +392,8 @@ describe('authoritative deterministic simulation', () => {
       { ...ambusher, state: 'hidden', warningTicks: 0, x: x + 20 * FIXED_SCALE },
     ], mimics: [] });
     warningSim.step(emptyInput);
-    expect(warningSim.state.ambushers[0].warningTicks).toBeGreaterThanOrEqual(24);
-    expect(warningSim.state.ambushers[0].warningTicks).toBeLessThanOrEqual(36);
+    expect(warningSim.state.ambushers[0].warningTicks).toBeGreaterThanOrEqual(AMBUSHER_WARNING_MIN_TICKS);
+    expect(warningSim.state.ambushers[0].warningTicks).toBeLessThanOrEqual(AMBUSHER_WARNING_MAX_TICKS);
 
     sim.step({ ...emptyInput, flashlight: true });
     expect(sim.state.watchers[0].illuminatedTicks).toBe(1);
@@ -766,7 +766,7 @@ describe('authoritative deterministic simulation', () => {
     expect(events).toContainEqual({ type: 'floor_transition', fromFloor: 1, toFloor: 0, floorsCompleted: 4 });
     expect(state.floor).toBe(0);
     expect(state.status).toBe('playing');
-    expect(state.curse).toBe(85 * FIXED_SCALE);
+    expect(state.curse).toBe(BLOCK13_ENTRY_CURSE_CAP);
     expect(state.battery).toBe(20 * FIXED_SCALE);
     expect(sim.floor.width).toBeGreaterThan(0);
     expect(sim.floor.key.length).toBe(2);

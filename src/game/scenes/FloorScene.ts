@@ -221,6 +221,7 @@ export class FloorScene extends Phaser.Scene {
   private ambusherJumpscareImpactPlayed = false;
   private crawlerSprites: Phaser.GameObjects.Sprite[] = [];
   private crawlerPresentation = new Map<number, { moving: boolean; elapsedMs: number }>();
+  private crawlerWarningNextCueAt = new Map<number, number>();
   private watcherSprites: Phaser.GameObjects.Sprite[] = [];
   private watcherEyeGlints: Phaser.GameObjects.Graphics[] = [];
   private hauntingDirector = new HauntingDirector();
@@ -297,6 +298,7 @@ export class FloorScene extends Phaser.Scene {
     this.playerWalkAnimationElapsedMs = 0;
     this.searchableSprites = [];
     this.crawlerPresentation.clear();
+    this.crawlerWarningNextCueAt.clear();
     this.watcherSprites = [];
     this.watcherEyeGlints = [];
     this.mimicRevealElapsedMs.clear();
@@ -847,14 +849,35 @@ export class FloorScene extends Phaser.Scene {
         } else this.showTemporaryMessage(`${this.puzzleFallbackItemLabel(event.floor)} FOUND — RETURN TO THE PUZZLE`, '#ffca86', 1800);
       }
       else if (event.type === 'puzzle_solved') {
-        if (event.floor === 1) {
+        if (event.floor === 4) {
+          const content = 'The three records agree on one point: the failures were scheduled, repeated, and then marked repaired without inspection. Someone made the building unsafe on purpose.';
+          this.recordNotebookEntry({ id: `${event.floor}:sabotage-revelation`, floor: event.floor, title: 'THE FIRST WARNING', content, important: true });
+          this.showClueModal('THE FIRST WARNING', content, true);
+        } else if (event.floor === 1) {
           const sequence = this.floorData.puzzle.recordOrder!.map(index => this.floorData.puzzle.recordEvents![index]).join('\n→ ');
-          this.showClueModal('THE UNALTERED SEQUENCE', `${sequence}\n\nThe official index was altered. This is the sequence preserved by the three independent records.`);
+          const content = `${sequence}\n\nThe official index was altered. This is the sequence preserved by the three independent records.`;
+          this.recordNotebookEntry({ id: `${event.floor}:unaltered-sequence`, floor: event.floor, title: 'THE UNALTERED SEQUENCE', content, important: true });
+          this.showClueModal('THE UNALTERED SEQUENCE', content, true);
+        } else if (event.floor === 3) {
+          const resident = this.floorData.puzzle.residents![this.floorData.puzzle.correctResident!];
+          const content = `${resident.name} — APARTMENT ${resident.apartment}\n\nThe directory accepts the match, then opens a sealed maintenance file:\n\nREMOVED FROM REGISTER. DO NOT RETURN THE ORIGINAL TO THE TENANT FOLDER.\n\nThe resident had been collecting evidence of the building's failures.`;
+          this.recordNotebookEntry({ id: `${event.floor}:name-they-removed`, floor: event.floor, title: 'THE NAME THEY REMOVED', content, important: true });
+          this.showClueModal('THE NAME THEY REMOVED', content, true);
+        } else if (event.floor === 2) {
+          const content = 'The archive confirms that emergency systems were disabled by order, not by accident. The resident\'s warnings were filed, crossed out, and left beside the locked-exit instructions.';
+          this.recordNotebookEntry({ id: `${event.floor}:archive-confirmation`, floor: event.floor, title: 'THE ARCHIVE CONFIRMATION', content, important: true });
+          this.showClueModal('THE ARCHIVE CONFIRMATION', content, true);
         } else if (event.floor === 0) {
           const state = this.authoritativeSimulation.state;
           const eventId = Math.imul(this.runState.seed ^ state.tick, 0x45d9f3b) >>> 0;
-          this.showHauntingVisual('silhouette', eventId, 1800);
-          this.showTemporaryMessage('THE SENDER WAS ALREADY INSIDE THE PHOTOGRAPH.', '#e8c6d4', 2300);
+          this.audioDirector?.setCategoryDucking('ambience', 0.08, 'final-memory-reveal');
+          const content = 'I heard them outside the door.\n\nThey\'re still waiting for someone to open it.\n\nI told them help was coming.\n\nI don\'t know what else to tell them.\n\nThe whistleblower died trying to reach the others.';
+          this.recordNotebookEntry({ id: `${event.floor}:last-message`, floor: event.floor, title: 'THE LAST MESSAGE', content, important: true });
+          this.showClueModal('THE LAST MESSAGE', content, true, () => {
+            this.audioDirector?.setCategoryDucking('ambience', 1, 'final-memory-reveal');
+            this.showHauntingVisual('silhouette', eventId, 1800);
+            this.showTemporaryMessage('THE MEMORY WILL NOT STAY BURIED.', '#e8c6d4', 2300);
+          });
         } else this.showTemporaryMessage(
           event.floor === 2 ? 'ARCHIVE POWER RESTORED' : 'PUZZLE SOLVED', '#ffd700', 1800,
         );
@@ -1292,9 +1315,9 @@ export class FloorScene extends Phaser.Scene {
       director.playPositionalVariantWithCooldown(audioCue.key, 2, {
         x: audioCue.positional.x / FIXED_SCALE,
         y: audioCue.positional.y / FIXED_SCALE,
-        maxDistance: 300,
+        maxDistance: 420,
         category: 'sfx',
-        volume: audioCue.volume ?? 0.42,
+        volume: audioCue.volume ?? 0.5,
       }, this.player.x, this.player.y, audioCue.cooldownMs);
     } else if (audioCue.key === 'sfx_flashlight_on' || audioCue.key === 'sfx_flashlight_off') {
       director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.56 });
@@ -1527,6 +1550,12 @@ export class FloorScene extends Phaser.Scene {
       sprite?.setAlpha(exposure * (enemy.chasing ? 1 : 0.76));
       sprite?.setTint(exposure >= 0.7 ? 0xe3d5bd : 0xffffff);
       sprite?.setScale(enemy.chasing ? 1 + Math.sin(state.tick * 0.16 + enemy.id) * 0.045 : 1);
+      const crawlerDistance = Math.hypot(enemy.x - state.x, enemy.y - state.y) / FIXED_SCALE;
+      const nextWarningAt = this.crawlerWarningNextCueAt.get(enemy.id) ?? Number.NEGATIVE_INFINITY;
+      if (!enemy.chasing && exposure > 0.18 && crawlerDistance <= 180 && this.time.now >= nextWarningAt) {
+        this.playAudioCue({ key: 'sfx_crawler_skitter', cooldownMs: 900, positional: { x: enemy.x, y: enemy.y }, volume: 0.34 });
+        this.crawlerWarningNextCueAt.set(enemy.id, this.time.now + 1800);
+      }
       if (sprite) sprite.setFlipX(enemy.targetX < enemy.x);
     });
     state.watchers.forEach((enemy, index) => {
@@ -1648,7 +1677,7 @@ export class FloorScene extends Phaser.Scene {
       lines.push('FIND THE ONE RESIDENT MATCHING BOTH RULES.', 'SAME BICYCLE • OPPOSITE NIGHT SHIFT.', `SELECTED  ·  RESIDENT ${run.selectedIndex + 1}`, `EVIDENCE NOTES  ·  ${evidence}/2 RECOVERED`, '', ...puzzle.residents!.map((resident, index) => `${index === run.selectedIndex ? '▶ ' : '  '}${resident.name} — APT ${resident.apartment} — BIKE ${resident.hasBicycle ? 'YES' : 'NO'} — NIGHTS ${resident.worksNights ? 'YES' : 'NO'}`), '↑ / ↓ SELECT RESIDENT   E CHECK BOTH RULES');
     } else if (puzzle.kind === 'circuit') {
       const expectedNext = puzzle.circuitOrder![run.circuitSequence.length];
-      lines.push('TURN ON EXACTLY TWO FEEDS IN THE RECOVERED ORDER.', 'SELECT A FEED, TOGGLE IT ON, THEN TEST THE ROUTE.', `SEQUENCE  ·  ${run.circuitSequence.map(index => puzzle.circuitLabels![index]).join(' → ') || '—'}`, `NEXT STEP  ·  ${expectedNext === undefined ? 'ROUTE COMPLETE' : puzzle.circuitLabels![expectedNext]}`, `SELECTED  ·  FEED ${run.selectedIndex + 1}`, '', ...puzzle.circuitLabels!.map((label, index) => `${index === run.selectedIndex ? '▶ ' : '  '}FEED ${index + 1}  ─ ${run.switchMask & (1 << index) ? '[ON ]' : '[OFF]'} ${label}  ─▶ RELAY`), '← / → SELECT FEED   ↑ TOGGLE   E TEST ROUTE');
+      lines.push('TURN ON EXACTLY TWO FEEDS IN THE RECOVERED ORDER.', 'SELECT A FEED, TOGGLE IT ON, THEN TEST THE ROUTE.', `SEQUENCE  ·  ${run.circuitSequence.map(index => puzzle.circuitLabels![index]).join(' → ') || '—'}`, `CHECKPOINT  ·  ${expectedNext === undefined ? 'ROUTE COMPLETE' : `${run.circuitSequence.length}/2 FEEDS RECORDED`}`, `SELECTED  ·  FEED ${run.selectedIndex + 1}`, '', ...puzzle.circuitLabels!.map((label, index) => `${index === run.selectedIndex ? '▶ ' : '  '}FEED ${index + 1}  ─ ${run.switchMask & (1 << index) ? '[ON ]' : '[OFF]'} ${label}  ─▶ RELAY`), '← / → SELECT FEED   ↑ TOGGLE   E TEST ROUTE');
       if (discoveredSteps.has(0) && this.notebookHintStage === 1) lines.push('', 'HINT 1 / 2  ·  THE DIAGRAM IDENTIFIES TWO FEEDS. MATCH THOSE LABELS; LEAVE THE OTHER TWO OFF.');
       else if (discoveredSteps.has(0) && this.notebookHintStage === 2) lines.push('', 'RECOVERED DIAGRAM:', puzzle.clueTexts[0]);
       else if (discoveredSteps.has(0)) lines.push('', 'H  OPTIONAL HINT 1 / 2  ·  READ THE MAINTENANCE DIAGRAM');
@@ -2182,7 +2211,7 @@ export class FloorScene extends Phaser.Scene {
     this.registry.set('investigationNotebook', this.notebookJournal);
   }
 
-  private showClueModal(title: string, content: string, recorded = false) {
+  private showClueModal(title: string, content: string, recorded = false, onClose?: () => void) {
     if (this.storyPopupOpen) return;
     this.storyPopupOpen = true;
     this.interactPrompt.setVisible(false);
@@ -2217,6 +2246,7 @@ export class FloorScene extends Phaser.Scene {
       this.storyPopupOpen = false;
       elements.forEach(element => element.destroy());
       this.closeStoryPopup = undefined;
+      onClose?.();
     };
     this.closeStoryPopup = close;
     closeButton.on('pointerdown', close);
