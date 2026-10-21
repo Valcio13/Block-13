@@ -454,21 +454,22 @@ function GameApp() {
     const completionStatus = terminalSubmissionStatus(completionPhase);
     
     return (
-      <main className="app-shell">
-        <section className="title-card">
+      <main className="app-shell result-shell">
+        <section className="title-card result-card">
+          <p className="eyebrow">RUN REPORT // HEMI ARCADE</p>
           <h1>{runState?.status === 'won' ? 'RUN COMPLETE!' : 'RUN OVER'}</h1>
           {runState?.status === 'won' && <p className="premise">YOU MADE IT OUT. Your nightmare is over. The run remains.</p>}
-          <p className="premise">{isBlockchainRun
+          <p className="result-status">{isBlockchainRun
             ? runState?.status === 'won' ? 'Hemi run complete.' : 'This Hemi run ended before the escape.'
             : 'LOCAL RUN — NO ONCHAIN SUBMISSION REQUIRED'}</p>
           {runState && (
-            <div style={{ marginTop: '2rem', color: '#a5b6b5' }}>
-              <p>Final Score: {runState.score}</p>
-              <p>Blocks Completed: {runState.floorsCompleted}</p>
+            <div className="result-stats">
+              <div><span>FINAL SCORE</span><strong>{runState.score}</strong></div>
+              <div><span>FLOORS COMPLETED</span><strong>{runState.floorsCompleted}</strong></div>
             </div>
           )}
           {isBlockchainRun && runState?.manifest && (
-            <div style={{ marginTop: '1rem', color: '#a5b6b5' }}>
+            <div className="result-chain-card">
               <p>Run ID: {runState.manifest.runId.toString()}</p>
               <p>Records this run’s result and replay commitment on Hemi.</p>
               {completionPhase === 'confirmed' ? (
@@ -483,7 +484,6 @@ function GameApp() {
                   <button onClick={submitCompletion} disabled={completionStatus.disabled || !!transactionPending || !!localStorage.getItem(TX2_PENDING_KEY)}>{completionStatus.button}</button>
                 </>
               )}
-              <p>Final score: {runState.score}</p>
             </div>
           )}
           {transactionPending && <div role="alert" className="menu-error">
@@ -494,7 +494,8 @@ function GameApp() {
               setTransactionPending(null);
             }}>I checked the explorer; clear unresolved transaction marker</button>
           </div>}
-          <button onClick={() => { localStorage.removeItem(RUN_RECOVERY_STORAGE_KEY); sessionStorage.removeItem('activeRun'); window.location.reload(); }}>NEW RUN</button>
+          <button className="primary-action" onClick={() => { localStorage.removeItem(RUN_RECOVERY_STORAGE_KEY); sessionStorage.removeItem('activeRun'); window.location.reload(); }}>NEW HEMI RUN</button>
+          <p className="result-secondary-action">Use the same wallet to begin another Hemi run.</p>
         </section>
       </main>
     );
@@ -513,7 +514,7 @@ function GameApp() {
           : menuActions.hemi === 'switch-network' ? 'SWITCH TO HEMI TESTNET' : 'PLAY ON HEMI';
 
   return (
-    <main className="app-shell">
+    <main className="app-shell menu-shell">
       <section className="title-card" aria-labelledby="game-title">
         <p className="eyebrow">HEMI ARCADE // SURVIVAL HORROR</p>
         <h1 id="game-title">FLOOR 13</h1>
@@ -524,13 +525,16 @@ function GameApp() {
         {status === 'starting' && startPhase === 'entropy' && <button type="button" className="cancel-run-preparation" onClick={cancelRunPreparation}>CANCEL PREPARATION</button>}
 
         <div className="run-choices" aria-label="Choose how to play">
-          <section className="run-choice">
-            <button type="button" className="local-run-button" onClick={beginLocalRun} disabled={!menuActions.localEnabled}>PLAY LOCAL</button>
-          <p>Play now. No wallet or transaction required.</p>
+          <section className="run-choice run-choice-primary">
+            <p className="choice-kicker">PRIMARY RUN</p>
+            <button type="button" aria-live="polite" onClick={beginRun} disabled={menuActions.hemi === 'busy' || !!transactionPending}>{hemiLabel}</button>
+            <p>Create a verifiable run on Hemi, then record the result and replay commitment after the run.</p>
+            {isConnected && <p className={`network-state ${isCorrectNetwork ? 'is-ready' : 'is-warning'}`}>{isCorrectNetwork ? '● HEMI TESTNET READY' : '● SWITCH TO HEMI TESTNET TO CONTINUE'}</p>}
           </section>
           <section className="run-choice run-choice-secondary">
-            <button type="button" aria-live="polite" onClick={beginRun} disabled={menuActions.hemi === 'busy' || !!transactionPending}>{hemiLabel}</button>
-            <p>Create a run on Hemi, then record your result and replay commitment after the run.</p>
+            <p className="choice-kicker">DEVELOPMENT / PRACTICE</p>
+            <button type="button" className="local-run-button" onClick={beginLocalRun} disabled={!menuActions.localEnabled}>PLAY LOCAL</button>
+            <p>Play immediately without wallet or transaction requirements.</p>
           </section>
         </div>
 

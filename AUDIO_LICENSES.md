@@ -1,6 +1,6 @@
 # Audio source and license record
 
-Checked **2026-10-05**. These are third-party recordings downloaded from Pixabay and edited for Block 13. Pixabay marks each source page “Free for use under the Pixabay Content License.” The current license summary permits commercial use and does not require attribution; the terms prohibit distributing content on a standalone basis. The OGG files here are trimmed/mixed cues bundled as part of the game. See the [Pixabay Content License summary](https://pixabay.com/service/license-summary/) and [Terms of Service](https://pixabay.com/service/terms/). Attribution is optional under those terms; credits are retained below.
+Checked **2026-10-21**. These are third-party recordings downloaded from Pixabay and edited for Block 13. Pixabay marks each source page “Free for use under the Pixabay Content License.” The current license summary permits commercial use and does not require attribution; the terms prohibit distributing content on a standalone basis. The OGG files here are trimmed/mixed cues bundled as part of the game. See the [Pixabay Content License summary](https://pixabay.com/service/license-summary/) and [Terms of Service](https://pixabay.com/service/terms/). Attribution is optional under those terms; credits are retained below.
 
 For Freesound-syndicated items, Pixabay shows the source title and creator attribution but does not expose the contributor's original upload filename. The recorded filename below is the exact name returned by Pixabay's download.
 
@@ -17,10 +17,11 @@ For Freesound-syndicated items, Pixabay shows the source title and creator attri
 | `dragon-studio-male-groan-of-pain-357971.mp3` | [Male Groan of Pain](https://pixabay.com/sound-effects/people-male-groan-of-pain-357971/) — DRAGON-STUDIO | Pixabay Content License; creator states commercial and personal use permitted; attribution optional | `public/assets/audio/player/sfx_player_hurt_1.ogg`, `sfx_player_hurt_2.ogg` |
 | `freesound_community-monster-chase-grunts-45476.mp3` (Pixabay download; contributor upload filename not exposed) | [Monster Chase Grunts](https://pixabay.com/sound-effects/horror-monster-chase-grunts-45476/) — surfaceknight68 (Freesound) | Pixabay Content License; commercial use permitted; attribution not required (credit optional) | `public/assets/audio/enemies/stalker/sfx_stalker_hunt.ogg` |
 | `universfield-horror-impact-hit-567238.mp3` | [Horror Impact Hit](https://pixabay.com/sound-effects/horror-horror-impact-hit-567238/) — Universfield | Pixabay Content License; commercial use permitted; attribution not required (credit optional) | `public/assets/audio/jumpscares/sfx_jumpscare_hit.ogg` |
+| `nastelbom-scary-halloween-617002.mp3` | [Scary Halloween](https://pixabay.com/music/scary-childrens-tunes-scary-halloween-617002/) — Dmitrii Spis (NastelBom) | Pixabay Content License; commercial use permitted; attribution not required (credit optional); Content ID registered | `public/assets/audio/music/music_scary_halloween_617002.ogg` |
 
 ## Processing record
 
-- All checked-in files are OGG/Vorbis, mono, 24 kHz. No generated audio is included.
+- Checked-in runtime files are OGG/Vorbis. Most short interaction and enemy cues are mono; the music bed is stereo at 48 kHz. No new generated audio was added in the audio consistency pass.
 - Footsteps: three short, differently timed cuts from the same concrete-walk recording, with short edge fades and conservative loudness normalization.
 - Flashlight: the first two separated toggle clicks from the source recording were cut into on/off cues, faded, and normalized.
 - Floor ambience: five 24-second loop beds were assembled from the industrial ambience, electrical hum, and drone sources. Per-floor filter and layer balance changes the progression; 0.8-second fades soften loop boundaries.

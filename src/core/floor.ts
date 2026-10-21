@@ -225,10 +225,10 @@ export function generateFloor(seed: number, floor: number, lootRng?: FloorLootRn
 
   // The normal-block staircase key is represented by one dedicated searchable
   // object. Placement is geometry-derived and consumes no RNG or loot rolls.
-  const key = floor === 0 ? legacyKey : chooseMaintenanceLockboxPosition({
+  const key = floor === 0 || floor !== 4 ? legacyKey : chooseMaintenanceLockboxPosition({
     width, height, tiles, start, exit, doors, searchables, floor,
   });
-  if (floor !== 0) searchables.push({
+  if (floor === 4) searchables.push({
     x: key[0], y: key[1], objectType: 'maintenance_lockbox',
     result: { type: 'battery', amount: 20 }, isMimic: false,
   });
@@ -269,7 +269,7 @@ function choosePuzzleSites(
   roomTiles.sort((a, b) => fartherFirst(a, b) || a[1] - b[1] || a[0] - b[0]);
   freeTiles.sort((a, b) => fartherFirst(a, b) || a[1] - b[1] || a[0] - b[0]);
   const device = centers[0] ? [centers[0][0], centers[0][1]] as [number, number] : roomTiles[0] ?? freeTiles[0] ?? [...key] as [number, number];
-  const wantsFallback = floor === 4 || floor === 3;
+  const wantsFallback = true;
   const fallbackCell = wantsFallback ? (centers.find(([x, y]) => x !== device[0] || y !== device[1])
     ?? roomTiles.find(([x, y]) => x !== device[0] || y !== device[1])
     ?? freeTiles.find(([x, y]) => x !== device[0] || y !== device[1])) : undefined;

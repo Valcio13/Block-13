@@ -57,6 +57,7 @@ import {
   ordinaryOverlayAssetsForMap,
   ordinaryOverlayPlacementAllowed,
   ordinaryMapDecorationPlacements,
+  ordinaryEnvironmentCoordinateHash,
   ordinaryThresholdTreatment,
   ordinarySurfaceAssetsForMap,
   resolveOrdinaryOverlayAsset,
@@ -74,6 +75,9 @@ import {
   type StalkerVisualFacing,
 } from '../stalkerAssets';
 import {
+  CONTAINER_SCARE_VARIANT_ASSETS,
+  containerScareAssetForSearchIndex,
+  lampJumpscareAssetForEvent,
   ambusherTextureKey,
   crawlerMovedBetween,
   crawlerPresentationPhaseOffsetMs,
@@ -92,7 +96,7 @@ import { HauntingDirector, HorrorPacingModel, HauntingSilence, hauntingPresentat
 import { interactionPrompt, rejectedInteractionFeedback } from '../interactionPresentation';
 import { hashAuthoritativeState } from '../../core/runRecovery';
 import { PLAYER_FOOTSTEP_COOLDOWN_MS, PLAYER_FOOTSTEP_VARIANT_GAINS, shouldPlayFootstep } from '../footstepMix';
-import { containerScareSearchIndex, containerScareShouldPlay, containerScareStyle } from '../containerScare';
+import { CONTAINER_SCARE_STATUS_TEXT, containerScareSearchIndex, containerScareShouldPlay, containerScareStyle } from '../containerScare';
 import { stalkerNearMissCueAvailable, stalkerNearMissState } from '../stalkerPresentation';
 import { accessiblePresentationIntensity, finalChaseAmbienceGain, genericScareCameraKick, stalkerHuntScale } from '../accessibilityPresentation';
 import {
@@ -171,6 +175,7 @@ export class FloorScene extends Phaser.Scene {
   private notebookHintStage = 0;
   private puzzleDeviceMarker?: Phaser.GameObjects.Graphics;
   private puzzleFallbackMarker?: Phaser.GameObjects.Graphics;
+  private puzzleFallbackLabel?: Phaser.GameObjects.Text;
   private puzzleCloseRequested = false;
   private controlsHint!: Phaser.GameObjects.Text;
   private healthBarBg!: Phaser.GameObjects.Rectangle;
@@ -185,6 +190,9 @@ export class FloorScene extends Phaser.Scene {
   private flashlightRayAngles: number[] = [];
   private flashlightLightRays: OccludedRay[] = [];
   private flashlightBoundaryAngles: number[] = new Array(FLASHLIGHT_HALF_ANGLES.length * 2).fill(0);
+  private flickeringLampPositions: Array<{ x: number; y: number; phase: number; seed: number; signal: boolean }> = [];
+  private flickeringLampFixtures: Phaser.GameObjects.Graphics[] = [];
+  private lastLampJumpscareTick = Number.NEGATIVE_INFINITY;
   private damageVignette!: Phaser.GameObjects.Graphics;
   private corruptionVignette!: Phaser.GameObjects.Graphics;
   private playerFacingAngle = 0;
@@ -222,12 +230,17 @@ export class FloorScene extends Phaser.Scene {
   private hauntingWhisper?: Phaser.GameObjects.Text;
   private hauntingVisualRemainingMs = 0;
   private hauntingWhisperRemainingMs = 0;
-  private containerScareEffect?: Phaser.GameObjects.Graphics;
+  private containerScareImage?: Phaser.GameObjects.Image;
+  private containerScareStatusText?: Phaser.GameObjects.Text;
   private containerScareAudio?: Phaser.Sound.BaseSound;
   private containerScareRemainingMs = 0;
-  private containerScareInitialPeakAlpha = 0;
+  private lampJumpscareImage?: Phaser.GameObjects.Image;
+  private lampJumpscareRemainingMs = 0;
   private appliedHauntingAmbienceGain = 1;
   private hauntingDebugKeyHandler?: (event: KeyboardEvent) => void;
+  private temporaryMessageQueue: Array<{ text: string; color: string; duration: number }> = [];
+  private temporaryMessageActive = false;
+  private temporaryMessageObject?: Phaser.GameObjects.Text;
   private isPaused = false; // Track pause state
   private pauseKey!: Phaser.Input.Keyboard.Key;
   private isTransitioning = false; // Track floor transitions
@@ -294,10 +307,12 @@ export class FloorScene extends Phaser.Scene {
     this.hauntingWhisper = undefined;
     this.hauntingVisualRemainingMs = 0;
     this.hauntingWhisperRemainingMs = 0;
-    this.containerScareEffect = undefined;
+    this.containerScareImage = undefined;
+    this.containerScareStatusText = undefined;
     this.containerScareAudio = undefined;
     this.containerScareRemainingMs = 0;
-    this.containerScareInitialPeakAlpha = 0;
+    this.lampJumpscareImage = undefined;
+    this.lampJumpscareRemainingMs = 0;
     this.stalkerNearMissActive = false;
     this.finalChaseAudioActive = false;
     this.finalChaseAmbienceGain = 1;
@@ -340,6 +355,7 @@ export class FloorScene extends Phaser.Scene {
     this.puzzlePanelArt = undefined;
     this.puzzleDeviceMarker = undefined;
     this.puzzleFallbackMarker = undefined;
+    this.puzzleFallbackLabel = undefined;
     this.puzzleCloseRequested = false;
     this.keyLabel = undefined as unknown as Phaser.GameObjects.Text;
     this.stairsLabel = undefined as unknown as Phaser.GameObjects.Text;
@@ -354,6 +370,9 @@ export class FloorScene extends Phaser.Scene {
     this.flashlightRayAngles = [];
     this.flashlightLightRays = [];
     this.flashlightBoundaryAngles = new Array(FLASHLIGHT_HALF_ANGLES.length * 2).fill(0);
+    this.flickeringLampPositions = [];
+    this.flickeringLampFixtures = [];
+    this.lastLampJumpscareTick = Number.NEGATIVE_INFINITY;
     this.damageVignette = undefined as unknown as Phaser.GameObjects.Graphics;
     this.corruptionVignette = undefined as unknown as Phaser.GameObjects.Graphics;
     this.mimicTwitchStates.clear();
@@ -428,7 +447,7 @@ export class FloorScene extends Phaser.Scene {
     // released on restart as well as when the scene is stopped.
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
 
-    const { width, height, tiles, start, key, exit, searchables } = this.floorData;
+    const { width, height, tiles, start, exit, searchables } = this.floorData;
 
     // Calculate camera bounds
     const worldWidth = width * this.tileSize;
@@ -438,13 +457,13 @@ export class FloorScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
     // Draw floor tiles; collision is resolved only by AuthoritativeSimulation.
     this.drawFloor(tiles);
+    this.createFlickeringLamps(tiles);
 
     // Create searchable objects
     this.createSearchables(searchables);
     this.createPuzzleMarkers();
 
     // Create key sprite
-    if (isBlock13Floor(this.authoritativeSimulation.state.floor)) this.keySprite = this.createKey(key[0], key[1]);
 
     // Create stairs sprite (locked initially)
     this.stairsSprite = this.createStairs(exit[0], exit[1]);
@@ -462,7 +481,7 @@ export class FloorScene extends Phaser.Scene {
       scene: this,
     });
     for (const key of floorAmbienceKeys(this.authoritativeSimulation.state.floor)) {
-      this.audioDirector.play(key, 'ambience', { loop: true, volume: 0.45 });
+      this.audioDirector.play(key, 'ambience', { loop: true, volume: 0.32 });
     }
     if (floorAmbienceKeys(this.authoritativeSimulation.state.floor).length > 0) {
       this.audioDirector.fadeInCategory('ambience', 1000);
@@ -571,9 +590,9 @@ export class FloorScene extends Phaser.Scene {
       fontFamily: 'monospace',
       fontSize: '13px',
       color: '#70d4c6',
-      backgroundColor: '#07090d',
-      padding: { x: 8, y: 4 },
-      lineSpacing: 2,
+      backgroundColor: '#070d12',
+      padding: { x: 12, y: 8 },
+      lineSpacing: 4,
     }).setScrollFactor(0).setDepth(100);
     const compactHud = this.scale.height < 420 || this.scale.width < 640;
     const puzzlePanelW = Math.min(600, this.scale.width - 28);
@@ -591,28 +610,28 @@ export class FloorScene extends Phaser.Scene {
     // Interaction prompt (hidden initially)
     this.interactPrompt = this.add.text(
       this.cameras.main.width / 2,
-      this.cameras.main.height - 100,
+      this.cameras.main.height - 92,
       '',
       {
         fontFamily: 'monospace',
         fontSize: '14px',
         color: '#ffd700',
-        backgroundColor: '#000000',
-        padding: { x: 10, y: 6 },
+        backgroundColor: '#080c12',
+        padding: { x: 12, y: 8 },
       }
     ).setOrigin(0.5).setScrollFactor(0).setDepth(100).setVisible(false);
 
-    // Controls hin
+    // Compact controls legend. Detailed controls remain available in pause.
     this.controlsHint = this.add.text(16, this.cameras.main.height - 100, [
-      'WASD / ARROWS - MOVE', 'F - FLASHLIGHT', 'E - INTERACT', 'TAB - NOTEBOOK  ·  ESC - PAUSE',
+      'WASD / ARROWS MOVE  ·  F LIGHT  ·  E INTERACT', 'TAB NOTEBOOK  ·  ESC PAUSE',
       ...(this.isDevelopmentBlock3VisualComparisonAvailable() ? ['F8 - BLOCK 3 ART: ORIGINAL'] : []),
     ].join('\n'), {
       fontFamily: 'monospace',
-      fontSize: '12px',
+      fontSize: '11px',
       color: '#a5b6b5',
       backgroundColor: '#07090d',
       padding: { x: 8, y: 4 },
-      lineSpacing: 2,
+      lineSpacing: 3,
     }).setScrollFactor(0).setDepth(100);
 
     // Create horizontal health bar at top center
@@ -693,6 +712,7 @@ export class FloorScene extends Phaser.Scene {
     this.updateAmbusherJumpscare(delta);
     this.updateHauntingPresentation(delta);
     this.updateContainerScare(delta);
+    this.updateLampJumpscare(delta);
 
     // Story and pause overlays freeze simulation ticks. Dismissing a note is UI
     // input only, so it is neither recorded nor allowed to consume a gameplay tick.
@@ -803,9 +823,9 @@ export class FloorScene extends Phaser.Scene {
           this.cameras.main.flash(100, flicker, flicker, flicker);
         }
         if (event.floor === 4 && event.failures === 2) this.playAudioCue({ key: `${AUDIO_KEYS.player.footstep}_${(this.runState.seed % 3) + 1}`, cooldownMs: 0, volume: reduced ? 0.08 : 0.14 });
-        if (event.failures === 3 && (event.floor === 4 || event.floor === 3)) {
+        if (event.failures === 3) {
           this.showHauntingVisual('silhouette', 13_000 + event.floor, reduced ? 650 : 900);
-          this.showTemporaryMessage(event.floor === 4 ? 'THE LOCK HAS JAMMED — FIND THE MAINTENANCE TOOL' : 'THE DIRECTORY IS UNUSABLE — FIND THE ARCHIVAL CLUE', '#e8c6d4', 1800);
+          this.showTemporaryMessage(`THE PUZZLE IS LOCKED — FIND THE ${this.puzzleFallbackItemLabel(event.floor)}`, '#e8c6d4', 1800);
         } else if (event.floor === 3 && event.failures === 1) {
           const evidence = this.searchableSprites[this.floorData.objectives.searchableIndices[0]]?.sprite;
           if (evidence) this.tweens.add({ targets: evidence, angle: 180, duration: 180, yoyo: true, hold: 350 });
@@ -824,7 +844,7 @@ export class FloorScene extends Phaser.Scene {
           const content = `The sealed original names ${resident.name}, apartment ${resident.apartment}, as the resident removed from the register. Return to the directory to recover the key.`;
           this.recordNotebookEntry({ id: `${event.floor}:archival-addendum`, floor: event.floor, title: 'ARCHIVAL ADDENDUM', content, important: true });
           this.showClueModal('ARCHIVAL ADDENDUM', content, true);
-        } else this.showTemporaryMessage('MAINTENANCE TOOL FOUND — RETURN TO THE JAMMED LOCKBOX', '#ffca86', 1800);
+        } else this.showTemporaryMessage(`${this.puzzleFallbackItemLabel(event.floor)} FOUND — RETURN TO THE PUZZLE`, '#ffca86', 1800);
       }
       else if (event.type === 'puzzle_solved') {
         if (event.floor === 1) {
@@ -845,7 +865,7 @@ export class FloorScene extends Phaser.Scene {
         if (result.type === 'staircase_key') continue;
         if (result.type === 'battery') this.showTemporaryMessage(`BATTERY +${result.amount}%`, '#70d4c6');
         else if (result.type === 'health') this.showTemporaryMessage(`HEALTH +${result.amount} HP`, '#70d4c6');
-        else if (result.type === 'collectible') this.showTemporaryMessage(`${result.item.toUpperCase()} +${result.score} POINTS`, '#ffd700');
+        else if (result.type === 'collectible') this.showTemporaryMessage(`GOLD +${result.score} POINTS`, '#ffd700');
         else if (result.type === 'clue') {
           this.recordNotebookEvents(this.floorData, [event]);
           const objectiveStep = this.floorData.searchables[event.index]?.objectiveStep;
@@ -899,7 +919,9 @@ export class FloorScene extends Phaser.Scene {
       paused: this.isPaused,
       transitioning: this.isTransitioning,
       modalOpen: this.storyPopupOpen || this.openingStoryOpen || this.endingEpilogueOpen,
-      presentationActive: Boolean(this.ambusherJumpscareVeil?.active || this.containerScareEffect
+      presentationActive: Boolean(this.ambusherJumpscareVeil?.active || this.containerScareImage?.active
+        || this.containerScareStatusText?.active
+        || this.lampJumpscareImage?.active
         || this.hauntingSilence.isActive || this.hauntingVisual?.visible || this.hauntingWhisper?.visible),
       realThreatActive: this.realEnemyThreatActive(state),
       recoveryUntilTick: this.hauntingDirector.recoveryUntilTick,
@@ -1061,6 +1083,42 @@ export class FloorScene extends Phaser.Scene {
     this.hauntingVisualRemainingMs = 0;
     this.hauntingWhisper?.setVisible(false);
     this.hauntingWhisperRemainingMs = 0;
+    this.clearLampJumpscare();
+  }
+
+  /** Screen-space scare used only by the rare dark-lamp presentation event. */
+  private startLampJumpscare(eventId: number) {
+    this.clearLampJumpscare();
+    const preferredAsset = lampJumpscareAssetForEvent(eventId);
+    const asset = this.textures.exists(preferredAsset.key) ? preferredAsset : lampJumpscareAssetForEvent(0);
+    if (!this.uiCamera || !this.textures.exists(asset.key)) return false;
+    const image = this.add.image(this.uiCamera.width / 2, this.uiCamera.height / 2, asset.key)
+      .setOrigin(0.5).setScrollFactor(0).setDepth(201).setAlpha(0);
+    image.setScale(Math.max(this.uiCamera.width / asset.width, this.uiCamera.height / asset.height) * 1.04);
+    this.cameras.main.ignore(image);
+    this.lampJumpscareImage = image;
+    this.lampJumpscareRemainingMs = 560;
+    this.markTextureNearest(asset.key);
+    return true;
+  }
+
+  private updateLampJumpscare(delta: number) {
+    if (!this.lampJumpscareImage) return;
+    if (this.isPaused || this.isTransitioning || this.storyPopupOpen || this.openingStoryOpen
+      || this.endingEpilogueOpen || this.authoritativeSimulation?.state.status !== 'playing') {
+      this.clearLampJumpscare();
+      return;
+    }
+    this.lampJumpscareRemainingMs -= Number.isFinite(delta) && delta > 0 ? delta : 0;
+    const reduced = this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false;
+    this.lampJumpscareImage.setAlpha(Math.max(0, Math.min(1, this.lampJumpscareRemainingMs / 260)) * (reduced ? 0.72 : 1));
+    if (this.lampJumpscareRemainingMs <= 0) this.clearLampJumpscare();
+  }
+
+  private clearLampJumpscare() {
+    this.lampJumpscareImage?.destroy();
+    this.lampJumpscareImage = undefined;
+    this.lampJumpscareRemainingMs = 0;
   }
 
   private bindHauntingDebugControls() {
@@ -1159,58 +1217,68 @@ export class FloorScene extends Phaser.Scene {
     this.ambusherJumpscareImpactPlayed = false;
   }
 
-  /** Short procedural container apparition. The existing authoritative box
-   * scare selects the moment; this presentation cannot alter its result. */
-  private startContainerScare(worldX: number, worldY: number) {
+  /** Full-screen container scare. The authoritative box scare selects the
+   * moment; this presentation cannot alter its result. */
+  private startContainerScare(searchableIndex: number) {
     this.clearHauntingPresentation();
     this.clearContainerScare();
     const reduced = this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false;
     const style = containerScareStyle(reduced);
-    const graphic = this.add.graphics().setPosition(worldX, worldY).setDepth(14);
-    this.uiCamera?.ignore(graphic);
-    const outline = 0x0a0810;
-    const bone = 0xc9c2d2;
-    graphic.fillStyle(outline, 0.96);
-    graphic.fillRect(-8, -13, 5, 19);
-    graphic.fillRect(-5, -11, 13, 15);
-    graphic.fillRect(5, -8, 5, 12);
-    graphic.fillStyle(bone, style.peakAlpha);
-    graphic.fillRect(-7, -12, 3, 16);
-    graphic.fillRect(-3, -10, 3, 13);
-    graphic.fillRect(1, -14, 3, 17);
-    graphic.fillRect(5, -9, 3, 13);
-    graphic.fillRect(-4, 1, 11, 5);
-    graphic.fillStyle(0x21131f, style.peakAlpha);
-    graphic.fillRect(-1, -5, 3, 3);
-    graphic.setScale(style.peakScale);
-    this.containerScareEffect = graphic;
+    const preferredAsset = containerScareAssetForSearchIndex(searchableIndex);
+    const asset = this.textures.exists(preferredAsset.key) || preferredAsset.key === CONTAINER_SCARE_VARIANT_ASSETS[0].key
+      ? preferredAsset
+      : CONTAINER_SCARE_VARIANT_ASSETS[0];
+    if (this.textures.exists(asset.key) && this.uiCamera) {
+      const image = this.add.image(this.uiCamera.width / 2, this.uiCamera.height / 2, asset.key)
+        .setOrigin(0.5).setScrollFactor(0).setDepth(201).setAlpha(0);
+      const coverScale = Math.max(this.uiCamera.width / asset.width, this.uiCamera.height / asset.height) * 1.04;
+      image.setScale(coverScale);
+      this.cameras.main.ignore(image);
+      this.containerScareImage = image;
+    }
+    this.containerScareStatusText = this.add.text(
+      this.cameras.main.width / 2,
+      this.cameras.main.height / 2 + 82,
+      CONTAINER_SCARE_STATUS_TEXT,
+      {
+        fontFamily: 'monospace',
+        fontSize: reduced ? '12px' : '14px',
+        color: reduced ? '#e8c9ad' : '#ffd5b0',
+        backgroundColor: '#140c12',
+        padding: { x: 10, y: 7 },
+        align: 'center',
+        stroke: '#050308',
+        strokeThickness: 2,
+      },
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(202).setAlpha(0);
+    this.cameras.main.ignore(this.containerScareStatusText);
     this.containerScareRemainingMs = style.durationMs;
-    this.containerScareInitialPeakAlpha = style.peakAlpha;
     if (this.audioDirector?.hasLoadedAsset('sfx_jumpscare_hit')) {
-      this.containerScareAudio = this.audioDirector.playWithCooldown('sfx_jumpscare_hit', 'sfx', 1800, { volume: reduced ? 0.42 : 0.58 }) ?? undefined;
+      this.containerScareAudio = this.audioDirector.playWithCooldown('sfx_jumpscare_hit', 'sfx', 1800, { volume: reduced ? 0.34 : 0.5 }) ?? undefined;
     }
   }
 
   private updateContainerScare(delta: number) {
-    if (!this.containerScareEffect) return;
+    if (!this.containerScareImage && !this.containerScareStatusText) return;
     if (this.isPaused || this.isTransitioning || this.storyPopupOpen || this.openingStoryOpen
       || this.endingEpilogueOpen || this.authoritativeSimulation?.state.status !== 'playing') {
       this.clearContainerScare();
       return;
     }
     this.containerScareRemainingMs -= Number.isFinite(delta) && delta > 0 ? delta : 0;
-    const style = containerScareStyle(this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false);
-    const intensity = this.containerScareInitialPeakAlpha > 0 ? style.peakAlpha / this.containerScareInitialPeakAlpha : 0;
-    this.containerScareEffect.setScale(style.peakScale);
-    this.containerScareEffect.setAlpha(Math.max(0, Math.min(1, this.containerScareRemainingMs / 120)) * intensity);
+    const reduced = this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false;
+    this.containerScareImage?.setAlpha(Math.max(0, Math.min(1, this.containerScareRemainingMs / (reduced ? 190 : 250)))
+      * (reduced ? 0.76 : 1));
+    this.containerScareStatusText?.setAlpha(Math.max(0, Math.min(1, this.containerScareRemainingMs / (reduced ? 160 : 200))));
     if (this.containerScareRemainingMs <= 0) this.clearContainerScare();
   }
 
   private clearContainerScare() {
-    this.containerScareEffect?.destroy();
-    this.containerScareEffect = undefined;
+    this.containerScareImage?.destroy();
+    this.containerScareImage = undefined;
+    this.containerScareStatusText?.destroy();
+    this.containerScareStatusText = undefined;
     this.containerScareRemainingMs = 0;
-    this.containerScareInitialPeakAlpha = 0;
     this.containerScareAudio?.stop();
     this.containerScareAudio = undefined;
   }
@@ -1219,7 +1287,7 @@ export class FloorScene extends Phaser.Scene {
     const director = this.audioDirector;
     if (!director) return;
     if (audioCue.key === 'sfx_player_hurt') {
-      director.playVariantWithCooldown(audioCue.key, AUDIO_KEYS.player.hurtVariants, 'sfx', audioCue.cooldownMs, { volume: 0.7 });
+      director.playVariantWithCooldown(audioCue.key, AUDIO_KEYS.player.hurtVariants, 'sfx', audioCue.cooldownMs, { volume: 0.46 });
     } else if (audioCue.key === 'sfx_crawler_skitter' && audioCue.positional) {
       director.playPositionalVariantWithCooldown(audioCue.key, 2, {
         x: audioCue.positional.x / FIXED_SCALE,
@@ -1229,9 +1297,17 @@ export class FloorScene extends Phaser.Scene {
         volume: audioCue.volume ?? 0.42,
       }, this.player.x, this.player.y, audioCue.cooldownMs);
     } else if (audioCue.key === 'sfx_flashlight_on' || audioCue.key === 'sfx_flashlight_off') {
-      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.95 });
+      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.56 });
     } else if (audioCue.key === 'sfx_interaction_search') {
-      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.8 });
+      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.46 });
+    } else if (audioCue.key === 'sfx_puzzle_solved') {
+      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.62 });
+    } else if (audioCue.key === 'sfx_key_pickup') {
+      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.58 });
+    } else if (audioCue.key === 'sfx_item_pickup' || audioCue.key === 'sfx_item_heal') {
+      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.48 });
+    } else if (audioCue.key === 'sfx_floor_transition') {
+      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.5 });
     } else if (audioCue.positional) {
       const reduced = director.getSettings().reduceJumpscareIntensity;
       const intensityScale = reduced && audioCue.key === 'sfx_ambusher_warning' ? 0.56 : 1;
@@ -1244,7 +1320,7 @@ export class FloorScene extends Phaser.Scene {
         volume: (audioCue.volume ?? 0.75) * intensityScale,
       }, this.player.x, this.player.y, audioCue.cooldownMs);
     } else {
-      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.75 });
+      director.playWithCooldown(audioCue.key, 'sfx', audioCue.cooldownMs, { volume: 0.56 });
     }
   }
 
@@ -1324,7 +1400,9 @@ export class FloorScene extends Phaser.Scene {
       if (event) this.presentHauntingEvent(event);
     }
     const objectiveProgress = this.floorData.objectives.searchableIndices.filter(index => state.searched[index]).length;
-    this.block13ObjectiveStatus = objectiveCopy(state.floor, state.hasKey, state.stalker.state === 'hunting', state.objectiveComplete, objectiveProgress, this.floorData.objectives.searchableIndices.length);
+    this.block13ObjectiveStatus = state.puzzle.fallbackActive && !state.puzzle.fallbackItemFound
+      ? `OBJECTIVE: FIND THE ${this.puzzleFallbackItemLabel(state.floor)}`
+      : objectiveCopy(state.floor, state.hasKey, state.stalker.state === 'hunting', state.objectiveComplete, objectiveProgress, this.floorData.objectives.searchableIndices.length);
     if (this.registry.get('stalkerHintShown') !== true && state.stalker.visible) {
       this.registry.set('stalkerHintShown', true);
       this.showTemporaryMessage('FLASHLIGHT CAN REPEL IT', '#ffd700', 2200);
@@ -1345,7 +1423,7 @@ export class FloorScene extends Phaser.Scene {
     }
     this.updatePlayerPresentationFacing(previous, state);
     this.hasKey = state.hasKey;
-    this.stairsUnlocked = isBlock13Floor(state.floor) ? state.hasKey && state.objectiveComplete : state.objectiveComplete;
+    this.stairsUnlocked = state.objectiveComplete;
     const block13 = isBlock13Floor(state.floor);
     this.updateObjectiveVisibility(state);
     this.stairsSprite.setTexture(this.stairsUnlocked ? 'stairs_unlocked' : 'stairs_locked');
@@ -1423,8 +1501,9 @@ export class FloorScene extends Phaser.Scene {
       : stalker.state === 'hunting' && stalkerExposure >= 0.7 ? 0xffb7b0
         : stalkerExposure >= 0.7 ? 0xe0d1d8 : 0xffffff);
     if (proximity.entered && !this.ambusherJumpscareVeil?.active && stalkerNearMissCueAvailable(this.time.now, this.stalkerNearMissNextCueAt)) {
-      this.cameras.main.shake(110, accessiblePresentationIntensity(0.0018, reduceJumpscareIntensity));
-      this.playAudioCue({ key: 'sfx_stalker_hunt', cooldownMs: 8000, positional: { x: stalker.x, y: stalker.y }, volume: 0.22 });
+      this.cameras.main.shake(130, accessiblePresentationIntensity(0.0024, reduceJumpscareIntensity));
+      this.cameras.main.flash(reduceJumpscareIntensity ? 28 : 52, 210, 176, 184);
+      this.playAudioCue({ key: 'sfx_stalker_hunt', cooldownMs: 8000, positional: { x: stalker.x, y: stalker.y }, volume: reduceJumpscareIntensity ? 0.24 : 0.28 });
       this.stalkerNearMissNextCueAt = this.time.now;
     }
     state.crawlers.forEach((enemy, index) => {
@@ -1478,7 +1557,7 @@ export class FloorScene extends Phaser.Scene {
         && !this.storyPopupOpen && !this.openingStoryOpen && !this.endingEpilogueOpen && !this.ambusherJumpscareVeil;
       if (containerScareShouldPlay(searchableIndex !== null, Boolean(this.ambusherJumpscareVeil?.active), canPresent) && searchableIndex !== null) {
         const searchable = this.searchableSprites[searchableIndex]?.data;
-        if (searchable) this.startContainerScare(searchable.x * this.tileSize + 16, searchable.y * this.tileSize + 16);
+        if (searchable) this.startContainerScare(searchableIndex);
       }
     }
     state.ambushers.forEach((enemy, index) => {
@@ -1547,6 +1626,7 @@ export class FloorScene extends Phaser.Scene {
     const run = state.puzzle;
     const visible = run.active;
     this.puzzleFallbackMarker?.setVisible(run.fallbackActive && !run.fallbackItemFound);
+    this.puzzleFallbackLabel?.setVisible(run.fallbackActive && !run.fallbackItemFound);
     this.puzzlePanel?.setVisible(visible);
     this.puzzlePanelText?.setVisible(visible);
     this.puzzlePanelArt?.setVisible(visible);
@@ -1560,37 +1640,38 @@ export class FloorScene extends Phaser.Scene {
     const lines = [`${puzzle.title}`, `OBJECTIVE  ·  ${this.puzzleObjectiveCopy(puzzle.kind)}`,
       `EVIDENCE RECOVERED  ${evidence}/${this.floorData.objectives.searchableIndices.length}`, ''];
     if (puzzle.kind === 'combination') {
-      lines.push('CALCULATE EACH RESULT, THEN SET THE THREE DIALS.', '',
-        ...puzzle.combinationExpressions!.map((expression, index) => `${index === run.selectedIndex ? '▶ ' : '  '}DIGIT ${index + 1}  ${expression.left} ${expression.operator} ${expression.right}  =  [ ${run.enteredCode[index]} ]`),
-        '', '← / → CHOOSE A DIAL   ↑ / ↓ CHANGE IT   E TEST CODE');
+      const currentCode = run.enteredCode.map(digit => digit === 0 ? '_' : String(digit)).join(' ');
+      lines.push('READ ALL THREE NOTES. CALCULATE EACH EXPRESSION.', 'KEEP ONLY THE FINAL / ONES DIGIT FROM EACH.', 'ENTER POSITION 1 → POSITION 2 → POSITION 3.', `CURRENT CODE  [ ${currentCode} ]`, `SELECTED  ·  POSITION ${run.selectedIndex + 1}`, '',
+        ...puzzle.combinationExpressions!.map((expression, index) => `${index === run.selectedIndex ? '▶ ' : '  '}POSITION ${index + 1}  ${expression.left} ${expression.operator} ${expression.right}  → FINAL DIGIT [ ${run.enteredCode[index]} ]`),
+        '', '← / → POSITION   ↑ / ↓ CHANGE DIGIT   E SUBMIT CODE');
     } else if (puzzle.kind === 'resident') {
-      lines.push('CROSS-REFERENCE BOTH RECORDS WITH THE DIRECTORY.', `MATCHES REQUIRED  ·  ${evidence}/2 RECORDS`, '', ...puzzle.residents!.map((resident, index) => `${index === run.selectedIndex ? '▶ ' : '  '}${resident.name} — APT ${resident.apartment} — BIKE ${resident.hasBicycle ? 'YES' : 'NO'} — NIGHTS ${resident.worksNights ? 'YES' : 'NO'}`), '↑ / ↓ SELECT   E CONFIRM');
+      lines.push('FIND THE ONE RESIDENT MATCHING BOTH RULES.', 'SAME BICYCLE • OPPOSITE NIGHT SHIFT.', `SELECTED  ·  RESIDENT ${run.selectedIndex + 1}`, `EVIDENCE NOTES  ·  ${evidence}/2 RECOVERED`, '', ...puzzle.residents!.map((resident, index) => `${index === run.selectedIndex ? '▶ ' : '  '}${resident.name} — APT ${resident.apartment} — BIKE ${resident.hasBicycle ? 'YES' : 'NO'} — NIGHTS ${resident.worksNights ? 'YES' : 'NO'}`), '↑ / ↓ SELECT RESIDENT   E CHECK BOTH RULES');
     } else if (puzzle.kind === 'circuit') {
       const expectedNext = puzzle.circuitOrder![run.circuitSequence.length];
-      lines.push('TARGET  ·  TRACE THE ARCHIVE RELAY THROUGH TWO FEEDS', 'Power the marked feeds in the recovered order; other feeds stay off.', `SEQUENCE  ·  ${run.circuitSequence.map(index => puzzle.circuitLabels![index]).join(' → ') || '—'}`, `NEXT CONTACT  ·  ${expectedNext === undefined ? 'ROUTE COMPLETE' : puzzle.circuitLabels![expectedNext]}`, '', ...puzzle.circuitLabels!.map((label, index) => `${index === run.selectedIndex ? '▶ ' : '  '}FEED ${index + 1}  ─ ${run.switchMask & (1 << index) ? '[ON ]' : '[OFF]'} ${label}  ─▶ RELAY`), '← / → SELECT   ↑ TOGGLE   E TEST CIRCUIT');
+      lines.push('TURN ON EXACTLY TWO FEEDS IN THE RECOVERED ORDER.', 'SELECT A FEED, TOGGLE IT ON, THEN TEST THE ROUTE.', `SEQUENCE  ·  ${run.circuitSequence.map(index => puzzle.circuitLabels![index]).join(' → ') || '—'}`, `NEXT STEP  ·  ${expectedNext === undefined ? 'ROUTE COMPLETE' : puzzle.circuitLabels![expectedNext]}`, `SELECTED  ·  FEED ${run.selectedIndex + 1}`, '', ...puzzle.circuitLabels!.map((label, index) => `${index === run.selectedIndex ? '▶ ' : '  '}FEED ${index + 1}  ─ ${run.switchMask & (1 << index) ? '[ON ]' : '[OFF]'} ${label}  ─▶ RELAY`), '← / → SELECT FEED   ↑ TOGGLE   E TEST ROUTE');
       if (discoveredSteps.has(0) && this.notebookHintStage === 1) lines.push('', 'HINT 1 / 2  ·  THE DIAGRAM IDENTIFIES TWO FEEDS. MATCH THOSE LABELS; LEAVE THE OTHER TWO OFF.');
       else if (discoveredSteps.has(0) && this.notebookHintStage === 2) lines.push('', 'RECOVERED DIAGRAM:', puzzle.clueTexts[0]);
       else if (discoveredSteps.has(0)) lines.push('', 'H  OPTIONAL HINT 1 / 2  ·  READ THE MAINTENANCE DIAGRAM');
       else lines.push('', 'SEARCH FOR THE AMBER PUZZLE EVIDENCE MARKER.');
     } else if (puzzle.kind === 'records') {
-      lines.push('REBUILD THE NIGHT IN CHRONOLOGICAL ORDER FROM THE RECORDS.', `CHAIN  ·  ${run.recordOrder.length}/3 EVENTS PLACED`, 'Evidence excerpts are kept in your notebook.', '');
+      lines.push('PLACE ALL THREE EVENTS IN TIME ORDER.', `CHAIN  ·  ${run.recordOrder.length}/3 EVENTS PLACED`, 'Use the recovered rules: FIRST → SECOND → THIRD.', `SELECTED  ·  EVENT ${run.selectedIndex + 1}`, '');
       if (recordsMayBeCompared(puzzle, discoveredSteps)) {
         lines.push(`ORDER  ·  ${run.recordOrder.map(index => puzzle.recordEvents![index]).join('  →  ') || '—'}`,
-          ...puzzle.recordEvents!.map((event, index) => `${index === run.selectedIndex ? '▶ ' : '  '}${run.recordOrder.includes(index) ? '✓ ' : '  '}${event}`), '↑ / ↓ SELECT   E ADD THE NEXT EVENT');
+          ...puzzle.recordEvents!.map((event, index) => `${index === run.selectedIndex ? '▶ ' : '  '}${run.recordOrder.includes(index) ? '✓ ' : '  '}${event}`), '↑ / ↓ SELECT EVENT   E PLACE NEXT EVENT');
       } else lines.push('RECOVER ALL THREE DOCUMENTS TO OPEN THE INDEX.');
     } else {
-      lines.push('ASSOCIATE EACH RECOVERED MEMORY WITH ITS PLACE IN THE BUILDING.', `LINKS CONFIRMED  ·  ${run.memoryConfirmedMask.toString(2).replace(/0/g, '').length}/3`, 'Unknown fragments stay blank until encountered.', '');
+      lines.push('MATCH EACH RECOVERED MEMORY TO THE PLACE IT NAMES.', `LINKS CONFIRMED  ·  ${run.memoryConfirmedMask.toString(2).replace(/0/g, '').length}/3`, 'SELECT A FRAGMENT, CHOOSE ITS PLACE, THEN CONFIRM.', `SELECTED  ·  FRAGMENT ${run.selectedIndex + 1}`, '');
       puzzle.memoryFragments!.forEach((fragment, index) => {
         const display = memoryFragmentDisplay(fragment, puzzle.memoryChoices![run.memoryAnswers[index]], index, discoveredSteps);
         lines.push(discoveredSteps.has(index)
           ? `${run.memoryConfirmedMask & (1 << index) ? '✓ ' : index === run.selectedIndex ? '▶ ' : '  '}${display}`
           : `  ${display}`);
       });
-      lines.push('← / → SELECT FRAGMENT   ↑ / ↓ CHANGE   E CONFIRM');
+      lines.push('← / → SELECT FRAGMENT   ↑ / ↓ CHANGE PLACE   E CONFIRM MATCH');
     }
-    if (run.fallbackActive) lines.push('', 'NORMAL ENTRY DISABLED — FIND THE MAINTENANCE TOOL.');
-    else if (run.attemptsRemaining > 0) lines.push('', `ATTEMPTS REMAINING: ${run.attemptsRemaining}`);
-    if (evidence < this.floorData.objectives.searchableIndices.length) lines.push('', 'FIND ALL EVIDENCE BEFORE SUBMITTING.');
+    if (run.fallbackActive) lines.push('', `LOCKED  ·  FIND THE ${this.puzzleFallbackItemLabel(state.floor)} TO CONTINUE.`);
+    else lines.push('', `ATTEMPTS REMAINING  ·  ${run.attemptsRemaining}`);
+    if (evidence < this.floorData.objectives.searchableIndices.length) lines.push('', `SUBMIT LOCKED  ·  FIND ALL ${this.floorData.objectives.searchableIndices.length} EVIDENCE NOTES FIRST.`);
     lines.push('', 'TAB NOTEBOOK     E SUBMIT / CONFIRM     F OR ESC CLOSE');
     this.puzzlePanelText.setText(lines.join('\n'));
   }
@@ -1602,6 +1683,16 @@ export class FloorScene extends Phaser.Scene {
       case 'circuit': return 'RESTORE POWER TO THE ARCHIVE RELAY';
       case 'records': return 'RECONSTRUCT THE TRUE EVENT ORDER';
       case 'memory': return 'RECONNECT THE MEMORIES YOU HAVE FOUND';
+    }
+  }
+
+  private puzzleFallbackItemLabel(floor: number): string {
+    switch (floor) {
+      case 4: return 'MAINTENANCE TOOL';
+      case 3: return 'ARCHIVAL CLUE';
+      case 2: return 'RELAY OVERRIDE';
+      case 1: return 'UNALTERED INDEX';
+      default: return 'MEMORY FRAGMENT';
     }
   }
 
@@ -1665,6 +1756,19 @@ export class FloorScene extends Phaser.Scene {
       marker.lineStyle(1, 0xffbf72, 1).strokeRect(px - 9, py - 9, 18, 18);
       marker.lineStyle(2, 0xffbf72, 0.95).lineBetween(px - 5, py + 4, px + 5, py - 4).lineBetween(px - 1, py + 1, px + 3, py + 5);
       this.puzzleFallbackMarker = marker;
+      const label = this.add.text(px, py - 24,
+        this.puzzleFallbackItemLabel(this.authoritativeSimulation.state.floor),
+        {
+          fontFamily: 'monospace',
+          fontSize: '10px',
+          color: '#ffcf86',
+          backgroundColor: '#171017',
+          padding: { x: 4, y: 2 },
+          stroke: '#050308',
+          strokeThickness: 2,
+        },
+      ).setOrigin(0.5).setDepth(5).setVisible(false);
+      this.puzzleFallbackLabel = label;
     }
   }
 
@@ -1847,6 +1951,54 @@ export class FloorScene extends Phaser.Scene {
     this.drawOccludedLightShape(ambientRays, originX, originY, 48, scaleColor(profile.ambient, 0.82 * ambientVisibility));
     this.drawOccludedLightShape(ambientRays, originX, originY, 34, scaleColor(profile.ambient, 1.08 * ambientVisibility));
 
+    // Wall lamps are presentation-only. Their positions come from stable tile
+    // coordinates and their flicker is derived from the existing presentation
+    // tick; no gameplay RNG or authoritative state is consumed or changed.
+    for (let lampIndex = 0; lampIndex < this.flickeringLampPositions.length; lampIndex++) {
+      const lamp = this.flickeringLampPositions[lampIndex];
+      const phase = lamp.phase + state.tick * 0.17;
+      const secondary = Math.sin(lamp.phase * 1.7 + state.tick * 0.43);
+      // Stable hash samples create an irregular per-lamp sequence without
+      // advancing an authoritative RNG stream or coupling lamps together.
+      const flickerBucket = Math.floor(state.tick / 4);
+      const noise = ordinaryEnvironmentCoordinateHash(lamp.seed, flickerBucket, Math.floor(state.tick / 19)) / 0xffff_ffff;
+      const flutter = Math.sin(phase) * 0.12 + secondary * 0.06 + (noise - 0.5) * 0.24;
+      const pulse = noise < 0.035 ? -0.28 : noise > 0.965 ? 0.16 : 0;
+      const signalPulse = lamp.signal
+        ? Math.max(0, 1 - Math.min(1, (state.tick % 360) / 42)) * 0.3
+        : 0;
+      const intensity = Math.max(0.34, Math.min(1.18, 0.78 + flutter + pulse + signalPulse));
+      this.flickeringLampFixtures[lampIndex]?.setAlpha(0.56 + intensity * 0.4);
+      const playerDistance = Math.hypot(lamp.x - originX, lamp.y - originY);
+      // Rare, but reachable during a normal run: being near a lamp is enough;
+      // the player's flashlight no longer suppresses this presentation scare.
+      if (playerDistance <= 138 && state.tick - this.lastLampJumpscareTick >= 900
+        && state.tick % 10 === 0 && noise < 0.002 && this.canStartHaunting(state)) {
+        const eventId = Math.imul(lamp.seed ^ state.tick, 0x45d9f3b) >>> 0;
+        const authoredScareShown = this.startLampJumpscare(eventId);
+        if (!authoredScareShown) this.showHauntingVisual('silhouette', eventId, 560);
+        if (this.lampJumpscareImage?.visible || this.hauntingVisual?.visible) {
+          const reduced = this.audioDirector?.getSettings().reduceJumpscareIntensity ?? false;
+          this.cameras.main.flash(reduced ? 22 : 38, 190, 166, 178);
+          this.playAudioCue({ key: 'sfx_jumpscare_hit', cooldownMs: 1800, volume: reduced ? 0.08 : 0.12 });
+          this.hauntingDirector.registerMajorEncounter(state.tick, 180);
+          this.lastLampJumpscareTick = state.tick;
+        }
+      }
+      const lampRays = collectOccludedLightRays(
+        this.floorData, lamp.x, lamp.y, lamp.signal ? 82 : 58, -Math.PI, Math.PI,
+        3, [], [], [],
+      );
+      this.drawOccludedLightShape(
+        lampRays, lamp.x, lamp.y, lamp.signal ? 82 : 58,
+        scaleColor(profile.ambient, 0.44 * intensity),
+      );
+      this.drawOccludedLightShape(
+        lampRays, lamp.x, lamp.y, 34,
+        scaleColor(profile.ambient, 0.66 * intensity),
+      );
+    }
+
     if (this.flashlightOn) {
       const factor = flashlightVisualFactor(state.tick, state.floor);
       for (let i = 0; i < FLASHLIGHT_HALF_ANGLES.length; i++) {
@@ -1898,6 +2050,51 @@ export class FloorScene extends Phaser.Scene {
     graphics.fillPath();
   }
 
+  /** Creates a few deterministic wall fixtures without changing map geometry. */
+  private createFlickeringLamps(tiles: boolean[][]) {
+    this.flickeringLampPositions = [];
+    this.flickeringLampFixtures.forEach(fixture => fixture.destroy());
+    this.flickeringLampFixtures = [];
+    const floor = this.authoritativeSimulation.state.floor;
+    const importantTiles = new Set<string>([
+      `${this.floorData.start[0]},${this.floorData.start[1]}`,
+      `${this.floorData.key[0]},${this.floorData.key[1]}`,
+      `${this.floorData.exit[0]},${this.floorData.exit[1]}`,
+      ...this.floorData.searchables.map(item => `${item.x},${item.y}`),
+    ]);
+    const candidates: Array<{ x: number; y: number; score: number }> = [];
+    if (floor >= 1 && floor <= 4) {
+      const decorations = ordinaryMapDecorationPlacements(floor, tiles, this.floorData.doors, importantTiles);
+      for (const placement of decorations) {
+        if (placement.asset !== 'wall_lamp_01') continue;
+        candidates.push({ x: placement.x, y: placement.y, score: ordinaryEnvironmentCoordinateHash(floor, placement.x, placement.y) });
+      }
+    } else {
+      // Block 13 has no ordinary lamp asset, so choose a few clean wall cells
+      // and draw a restrained fixture directly as presentation geometry.
+      for (let y = 1; y < tiles.length - 1; y++) for (let x = 1; x < tiles[y].length - 1; x++) {
+        if (tiles[y]?.[x] || importantTiles.has(`${x},${y}`)) continue;
+        if (![tiles[y - 1]?.[x], tiles[y]?.[x + 1], tiles[y + 1]?.[x], tiles[y]?.[x - 1]].some(Boolean)) continue;
+        const score = ordinaryEnvironmentCoordinateHash(floor, x, y);
+        if (score % 173 > 8) continue;
+        candidates.push({ x, y, score });
+      }
+    }
+    candidates.sort((a, b) => a.score - b.score);
+    for (const [index, candidate] of candidates.slice(0, 5).entries()) {
+      const worldX = candidate.x * this.tileSize + 16;
+      const worldY = candidate.y * this.tileSize + 16;
+      const phase = (candidate.score % 628) / 100;
+      this.flickeringLampPositions.push({ x: worldX, y: worldY, phase, seed: candidate.score, signal: index === 0 });
+      const fixture = this.add.graphics().setDepth(2);
+      fixture.fillStyle(floor === 0 ? 0x8c6678 : 0xc4a46d, 0.9);
+      fixture.fillRect(worldX - 3, worldY - 3, 6, 4);
+      fixture.fillStyle(floor === 0 ? 0xd29aaf : 0xf2d798, 0.95);
+      fixture.fillRect(worldX - 2, worldY - 2, 4, 2);
+      this.flickeringLampFixtures.push(fixture);
+    }
+  }
+
   private createCircleTexture(size: number, fillStyle: any): Phaser.GameObjects.Graphics {
     const graphics = this.add.graphics();
     graphics.fillStyle(0xffffff, 1);
@@ -1922,20 +2119,34 @@ export class FloorScene extends Phaser.Scene {
   }
 
   private showTemporaryMessage(text: string, color: string, duration: number = 1200) {
+    if (this.temporaryMessageObject?.text === text || this.temporaryMessageQueue.some(message => message.text === text)) return;
+    this.temporaryMessageQueue.push({ text, color, duration });
+    if (this.temporaryMessageQueue.length > 4) this.temporaryMessageQueue.shift();
+    if (this.temporaryMessageActive) return;
+    this.presentNextTemporaryMessage();
+  }
+
+  private presentNextTemporaryMessage() {
+    const next = this.temporaryMessageQueue.shift();
+    if (!next) { this.temporaryMessageActive = false; return; }
+    this.temporaryMessageActive = true;
     const msg = this.add.text(
       this.cameras.main.width / 2,
-      this.cameras.main.height / 2 + 80,
-      text,
+      this.cameras.main.height - 54,
+      next.text,
       {
         fontFamily: 'monospace',
-        fontSize: '14px',
-        color: color,
-        backgroundColor: '#000000',
-        padding: { x: 8, y: 6 },
+        fontSize: '13px',
+        color: next.color,
+        backgroundColor: '#080c12',
+        padding: { x: 12, y: 8 },
         align: 'center',
-        wordWrap: { width: Math.max(240, this.cameras.main.width - 48), useAdvancedWrap: true },
-      }
-    ).setOrigin(0.5).setScrollFactor(0).setDepth(200).setAlpha(0);
+        wordWrap: { width: Math.min(520, Math.max(260, this.cameras.main.width - 72)), useAdvancedWrap: true },
+        stroke: '#020306',
+        strokeThickness: 2,
+      },
+    ).setOrigin(0.5).setScrollFactor(0).setDepth(205).setAlpha(0);
+    this.temporaryMessageObject = msg;
 
     // Make main camera ignore this, let UI camera render i
     this.cameras.main.ignore(msg);
@@ -1945,12 +2156,16 @@ export class FloorScene extends Phaser.Scene {
       alpha: 1,
       duration: 150,
       onComplete: () => {
-        this.time.delayedCall(duration, () => {
+        this.time.delayedCall(next.duration, () => {
           this.tweens.add({
             targets: msg,
             alpha: 0,
             duration: 200,
-            onComplete: () => msg.destroy(),
+            onComplete: () => {
+              msg.destroy();
+              this.temporaryMessageObject = undefined;
+              this.presentNextTemporaryMessage();
+            },
           });
         });
       }
@@ -2415,17 +2630,22 @@ export class FloorScene extends Phaser.Scene {
       : `${playerBlockName(this.runState.floor)}/${START_FLOOR}`;
     const simulationState = this.authoritativeSimulation.state;
     const objectiveProgress = this.floorData.objectives.searchableIndices.filter(index => simulationState.searched[index]).length;
-    this.block13ObjectiveStatus = objectiveCopy(simulationState.floor, simulationState.hasKey, simulationState.stalker.state === 'hunting', simulationState.objectiveComplete, objectiveProgress, this.floorData.objectives.searchableIndices.length);
+    this.block13ObjectiveStatus = simulationState.puzzle.fallbackActive && !simulationState.puzzle.fallbackItemFound
+      ? `OBJECTIVE: FIND THE ${this.puzzleFallbackItemLabel(simulationState.floor)}`
+      : objectiveCopy(simulationState.floor, simulationState.hasKey, simulationState.stalker.state === 'hunting', simulationState.objectiveComplete, objectiveProgress, this.floorData.objectives.searchableIndices.length);
 
     const lines = [
       floorDisplay,
       ...(this.block13ObjectiveStatus ? [this.block13ObjectiveStatus] : []),
+      '',
       `HP: ${Math.floor(this.runState.hp)}/100`,
       `CURSE: ${formatWholePercent(this.runState.curse)}%`,
       `BATTERY: ${formatWholePercent(this.runState.battery)}%`,
       `SCORE: ${this.runState.score}`,
       `LIGHT: ${flashStatus}`,
-      ...hudWarningCopy({ hp: simulationState.hp, battery: simulationState.battery / FIXED_SCALE, curse: simulationState.curse / FIXED_SCALE }),
+      ...(hudWarningCopy({ hp: simulationState.hp, battery: simulationState.battery / FIXED_SCALE, curse: simulationState.curse / FIXED_SCALE }).length
+        ? ['', ...hudWarningCopy({ hp: simulationState.hp, battery: simulationState.battery / FIXED_SCALE, curse: simulationState.curse / FIXED_SCALE })]
+        : []),
     ];
     this.statusText.setText(lines.join('\n'));
 
@@ -3635,7 +3855,7 @@ export class FloorScene extends Phaser.Scene {
         this.audioDirector.stop('sfx_ambusher_impact');
         this.audioDirector.stop('sfx_jumpscare_hit');
         const reduced = this.audioDirector.getSettings().reduceJumpscareIntensity;
-        this.audioDirector.playWithCooldown('sfx_jumpscare_hit', 'sfx', 0, { volume: reduced ? 0.56 : 1.2 });
+        this.audioDirector.playWithCooldown('sfx_jumpscare_hit', 'sfx', 0, { volume: reduced ? 0.46 : 0.82 });
       }
     };
     this.input.keyboard?.on('keydown', this.audioPreviewKeyHandler);
@@ -4658,6 +4878,10 @@ export class FloorScene extends Phaser.Scene {
   }
 
   shutdown() {
+    this.temporaryMessageQueue = [];
+    this.temporaryMessageObject?.destroy();
+    this.temporaryMessageObject = undefined;
+    this.temporaryMessageActive = false;
     this.clearFinalChaseAmbience();
     this.clearAmbusherJumpscare();
     this.clearHauntingPresentation();
@@ -4707,6 +4931,10 @@ export class FloorScene extends Phaser.Scene {
     }
     this.ordinaryEnvironmentImage?.destroy();
     this.ordinaryEnvironmentImage = undefined;
+    this.flickeringLampFixtures.forEach(fixture => fixture.destroy());
+    this.flickeringLampFixtures = [];
+    this.flickeringLampPositions = [];
+    this.lastLampJumpscareTick = Number.NEGATIVE_INFINITY;
     if (this.textures.exists('ordinary_composed_environment')) {
       this.textures.remove('ordinary_composed_environment');
     }

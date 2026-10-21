@@ -107,6 +107,36 @@ describe('AudioDirector optional playback', () => {
     director.shutdown();
   });
 
+  it('replaces an active logical channel instead of stacking duplicate playback', () => {
+    const first = { isPlaying: true, play: vi.fn(), once: vi.fn(), stop: vi.fn() };
+    const second = { isPlaying: true, play: vi.fn(), once: vi.fn(), stop: vi.fn() };
+    const add = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+    const director = directorFor({
+      cache: { audio: { exists: () => true } } as unknown as Phaser.Cache.CacheManager,
+      sound: { add } as unknown as Phaser.Sound.BaseSoundManager,
+    });
+    director.play('sfx_jumpscare_hit', 'sfx');
+    director.play('sfx_jumpscare_hit', 'sfx');
+    expect(first.stop).toHaveBeenCalledOnce();
+    expect(add).toHaveBeenCalledTimes(2);
+    director.shutdown();
+  });
+
+  it('ducks and restores ambience through the legacy major-scare API', () => {
+    const ambience = { isPlaying: true, play: vi.fn(), once: vi.fn(), stop: vi.fn(), setVolume: vi.fn() };
+    const director = directorFor({
+      cache: { audio: { exists: () => true } } as unknown as Phaser.Cache.CacheManager,
+      sound: { add: () => ambience } as unknown as Phaser.Sound.BaseSoundManager,
+    });
+    director.play('amb_floor_2', 'ambience', { loop: true, volume: 0.45 });
+    director.setMajorScareAudioActive(true);
+    expect(ambience.stop).not.toHaveBeenCalled();
+    expect(ambience.setVolume).toHaveBeenLastCalledWith(0.9 * 0.8 * 0.45 * 0.22);
+    director.setMajorScareAudioActive(false);
+    expect(ambience.setVolume).toHaveBeenLastCalledWith(0.9 * 0.8 * 0.45);
+    director.shutdown();
+  });
+
   it('fades music in and keeps active music responsive to master/music settings and mute', () => {
     const music = { isPlaying: true, play: vi.fn(), once: vi.fn(), stop: vi.fn(), setVolume: vi.fn() };
     const tweenAdd = vi.fn((config: { targets: { value: number }; onUpdate: () => void; onComplete: () => void }) => {

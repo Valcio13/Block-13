@@ -108,8 +108,10 @@ export const ORDINARY_SURFACE_POOLS: Readonly<Record<1 | 2 | 3 | 4, SurfacePool>
     wall: [['wall_base', 78], ['wall_variant_01', 16], ['wall_variant_02', 6]],
   },
   2: {
-    floor: [['floor_base', 80], ['floor_variant_02', 12], ['floor_service_grate', 8]],
-    wall: [['wall_base', 78], ['wall_variant_01', 10], ['wall_variant_02', 4], ['wall_service_manifold', 8]],
+    // Block 2 is industrial but still legible: let the shared base tiles
+    // carry most of the room so authored maintenance details read as accents.
+    floor: [['floor_base', 90], ['floor_variant_02', 7], ['floor_service_grate', 3]],
+    wall: [['wall_base', 88], ['wall_variant_01', 6], ['wall_variant_02', 2], ['wall_service_manifold', 4]],
   },
   1: {
     floor: [['floor_base', 38], ['floor_variant_01', 14], ['floor_variant_02', 20], ['floor_variant_03', 16], ['floor_spalled_slab', 12]],
@@ -293,7 +295,7 @@ export function ordinaryMapDecorationPlacements(
     const roll = ordinaryEnvironmentCoordinateHash(floor, x, y) % 1000;
     const asset = roll < 40 ? 'wall_lamp_01'
       : roll < 72 ? 'wall_vent_01'
-        : floor === 2 && roll < 108 ? 'breaker_panel_01'
+        : floor === 2 && roll < 96 ? 'breaker_panel_01'
           : null;
     if (!asset) continue;
     placements.push({ asset, x, y });

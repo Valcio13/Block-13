@@ -1,5 +1,7 @@
 import type { BoxScareSnapshot } from '../core/authoritativeSimulation';
 
+export const CONTAINER_SCARE_STATUS_TEXT = 'JUMPSCARED\nMOVEMENT LOCKED';
+
 /** A presentation event is eligible only when the authoritative box-scare
  * marker advanced on this search. It never chooses or changes the outcome. */
 export function containerScareSearchIndex(
@@ -14,8 +16,8 @@ export function containerScareSearchIndex(
 
 export function containerScareStyle(reducedIntensity: boolean) {
   return reducedIntensity
-    ? { durationMs: 260, peakAlpha: 0.38, peakScale: 1.08 }
-    : { durationMs: 420, peakAlpha: 0.72, peakScale: 1.2 };
+    ? { durationMs: 300, peakAlpha: 0.42, peakScale: 1.08 }
+    : { durationMs: 500, peakAlpha: 0.82, peakScale: 1.2 };
 }
 
 export function containerScareShouldPlay(

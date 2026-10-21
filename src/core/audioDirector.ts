@@ -245,12 +245,24 @@ export class AudioDirector {
     }
     
     // Check if major scare is active (blocks ambient/sfx except scares)
-    if (this.majorScareAudioActive && category !== 'music' && !key.includes('scare')) {
+    const isMajorScareCue = key.includes('scare') || key.includes('impact') || key.includes('jumpscare') || key.includes('warning');
+    if (this.majorScareAudioActive && category !== 'music' && !isMajorScareCue) {
       return null;
     }
     
     const baseVolume = config?.volume ?? 1;
     const volume = this.calculateVolume(category, baseVolume);
+
+    // A non-positional event key represents one logical presentation channel.
+    // Replace an active instance before starting the next one so repeated
+    // lifecycle/state edges cannot leave stacked loops or stale one-shots.
+    const previous = this.activeSounds.get(key);
+    if (previous && (previous.isPlaying || this.pausedSounds.has(previous))) {
+      try { previous.stop(); } catch { /* stale backend handles are disposable */ }
+      this.activeSounds.delete(key);
+      this.activeSoundMix.delete(previous);
+      this.pausedSounds.delete(previous);
+    }
     
     let sound: Phaser.Sound.BaseSound;
     try {
@@ -554,19 +566,10 @@ export class AudioDirector {
   
   public setMajorScareAudioActive(active: boolean) {
     this.majorScareAudioActive = active;
-    
-    if (active) {
-      // Reduce ambience during major scares
-      this.activeSounds.forEach((sound, key) => {
-        if (key.startsWith('amb_') && sound.isPlaying) {
-          // Cannot directly change volume on BaseSound
-          // Stop ambience sounds during major scares instead
-          sound.stop();
-        }
-      });
-    } else {
-      // Ambience will naturally resume via normal gameplay loops
-    }
+    // Keep the loop alive and duck it through the same settings-aware mix
+    // path used by the authored scare timelines. This preserves ambience
+    // position and restores it cleanly after pause/recovery transitions.
+    this.setCategoryDucking('ambience', active ? 0.22 : 1, 'major-scare');
   }
   
   public isMajorScareAudioActive(): boolean {

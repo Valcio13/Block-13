@@ -635,12 +635,7 @@ describe('authoritative deterministic simulation', () => {
       }
       solvePuzzle();
       expect(sim.state.objectiveComplete).toBe(true);
-      if (!sim.state.hasKey && floor === 0) {
-        route(sim.floor.key);
-        step({ ...emptyInput, interact: true });
-        step(emptyInput);
-      }
-      expect(sim.state.hasKey).toBe(floor === 0 || floor === 4 || floor === 3);
+      expect(sim.state.hasKey).toBe(floor === 4 || floor === 3);
       if (floor === 0) expect(sim.floor.searchables.some(item => item.isMimic)).toBe(true);
       route(sim.floor.exit);
       let guard = 0;

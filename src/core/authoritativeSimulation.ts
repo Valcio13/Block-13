@@ -98,7 +98,7 @@ export interface PuzzleRunState {
 
 function createPuzzleRunState(floor: number): PuzzleRunState {
   return {
-    active: false, solved: false, attemptsRemaining: floor === 4 || floor === 3 ? 3 : 0,
+    active: false, solved: false, attemptsRemaining: 3,
     failures: 0, fallbackActive: false, fallbackItemFound: false, selectedIndex: 0,
     enteredCode: [0, 0, 0], switchMask: 0, circuitSequence: [], recordOrder: [], memoryAnswers: [0, 0, 0],
     memoryConfirmedMask: 0, directionMask: 0,
@@ -167,10 +167,10 @@ const STALKER_SPECS = {
 /** Enemy rosters are deliberately sparse under Floor 13 rules v1. */
 export const ENCOUNTER_ROSTER_BOUNDS = {
   4: { crawlers: [0, 0], watchers: [0, 0], ambushers: [0, 0] },
-  3: { crawlers: [0, 1], watchers: [0, 0], ambushers: [0, 1] },
-  2: { crawlers: [1, 1], watchers: [0, 1], ambushers: [0, 1] },
-  1: { crawlers: [1, 2], watchers: [1, 1], ambushers: [1, 1] },
-  0: { crawlers: [2, 2], watchers: [1, 2], ambushers: [1, 1] },
+  3: { crawlers: [1, 1], watchers: [0, 0], ambushers: [0, 1] },
+  2: { crawlers: [1, 1], watchers: [0, 1], ambushers: [1, 1] },
+  1: { crawlers: [2, 2], watchers: [1, 1], ambushers: [1, 1] },
+  0: { crawlers: [2, 2], watchers: [1, 2], ambushers: [1, 2] },
 } as const;
 
 export class AuthoritativeSimulation {
@@ -272,10 +272,10 @@ export class AuthoritativeSimulation {
     let crawlerCount = 0, watcherCount = 0, ambusherCount = 0;
     switch (s.floor) {
       case 4: break;
-      case 3: crawlerCount = this.crawlerRng.nextInt() % 2; ambusherCount = this.ambusherRng.nextInt() % 2; break;
-      case 2: crawlerCount = 1; watcherCount = this.watcherRng.nextInt() % 2; ambusherCount = this.ambusherRng.nextInt() % 2; break;
-      case 1: crawlerCount = 1 + this.crawlerRng.nextRange(0, 1); watcherCount = 1; ambusherCount = 1; break;
-      case 0: crawlerCount = 2; watcherCount = 1 + this.watcherRng.nextRange(0, 1); ambusherCount = 1; break;
+      case 3: crawlerCount = 1; ambusherCount = this.ambusherRng.nextInt() % 2; break;
+      case 2: crawlerCount = 1; watcherCount = this.watcherRng.nextInt() % 2; ambusherCount = 1; break;
+      case 1: crawlerCount = 2; watcherCount = 1; ambusherCount = 1; break;
+      case 0: crawlerCount = 2; watcherCount = 1 + this.watcherRng.nextRange(0, 1); ambusherCount = 1 + this.ambusherRng.nextRange(0, 1); break;
       default: break;
     }
     s.crawlers = Array.from({ length: crawlerCount }, (_, id) => {
@@ -314,7 +314,7 @@ export class AuthoritativeSimulation {
   }
 
   private placeLockboxAwayFromSpawnedEntities() {
-    if (this.stateValue.floor === 0) return;
+    if (this.stateValue.floor !== 4) return;
     const occupied: [number, number][] = [];
     const add = (x: number, y: number) => occupied.push([Math.floor(x / TILE), Math.floor(y / TILE)]);
     const state = this.stateValue;
@@ -841,8 +841,8 @@ export class AuthoritativeSimulation {
   private recordPuzzleFailure() {
     const s = this.stateValue, run = s.puzzle;
     run.failures++;
-    if (s.floor === 4 || s.floor === 3) run.attemptsRemaining = Math.max(0, run.attemptsRemaining - 1);
-    const fallbackActivated = (s.floor === 4 || s.floor === 3) && run.attemptsRemaining === 0;
+    run.attemptsRemaining = Math.max(0, run.attemptsRemaining - 1);
+    const fallbackActivated = run.attemptsRemaining === 0;
     if (fallbackActivated) {
       run.fallbackActive = true;
       run.active = false;
@@ -897,16 +897,6 @@ export class AuthoritativeSimulation {
       this.tickEvents.push({ type: 'puzzle_fallback_item_found', floor: s.floor });
       return;
     }
-    if (s.floor === 0) {
-    const keyX = (this.floorValue.key[0] * 32 + 16) * FIXED_SCALE;
-    const keyY = (this.floorValue.key[1] * 32 + 16) * FIXED_SCALE;
-    if (!s.hasKey && this.inRange(keyX, keyY)) {
-      s.hasKey = true;
-      this.tickEvents.push({ type: 'key_collected' });
-      if (s.stalker.state === 'dormant') { s.stalker.state = 'roaming'; this.pickStalkerRoamTarget(); }
-      else if (s.stalker.state === 'roaming') { s.stalker.state = 'investigating'; s.stalker.targetX = s.x; s.stalker.targetY = s.y; s.stalker.ticksRemaining = (STALKER_SPECS[s.floor as keyof typeof STALKER_SPECS] ?? STALKER_SPECS[4]).investigate; }
-    }
-    }
     const searchableOrder = [
       ...this.floorValue.objectives.searchableIndices,
       ...this.floorValue.searchables.map((_, index) => index).filter(index => !this.floorValue.objectives.searchableIndices.includes(index)),
@@ -950,7 +940,7 @@ export class AuthoritativeSimulation {
       return;
     }
     const [ex, ey] = this.floorValue.exit;
-    const exitUnlocked = s.floor === 0 ? s.hasKey && s.objectiveComplete : s.objectiveComplete;
+    const exitUnlocked = s.floor === 0 ? s.objectiveComplete : s.objectiveComplete;
     if (exitUnlocked && this.inRange((ex * 32 + 16) * FIXED_SCALE, (ey * 32 + 16) * FIXED_SCALE)) {
       const fromFloor = s.floor;
       s.score += 100 * Math.max(0, s.floor);

@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { AuthoritativeSimulation } from '../src/core/authoritativeSimulation';
-import { containerScareSearchIndex, containerScareShouldPlay, containerScareStyle } from '../src/game/containerScare';
+import { CONTAINER_SCARE_STATUS_TEXT, containerScareSearchIndex, containerScareShouldPlay, containerScareStyle } from '../src/game/containerScare';
 import { accessiblePresentationIntensity } from '../src/game/accessibilityPresentation';
 
 describe('container scare presentation adapter', () => {
+  it('provides an explicit movement-lock indicator for the player', () => {
+    expect(CONTAINER_SCARE_STATUS_TEXT).toContain('JUMPSCARED');
+    expect(CONTAINER_SCARE_STATUS_TEXT).toContain('MOVEMENT LOCKED');
+  });
   it('fires only when the authoritative scare marker advances on a searched container', () => {
     const previous = { lastTriggerTick: 10, lastType: 2, availableTypes: [0, 1, 2, 3] };
     const current = { lastTriggerTick: 30, lastType: 1, availableTypes: [0, 1, 2, 3] };

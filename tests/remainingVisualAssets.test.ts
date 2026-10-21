@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { ENEMY_ASSET_MANIFEST, CRAWLER_WALK_CYCLE_DURATION_MS, CRAWLER_WALK_FRAME_RATE, MIMIC_REVEAL_PULSE_DURATION_MS, ambusherWarningAlpha, crawlerMovedBetween, crawlerPresentationPhaseOffsetMs, crawlerTextureKeyForPresentation, mimicRevealPulseScale, watcherGazeAudioPosition, watcherGazeEyeAlpha, watcherTextureKey, ambusherTextureKey, mimicTextureKey } from '../src/game/enemyAssets';
+import { CONTAINER_SCARE_ASSET, CONTAINER_SCARE_VARIANT_ASSETS, ENEMY_ASSET_MANIFEST, CRAWLER_WALK_CYCLE_DURATION_MS, CRAWLER_WALK_FRAME_RATE, LAMP_JUMPSCARE_ASSET, LAMP_JUMPSCARE_VARIANT_ASSETS, MIMIC_REVEAL_PULSE_DURATION_MS, ambusherWarningAlpha, containerScareAssetForSearchIndex, crawlerMovedBetween, crawlerPresentationPhaseOffsetMs, crawlerTextureKeyForPresentation, lampJumpscareAssetForEvent, mimicRevealPulseScale, watcherGazeAudioPosition, watcherGazeEyeAlpha, watcherTextureKey, ambusherTextureKey, mimicTextureKey } from '../src/game/enemyAssets';
 import { AuthoritativeSimulation, FIXED_SCALE } from '../src/core/authoritativeSimulation';
 import { NARRATIVE_ASSET_MANIFEST, victoryExteriorScale } from '../src/game/narrativeAssets';
 import { resultHandoffReady, shouldBeginVictoryEpilogue, VICTORY_EPILOGUE } from '../src/game/contestUx';
@@ -18,6 +18,20 @@ describe('remaining authored Block 13 visual assets', () => {
     expect(Object.keys(ENEMY_ASSET_MANIFEST)).toHaveLength(8);
     for (const asset of Object.values(ENEMY_ASSET_MANIFEST)) expectPng(asset, 6);
     expect(ENEMY_ASSET_MANIFEST.forgotten_appearance).toMatchObject({ width: 32, height: 52 });
+  });
+
+  it('registers the dedicated container jumpscare image at its authored size', () => {
+    expectPng(CONTAINER_SCARE_ASSET, 2);
+    expect(CONTAINER_SCARE_VARIANT_ASSETS).toHaveLength(2);
+    expectPng(CONTAINER_SCARE_VARIANT_ASSETS[1], 2);
+    expect(containerScareAssetForSearchIndex(0).key).toBe('container_jumpscare_nightmare_trunk');
+    expect(containerScareAssetForSearchIndex(1).key).toBe('container_jumpscare_clawed_hand');
+    expect(containerScareAssetForSearchIndex(2).key).toBe('container_jumpscare_nightmare_trunk');
+    expectPng(LAMP_JUMPSCARE_ASSET, 2);
+    expect(LAMP_JUMPSCARE_VARIANT_ASSETS).toHaveLength(2);
+    expectPng(LAMP_JUMPSCARE_VARIANT_ASSETS[1], 2);
+    expect(lampJumpscareAssetForEvent(0).key).toBe('lamp_jumpscare_crawling_shadow');
+    expect(lampJumpscareAssetForEvent(1).key).toBe('lamp_jumpscare_ghostly_figure');
   });
 
   it('runs the Crawler four-step 8 FPS cycle and returns immediately to idle on stop', () => {

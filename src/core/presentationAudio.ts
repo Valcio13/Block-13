@@ -12,8 +12,8 @@ export type AudioCue = {
 const cue = (key: string, cooldownMs = 0, positional?: { x: number; y: number }, volume?: number): AudioCue => ({ key, cooldownMs, positional, volume });
 
 /** Dedicated impact gains through AudioDirector, preserving master and SFX settings. */
-export const AMBUSHER_IMPACT_PRODUCTION_VOLUME = 0.55;
-export const AMBUSHER_IMPACT_FALLBACK_VOLUME = 1.2;
+export const AMBUSHER_IMPACT_PRODUCTION_VOLUME = 0.48;
+export const AMBUSHER_IMPACT_FALLBACK_VOLUME = 0.82;
 export const AMBUSHER_PRE_IMPACT_AMBIENCE_GAIN = 0.25;
 export function playAmbusherImpact(director: Pick<AudioDirector, 'hasLoadedAsset' | 'playWithCooldown' | 'stop'>, reduceIntensity = false): string | undefined {
   // A new encounter replaces any lingering tail instead of stacking it.
@@ -43,6 +43,9 @@ export function audioCuesForEvents(events: readonly SimulationEvent[], state?: P
         break;
       case 'floor_transition':
         cues.push(cue('sfx_floor_transition', 1500));
+        break;
+      case 'puzzle_solved':
+        cues.push(cue('sfx_puzzle_solved', 1200));
         break;
       case 'mimic_revealed':
         {
@@ -107,25 +110,16 @@ export function floorAmbienceKeys(floor: number): string[] {
 }
 
 export interface FloorMusicTrack {
-  key: 'music_block3_airy' | 'music_block1_lost' | 'music_block13_echoes';
+  key: 'music_scary_halloween';
   /** Per-track trim before master and music settings are applied. */
   gain: number;
 }
 
-/** Floor-selected music is presentation-only; floor 4 deliberately stays music-free. */
+/** One restrained music bed is used across every playable floor. */
 export function floorMusicTrack(floor: number): FloorMusicTrack | undefined {
-  switch (floor) {
-    case 3: return { key: 'music_block3_airy', gain: 0.24 };
-    case 2: return { key: 'music_block3_airy', gain: 0.32 };
-    case 1: return { key: 'music_block1_lost', gain: 0.20 };
-    case 0: return { key: 'music_block13_echoes', gain: 0.18 };
-    default: return undefined;
-  }
+  return floor >= 0 && floor <= 4 ? { key: 'music_scary_halloween', gain: 0.22 } : undefined;
 }
 
 export const FLOOR_MUSIC_PREVIEW: readonly FloorMusicTrack[] = [
-  { key: 'music_block3_airy', gain: 0.24 },
-  { key: 'music_block3_airy', gain: 0.32 },
-  { key: 'music_block1_lost', gain: 0.20 },
-  { key: 'music_block13_echoes', gain: 0.18 },
+  { key: 'music_scary_halloween', gain: 0.22 },
 ];

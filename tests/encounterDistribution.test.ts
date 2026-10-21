@@ -44,10 +44,10 @@ describe('versioned rare-enemy roster', () => {
     ]));
     console.info('Mean spawned enemy counts / 128 seeds; prior rules → Floor 13 0.5.0:', { prior: priorAverages, current: averages });
     const expected = {
-      0: { crawler: 2, watcher: 1.5, ambusher: 1 },
-      1: { crawler: 1.5, watcher: 1, ambusher: 1 },
-      2: { crawler: 1, watcher: 0.5, ambusher: 0.5 },
-      3: { crawler: 0.5, watcher: 0, ambusher: 0.5 },
+      0: { crawler: 2, watcher: 1.5, ambusher: 1.5 },
+      1: { crawler: 2, watcher: 1, ambusher: 1 },
+      2: { crawler: 1, watcher: 0.5, ambusher: 1 },
+      3: { crawler: 1, watcher: 0, ambusher: 0.5 },
       4: { crawler: 0, watcher: 0, ambusher: 0 },
     };
     for (const [floor, values] of Object.entries(expected)) for (const [enemy, mean] of Object.entries(values)) {

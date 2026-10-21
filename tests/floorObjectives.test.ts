@@ -128,4 +128,12 @@ describe('authoritative floor puzzle progression', () => {
       expect(completed.state.hasKey).toBe(true);
     }
   });
+
+  it('provides a reachable fallback site and three attempts on every floor puzzle', () => {
+    for (const floorNumber of [4, 3, 2, 1, 0]) {
+      const sim = new AuthoritativeSimulation(BigInt(0x7100 + floorNumber), { floor: floorNumber, ...noSpawnEnemies });
+      expect(sim.state.puzzle.attemptsRemaining).toBe(3);
+      expect(sim.floor.puzzleFallbackSite).toBeDefined();
+    }
+  });
 });

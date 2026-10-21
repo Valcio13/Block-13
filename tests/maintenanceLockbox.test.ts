@@ -43,8 +43,8 @@ function walkTo(sim: AuthoritativeSimulation, target: [number, number]) {
 }
 
 describe('Maintenance Lockbox', () => {
-  it('places exactly one deterministic, reachable optional reward on each ordinary floor and none on Floor 13', () => {
-    for (const floorNumber of [4, 3, 2, 1]) for (let seed = 0; seed < 20; seed++) {
+  it('places the puzzle lockbox only on Floor 4 and none on other floors', () => {
+    for (const floorNumber of [4]) for (let seed = 0; seed < 20; seed++) {
       const floor = generateFloor(seed, floorNumber), repeat = generateFloor(seed, floorNumber);
       const boxes = floor.searchables.filter(item => item.objectType === 'maintenance_lockbox');
       expect(boxes).toHaveLength(1);
@@ -60,11 +60,13 @@ describe('Maintenance Lockbox', () => {
       expect(fromStart).toBeGreaterThanOrEqual(({ 4: 7, 3: 10, 2: 13, 1: 16 } as Record<number, number>)[floorNumber]);
       expect(fromExit).toBeGreaterThanOrEqual(({ 4: 5, 3: 6, 2: 7, 1: 8 } as Record<number, number>)[floorNumber]);
     }
-    expect(generateFloor(42, 0).searchables.some(item => item.objectType === 'maintenance_lockbox')).toBe(false);
+    for (const floorNumber of [3, 2, 1, 0]) for (let seed = 0; seed < 20; seed++) {
+      expect(generateFloor(seed, floorNumber).searchables.some(item => item.objectType === 'maintenance_lockbox')).toBe(false);
+    }
   });
 
   it('keeps the spawned lockbox clear of enemies and other interactables', () => {
-    for (const floorNumber of [4, 3, 2, 1]) for (let seed = 1; seed <= 8; seed++) {
+    for (const floorNumber of [4]) for (let seed = 1; seed <= 8; seed++) {
       const sim = new AuthoritativeSimulation(BigInt(seed * 1000 + floorNumber), { floor: floorNumber });
       const floor = sim.floor, box = floor.searchables.find(item => item.objectType === 'maintenance_lockbox')!;
       const occupied = [

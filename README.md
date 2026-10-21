@@ -10,7 +10,7 @@ The route is:
 
 **Floor 4 → Floor 3 → Floor 2 → Floor 1 → Floor 13 → Outside**
 
-Explore the building, search for evidence and supplies, and find a way onward. The current authoritative build still uses staircase-key progression; distinct mandatory floor investigations and reduced encounter rates are planned as a versioned rules migration before they become active.
+Explore the building, search for evidence and supplies, and solve the distinct investigation on each floor. Floors 4 and 3 grant progression keys when their puzzles are solved; Floors 2, 1, and 13 unlock their next route directly through their completed puzzle objectives. The Floor 13 finale has no physical key pickup.
 
 ### Controls
 
@@ -18,6 +18,7 @@ Explore the building, search for evidence and supplies, and find a way onward. T
 - **F:** toggle flashlight
 - **E:** interact with containers, keys, and stairs
 - **Escape:** pause
+- **Tab:** open the field-notes notebook while playing
 
 Audio and accessibility settings are available from the main menu and pause
 menu. Volume, mute, and **Reduce Jumpscare Intensity** preferences are saved
@@ -45,7 +46,7 @@ World generation, economy, events, and gameplay subsystems use separated determi
 
 ## Web3 status
 
-- **TX1 — Run Manifest:** Current procedural puzzle progression rules use game version `0.6.3` and the canonical rules hash `keccak256(UTF-8("floor13-procedural-puzzles-floor-progression-v4-spaced-searchables"))`. This version adds deterministic spacing for searchable containers while preserving map dimensions, RNG draw cadence, and puzzle progression; older identities remain historical. In-progress older-rule checkpoints are not migrated or replayed under the new rules. The RunRegistry ABI, manifest layout, InputLogV2 encoding, FinalStateV1 layout, and seed derivation algorithm remain unchanged.
+- **TX1 — Run Manifest:** Current procedural puzzle progression rules use game version `0.6.7` and the canonical rules hash `keccak256(UTF-8("floor13-procedural-puzzles-floor-progression-v8-valid-floor4-combination-digits"))`. This version validates the three-digit Floor 4 combination generation, keeps the authored maintenance lockbox exclusive to Floor 4, resolves the Floor 13 exit through memory completion without a physical key, and retains the current deterministic encounter balance; older identities remain historical. In-progress older-rule checkpoints are not migrated or replayed under the new rules. The RunRegistry ABI, manifest layout, InputLogV2 encoding, FinalStateV1 layout, and seed derivation algorithm remain unchanged.
 - **Gameplay and replay:** Implemented locally in the game and covered by deterministic tests. InputLogV2 and FinalStateV1 are committed by TX2.
 - **TX2 — completion/result commitment:** The contract accepts canonical score, outcome, terminal tick, InputLogV2 hash, and FinalStateV1 hash after an explicit player action. This commitment is deterministic and auditable, but does not independently prove honest execution.
 - **Independent verifier/backend/signing:** Not implemented and not part of the current contest flow.
@@ -131,7 +132,7 @@ Current protocol and architecture documentation is indexed in [ARCHITECTURE.md](
 The current pre-release blockers and handoff checklist are in
 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). The npm package is marked
 `private`; its `0.2.0` package metadata is internal project metadata and is
-intentionally independent from the onchain game version `0.6.1`.
+intentionally independent from the onchain game version `0.6.7`.
 The current dependency advisory triage is in
 [docs/dependency-audit-2026-10.md](docs/dependency-audit-2026-10.md).
 

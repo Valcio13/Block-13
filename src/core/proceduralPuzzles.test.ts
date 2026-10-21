@@ -47,6 +47,11 @@ describe('procedural floor puzzles', () => {
     for (const seed of [0, 1, 17, 0x7fffffff]) {
       const combination = generateProceduralPuzzle(seed, 4);
       expect(combination.combinationExpressions).toHaveLength(3);
+      expect(combination.solutionCode).toHaveLength(3);
+      expect(combination.solutionCode!.every(digit => digit >= 1 && digit <= 9)).toBe(true);
+      combination.combinationExpressions!.forEach(expression => {
+        if (expression.operator === '-') expect(expression.left).toBeGreaterThanOrEqual(expression.right);
+      });
       expect(combination.clueTexts.join(' ')).not.toMatch(/records?\s+\d+\s+.*\s*=\s*\d/i);
       const circuit = generateProceduralPuzzle(seed, 2);
       expect(circuit.circuitOrder).toHaveLength(2);

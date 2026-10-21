@@ -76,8 +76,8 @@ export function tileDressingAt(floor: number, x: number, y: number, walkable: bo
       return 'none';
     }
     if (floor === 2) {
-      if (roll < 7) return 'stain';
-      if (roll < 9) return 'crack';
+      if (roll < 4) return 'stain';
+      if (roll < 5) return 'crack';
       if (roll === 99) return 'warning';
       return 'none';
     }
@@ -87,9 +87,9 @@ export function tileDressingAt(floor: number, x: number, y: number, walkable: bo
   }
   if (floor === 3 && roll < 4) return 'pipe';
   if (floor === 3) return roll >= 4 && roll < 16 ? 'crack' : 'none';
-  if (floor <= 3 && roll < (floor === 2 ? 5 : 8)) return 'pipe';
-  if (floor === 2 && roll >= 98 && roll < 100) return 'warning';
-  const wallCrackLimit = floor === 4 ? 12 : floor === 2 ? 13 : 18;
+  if (floor <= 3 && roll < (floor === 2 ? 3 : 8)) return 'pipe';
+  if (floor === 2 && roll === 99) return 'warning';
+  const wallCrackLimit = floor === 4 ? 12 : floor === 2 ? 8 : 18;
   if (roll < wallCrackLimit) return 'crack';
   return 'none';
 }
@@ -107,7 +107,7 @@ export function architecturalMarkAt(floor: number, x: number, y: number, walkabl
       if (!walkable && hash % 19 === 0) return 'peel';
       return null;
     case 2:
-      return (hash + x * 7 + y * 13) % 31 === 0 ? 'warning_repeat' : null;
+      return (hash + x * 7 + y * 13) % 47 === 0 ? 'warning_repeat' : null;
     case 1:
       return hash % 13 === 0 ? 'fracture' : null;
     case 0:

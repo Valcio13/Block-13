@@ -21,7 +21,7 @@ const VOLUMES: ReadonlyArray<{ key: VolumeKey; mute: MuteKey; label: string }> =
 const PREVIEWS: Record<PreviewCategory, { key: string; durationMs: number }> = {
   sfx: { key: 'sfx_player_footstep_1', durationMs: 1800 },
   ambience: { key: 'amb_floor_3', durationMs: 3500 },
-  music: { key: 'music_block3_airy', durationMs: 3500 },
+  music: { key: 'music_scary_halloween', durationMs: 3500 },
 };
 
 function effectivePreviewVolume(preferences: AudioPreferences, category: PreviewCategory) {

@@ -139,11 +139,11 @@ describe('presentation audio mapping', () => {
     expect(playWithCooldown).toHaveBeenCalledOnce();
     expect(playWithCooldown).toHaveBeenCalledWith('sfx_jumpscare_hit', 'sfx', 0, { volume: AMBUSHER_IMPACT_FALLBACK_VOLUME });
     expect(stop).toHaveBeenCalledWith('sfx_jumpscare_hit');
-    expect(AMBUSHER_IMPACT_FALLBACK_VOLUME).toBe(1.2);
-    expect(AMBUSHER_IMPACT_PRODUCTION_VOLUME).toBe(0.55);
+    expect(AMBUSHER_IMPACT_FALLBACK_VOLUME).toBe(0.82);
+    expect(AMBUSHER_IMPACT_PRODUCTION_VOLUME).toBe(0.48);
     expect(AMBUSHER_PRE_IMPACT_AMBIENCE_GAIN).toBe(0.25);
     expect(0.9 * 0.9 * AMBUSHER_IMPACT_FALLBACK_VOLUME).toBeLessThanOrEqual(1);
-    expect(-7.7 + 20 * Math.log10(0.9 * 0.9 * AMBUSHER_IMPACT_FALLBACK_VOLUME)).toBeCloseTo(-7.95, 1);
+    expect(-7.7 + 20 * Math.log10(0.9 * 0.9 * AMBUSHER_IMPACT_FALLBACK_VOLUME)).toBeCloseTo(-11.26, 1);
     playWithCooldown.mockClear();
     (director.hasLoadedAsset as ReturnType<typeof vi.fn>).mockReturnValue(true);
     expect(playAmbusherImpact(director)).toBe('sfx_ambusher_impact');
@@ -169,13 +169,13 @@ describe('presentation audio mapping', () => {
     expect(Object.keys(AUDIO_ASSET_CATALOG)).toContain('sfx_final_chase_stinger');
   });
 
-  it('maps the approved music stages and leaves Block 4 music-free', () => {
-    expect(floorMusicTrack(4)).toBeUndefined();
-    expect(floorMusicTrack(3)).toEqual({ key: 'music_block3_airy', gain: 0.24 });
-    expect(floorMusicTrack(2)).toEqual({ key: 'music_block3_airy', gain: 0.32 });
-    expect(floorMusicTrack(1)).toEqual({ key: 'music_block1_lost', gain: 0.2 });
-    expect(floorMusicTrack(0)).toEqual({ key: 'music_block13_echoes', gain: 0.18 });
-    for (const key of ['music_block3_airy', 'music_block1_lost', 'music_block13_echoes']) {
+  it('uses the approved music bed across every playable floor', () => {
+    for (const floor of [4, 3, 2, 1, 0]) {
+    expect(floorMusicTrack(floor)).toEqual({ key: 'music_scary_halloween', gain: 0.22 });
+    }
+    expect(floorMusicTrack(-1)).toBeUndefined();
+    expect(floorMusicTrack(5)).toBeUndefined();
+    for (const key of ['music_scary_halloween']) {
       const path = AUDIO_ASSET_MANIFEST[key];
       expect(path).toBe(AUDIO_ASSET_CATALOG[key]);
       expect(existsSync(resolve(process.cwd(), 'public', path.slice(1)))).toBe(true);

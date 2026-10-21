@@ -5,7 +5,7 @@ import { BLOCK13_ASSET_MANIFEST } from '../block13Assets';
 import { PLAYER_ASSET_MANIFEST, PLAYER_WALK_ASSET_MANIFEST } from '../playerAssets';
 import { ORDINARY_ENVIRONMENT_ASSET_MANIFEST } from '../environmentAssets';
 import { STALKER_IDLE_ASSET_MANIFEST, STALKER_WALK_ASSET_MANIFEST } from '../stalkerAssets';
-import { AMBUSHER_JUMPSCARE_VARIANT_ASSETS, ENEMY_ASSET_MANIFEST } from '../enemyAssets';
+import { AMBUSHER_JUMPSCARE_VARIANT_ASSETS, CONTAINER_SCARE_VARIANT_ASSETS, ENEMY_ASSET_MANIFEST, LAMP_JUMPSCARE_VARIANT_ASSETS } from '../enemyAssets';
 import { NARRATIVE_ASSET_MANIFEST } from '../narrativeAssets';
 import { BLOCK3_REFINED_EXPERIMENT_ASSETS } from '../block3VisualExperiment';
 
@@ -97,6 +97,8 @@ export class BootScene extends Phaser.Scene {
     for (const asset of Object.values(ENEMY_ASSET_MANIFEST)) this.load.image(asset.key, asset.path);
     // Missing optional compositions fail closed to the face/world/procedural chain.
     for (const asset of Object.values(AMBUSHER_JUMPSCARE_VARIANT_ASSETS)) this.load.image(asset.key, asset.path);
+    for (const asset of CONTAINER_SCARE_VARIANT_ASSETS) this.load.image(asset.key, asset.path);
+    for (const asset of LAMP_JUMPSCARE_VARIANT_ASSETS) this.load.image(asset.key, asset.path);
     for (const asset of Object.values(NARRATIVE_ASSET_MANIFEST)) this.load.image(asset.key, asset.path);
     this.load.on('filecomplete', (_key: string, _type: string, _data: unknown) => {
       for (const asset of Object.values(NARRATIVE_ASSET_MANIFEST)) {

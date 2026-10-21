@@ -142,9 +142,8 @@ export function objectiveCopy(
     1: 'RECONSTRUCT THE ERASED RECORDS',
   };
   if (isBlock13Floor(floor)) {
-    if (objectiveComplete && hasKey && stalkerHunting) return 'OBJECTIVE: GET OUT NOW';
-    if (objectiveComplete && !hasKey) return 'OBJECTIVE: FIND THE EXIT KEY';
-    if (objectiveComplete && hasKey) return 'OBJECTIVE: GET OUT';
+    if (objectiveComplete && stalkerHunting) return 'OBJECTIVE: GET OUT NOW';
+    if (objectiveComplete) return 'OBJECTIVE: GET OUT';
     return `OBJECTIVE: RECOVER THE FINAL MEMORY${total ? ` (${progress}/${total})` : ''}`;
   }
   if (objectiveComplete) return floor === 1 ? 'OBJECTIVE: REACH THE EXIT' : 'OBJECTIVE: RETURN TO STAIRS';

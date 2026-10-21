@@ -1,9 +1,10 @@
 # Maintenance Lockbox
 
-Normal Blocks 4, 3, 2, and 1 each generate exactly one `maintenance_lockbox`
-searchable. Its result is a dedicated guaranteed staircase-key result, never
-an ordinary loot-table roll. Block 13 retains its existing finale key/objective
-placement.
+Floor 4 generates exactly one `maintenance_lockbox` searchable as its authored
+combination puzzle device. Floors 3, 2, 1, and 13 do not reuse that lockbox
+prop; their puzzle devices are ordinary architectural locations and puzzle
+completion grants progression directly. The Floor 13 finale has no physical
+key pickup.
 
 Placement uses bounded breadth-first distances over the generated walkable tile
 grid. It prefers remote dead-end/branch cells, with increasing minimum route

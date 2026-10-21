@@ -95,9 +95,9 @@ describe('ordinary authored environment assets', () => {
     expect(ORDINARY_SURFACE_POOLS[3].floor.map(([name]) => name)).toEqual(['floor_base', 'floor_variant_01', 'floor_variant_02', 'floor_variant_03']);
     expect(ORDINARY_SURFACE_POOLS[3].wall.map(([name]) => name)).toEqual(['wall_base', 'wall_variant_01', 'wall_variant_02']);
     expect(ORDINARY_SURFACE_POOLS[2].floor.map(([name]) => name)).toEqual(['floor_base', 'floor_variant_02', 'floor_service_grate']);
-    expect(ORDINARY_SURFACE_POOLS[2].floor[0]).toEqual(['floor_base', 80]);
+    expect(ORDINARY_SURFACE_POOLS[2].floor[0]).toEqual(['floor_base', 90]);
     expect(ORDINARY_SURFACE_POOLS[2].wall.map(([name]) => name)).toEqual(['wall_base', 'wall_variant_01', 'wall_variant_02', 'wall_service_manifold']);
-    expect(ORDINARY_SURFACE_POOLS[2].wall[0]).toEqual(['wall_base', 78]);
+    expect(ORDINARY_SURFACE_POOLS[2].wall[0]).toEqual(['wall_base', 88]);
     expect(ORDINARY_SURFACE_POOLS[1].floor.map(([name]) => name)).not.toContain('floor_variant_04');
     expect(ORDINARY_SURFACE_POOLS[1].floor.map(([name]) => name)).toContain('floor_spalled_slab');
     expect(ORDINARY_SURFACE_POOLS[1].wall.map(([name]) => name)).toContain('wall_exposed_lath');
@@ -178,18 +178,18 @@ describe('ordinary authored environment assets', () => {
       const dressing = tileDressingAt(2, x, y, true);
       if (dressing === 'stain' || dressing === 'crack' || dressing === 'warning') dressingCounts[dressing]++;
     }
-    expect(dressingCounts.stain).toBeGreaterThan(650);
-    expect(dressingCounts.stain).toBeLessThan(750);
-    expect(dressingCounts.crack).toBeGreaterThan(150);
-    expect(dressingCounts.crack).toBeLessThan(250);
+    expect(dressingCounts.stain).toBeGreaterThan(350);
+    expect(dressingCounts.stain).toBeLessThan(450);
+    expect(dressingCounts.crack).toBeGreaterThan(50);
+    expect(dressingCounts.crack).toBeLessThan(150);
     expect(dressingCounts.warning).toBeGreaterThan(50);
     expect(dressingCounts.warning).toBeLessThan(150);
     let warningMarks = 0;
     for (let y = 0; y < 100; y++) for (let x = 0; x < 100; x++) {
       if (architecturalMarkAt(2, x, y, true) === 'warning_repeat') warningMarks++;
     }
-    expect(warningMarks).toBeGreaterThan(300);
-    expect(warningMarks).toBeLessThan(400);
+    expect(warningMarks).toBeGreaterThan(150);
+    expect(warningMarks).toBeLessThan(275);
   });
 
   it('reuses requested shared base art or signals procedural tile fallback when base art is missing', () => {

@@ -30,6 +30,54 @@ export const AMBUSHER_JUMPSCARE_VARIANT_ASSETS = {
   wrong_face: { key: 'ambusher_jumpscare_wrong_face', path: assetPath('sprites/enemies/ambusher/ambusher_jumpscare_wrong_face.png'), width: 576, height: 324 },
 } as const;
 
+/** Dedicated screen-space art for ordinary container scares. */
+export const CONTAINER_SCARE_ASSET = {
+  key: 'container_jumpscare_nightmare_trunk',
+  path: assetPath('sprites/enemies/ambusher/container_jumpscare_nightmare_trunk.png'),
+  width: 1536,
+  height: 1024,
+} as const;
+
+export const CONTAINER_SCARE_VARIANT_ASSETS = [
+  CONTAINER_SCARE_ASSET,
+  {
+    key: 'container_jumpscare_clawed_hand',
+    path: assetPath('sprites/enemies/ambusher/container_jumpscare_clawed_hand.png'),
+    width: 1536,
+    height: 1024,
+  },
+] as const;
+
+/** Selects a container scare composition without consuming gameplay RNG. */
+export function containerScareAssetForSearchIndex(searchableIndex: number) {
+  const index = Number.isFinite(searchableIndex) ? Math.abs(Math.trunc(searchableIndex)) : 0;
+  return CONTAINER_SCARE_VARIANT_ASSETS[index % CONTAINER_SCARE_VARIANT_ASSETS.length];
+}
+
+/** Dedicated screen-space composition for the rare unlit-lamp scare. */
+export const LAMP_JUMPSCARE_ASSET = {
+  key: 'lamp_jumpscare_crawling_shadow',
+  path: assetPath('sprites/enemies/ambusher/lamp_jumpscare_crawling_shadow.png'),
+  width: 1536,
+  height: 1024,
+} as const;
+
+export const LAMP_JUMPSCARE_VARIANT_ASSETS = [
+  LAMP_JUMPSCARE_ASSET,
+  {
+    key: 'lamp_jumpscare_ghostly_figure',
+    path: assetPath('sprites/enemies/ambusher/lamp_jumpscare_ghostly_figure.png'),
+    width: 1448,
+    height: 1086,
+  },
+] as const;
+
+/** Selects a lamp scare composition from the presentation event identity only. */
+export function lampJumpscareAssetForEvent(eventId: number) {
+  const index = Number.isFinite(eventId) ? Math.abs(Math.trunc(eventId)) : 0;
+  return LAMP_JUMPSCARE_VARIANT_ASSETS[index % LAMP_JUMPSCARE_VARIANT_ASSETS.length];
+}
+
 export const CRAWLER_WALK_FRAME_RATE = 8;
 export const CRAWLER_FRAME_STEP_MS = 1000 / CRAWLER_WALK_FRAME_RATE;
 export const CRAWLER_WALK_CYCLE_DURATION_MS = CRAWLER_FRAME_STEP_MS * 4;

@@ -39,6 +39,17 @@ The gains in code are starting mix trims only; final subjective balance
 requires in-game listening. Processing measurements and the generated loop
 boundaries do not establish that any track sounds good in context.
 
+## Whole-game music bed
+
+| Source | Creator | Original source | License | Modifications |
+| --- | --- | --- | --- | --- |
+| *Scary Halloween* | Dmitrii Spis (NastelBom) | https://pixabay.com/music/scary-childrens-tunes-scary-halloween-617002/ | Pixabay Content License; attribution optional | Downloaded directly from Pixabay on 2026-10-17, encoded to OGG Vorbis quality 6 for runtime use. The source is 75.65 seconds and measures approximately -8.3 LUFS integrated; the runtime gain trim is 0.22. |
+
+The source MP3 is retained as `docs/audio/sources/music_scary_halloween_617002.mp3`.
+The runtime file is `public/assets/audio/music/music_scary_halloween_617002.ogg`.
+The track is registered with YouTube Content ID; the Pixabay download page
+provides a license certificate if a platform claim needs to be disputed.
+
 ## Original enemy cues (2026-10-12)
 
 The following cues were composed for this project with the deterministic,

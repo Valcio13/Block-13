@@ -12,7 +12,6 @@ function withinInteractionRange(state: AuthoritativeState, tileX: number, tileY:
 /** Mirrors only current proximity eligibility and action priority for display copy. */
 export function interactionPrompt(state: AuthoritativeState, floor: Floor): string {
   if (state.puzzle.active) return '';
-  if (isBlock13Floor(state.floor) && !state.hasKey && withinInteractionRange(state, floor.key[0], floor.key[1])) return '[E] PICK UP KEY';
   if (!state.puzzle.solved && withinInteractionRange(state, floor.puzzleDevice[0], floor.puzzleDevice[1])) {
     return state.puzzle.fallbackActive && state.puzzle.fallbackItemFound
       ? '[E] FORCE OPEN DEVICE'
@@ -32,7 +31,6 @@ export function interactionPrompt(state: AuthoritativeState, floor: Floor): stri
   }
   if (!withinInteractionRange(state, floor.exit[0], floor.exit[1])) return '';
   if (isBlock13Floor(state.floor) && !state.objectiveComplete) return 'EXIT LOCKED — RECOVER THE FINAL MEMORY';
-  if (isBlock13Floor(state.floor) && !state.hasKey) return 'EXIT LOCKED — FIND THE KEY';
   if (!isBlock13Floor(state.floor) && !state.objectiveComplete) return 'STAIRS LOCKED — SOLVE THE FLOOR PUZZLE';
   return isBlock13Floor(state.floor) ? '[E] ESCAPE OUTSIDE' : '[E] DESCEND STAIRS';
 }
@@ -40,7 +38,6 @@ export function interactionPrompt(state: AuthoritativeState, floor: Floor): stri
 /** Feedback only for an E press that produced no authoritative interaction event. */
 export function rejectedInteractionFeedback(state: AuthoritativeState, floor: Floor): string | undefined {
   if (isBlock13Floor(state.floor) && !state.objectiveComplete && withinInteractionRange(state, floor.exit[0], floor.exit[1])) return 'RECOVER THE FINAL MEMORY';
-  if (isBlock13Floor(state.floor) && !state.hasKey && withinInteractionRange(state, floor.exit[0], floor.exit[1])) return 'FIND THE KEY TO UNLOCK THE WAY';
   if (!isBlock13Floor(state.floor) && !state.objectiveComplete && withinInteractionRange(state, floor.exit[0], floor.exit[1])) return 'SOLVE THE FLOOR PUZZLE TO UNLOCK THE STAIRS';
   const alreadySearched = floor.searchables.some((item, index) => state.searched[index] && withinInteractionRange(state, item.x, item.y));
   return alreadySearched ? 'ALREADY SEARCHED' : undefined;

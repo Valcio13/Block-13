@@ -24,7 +24,7 @@ describe('floor music presentation integration', () => {
     for (const key of ['F1', 'F2', 'F3', 'F4', 'F5', 'F12']) expect(preview).toContain(`${key}: { key:`);
     for (const key of ['F6', 'F7', 'F9', 'F10', 'F11']) expect(preview).toContain(`event.code === '${key}'`);
     expect(preview).not.toContain("event.code === 'F8'");
-    expect(preview).toContain("volume: reduced ? 0.56 : 1.2");
+    expect(preview).toContain("volume: reduced ? 0.46 : 0.82");
     expect(floorScene).toContain("this.input.keyboard?.off('keydown', this.audioPreviewKeyHandler)");
   });
 });

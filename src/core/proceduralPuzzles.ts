@@ -55,21 +55,28 @@ export function generateProceduralPuzzle(worldSeed: number, floor: PuzzleFloor):
 }
 
 function createCombination(rng: PCG32): ProceduralPuzzle {
-  const combinationExpressions: Array<{ left: number; right: number; operator: '+' | '-' | '×' }> = Array.from({ length: 3 }, () => {
+  const combinationExpressions: Array<{ left: number; right: number; operator: '+' | '-' | '×' }> = [];
+  const solutionCode: number[] = [];
+  while (combinationExpressions.length < 3) {
     const left = rng.nextRange(1, 9);
     const right = rng.nextRange(1, 9);
     const operator: '+' | '-' | '×' = rng.nextRange(0, 2) === 0 ? '+' : rng.nextRange(0, 1) === 0 ? '-' : '×';
-    return { left, right, operator };
-  });
-  const solutionCode = combinationExpressions.map(({ left, right, operator }) =>
-    operator === '+' ? (left + right) % 10 : operator === '-' ? (left - right + 10) % 10 : (left * right) % 10);
+    // Keep every clue beginner-solvable: subtraction never goes negative and
+    // every operation resolves to a non-zero final digit.
+    const result = operator === '+' ? left + right : operator === '-' ? left - right : left * right;
+    const finalDigit = result % 10;
+    if (operator === '-' && left < right) continue;
+    if (finalDigit === 0) continue;
+    combinationExpressions.push({ left, right, operator });
+    solutionCode.push(finalDigit);
+  }
   const ordinals = ['FIRST', 'SECOND', 'THIRD'];
   const sources = ['CALENDAR', 'PHOTOGRAPH', 'APARTMENT MARK'];
   return {
     floor: 4, kind: 'combination', title: 'THE LOCKED BOX', deviceLabel: 'MAINTENANCE LOCKBOX', solutionCode,
     clueTexts: solutionCode.map((digit, index) => ({
       title: `${sources[index]} // ${ordinals[index]} DIGIT`,
-      content: `The ${sources[index].toLowerCase()} records ${combinationExpressions[index].left} ${combinationExpressions[index].operator} ${combinationExpressions[index].right}. Reduce the result to the final digit; this is the ${ordinals[index]} number.`,
+      content: `CODE RULE: calculate ${combinationExpressions[index].left} ${combinationExpressions[index].operator} ${combinationExpressions[index].right}, then keep only the final digit. That digit is the ${ordinals[index]} number and position ${index + 1} of the lock code.`,
     })).map(clue => `${clue.title}: ${clue.content}`),
     combinationExpressions,
   };
@@ -79,9 +86,13 @@ function createResidentDeduction(rng: PCG32): ProceduralPuzzle {
   const target = rng.nextRange(0, 3);
   const patterns = rng.shuffle([0, 1, 2, 3]);
   const nameOrder = rng.shuffle([0, 1, 2, 3]);
+  // Each apartment is a unique address in the directory. Independent address
+  // rolls made clues such as “apartment 4B” ambiguous when two residents shared
+  // that address with conflicting attributes.
+  const apartmentOrder = rng.shuffle([...APARTMENTS]);
   const residents = patterns.map((pattern, index) => ({
     name: RESIDENT_NAMES[nameOrder[index]],
-    apartment: APARTMENTS[(nameOrder[index] + rng.nextRange(0, 3)) % 4],
+    apartment: apartmentOrder[index],
     hasBicycle: (pattern & 1) !== 0,
     worksNights: (pattern & 2) !== 0,
   }));
@@ -100,8 +111,8 @@ function createResidentDeduction(rng: PCG32): ProceduralPuzzle {
     floor: 3, kind: 'resident', title: 'THE MISSING RESIDENT', deviceLabel: 'RESIDENT DIRECTORY',
     residents, correctResident: correct, residentClueReferences: references,
     clueTexts: [
-      `A bicycle receipt is linked to apartment ${bicycleReference.apartment}. The missing resident had the same bicycle status as that tenant.`,
-      `The missing resident's shift was opposite the rota entry for apartment ${shiftReference.apartment}. Compare both records with the directory.`,
+      `RULE 1 — BICYCLE: the missing resident has the SAME bicycle status as apartment ${bicycleReference.apartment}.`,
+      `RULE 2 — NIGHT SHIFT: the missing resident has the OPPOSITE night-shift status from apartment ${shiftReference.apartment}. Apply BOTH rules to the directory.`,
     ],
   };
 }
@@ -114,7 +125,7 @@ function createCircuit(rng: PCG32): ProceduralPuzzle {
   return {
     floor: 2, kind: 'circuit', title: 'THE ARCHIVE CIRCUIT', deviceLabel: 'BREAKER PANEL',
     circuitLabels: labels, circuitMask, circuitOrder,
-    clueTexts: [`MAINTENANCE DIAGRAM: the ARCHIVE relay accepts two feeds in sequence. Trace ${labels[circuitOrder[0]]} first, then ${labels[circuitOrder[1]]}. Leave every other breaker disconnected.`],
+    clueTexts: [`RELAY RULE: switch ON exactly two feeds in sequence. Sequence 1 is ${labels[circuitOrder[0]]}; sequence 2 is ${labels[circuitOrder[1]]}. Leave the other two OFF, then TEST CIRCUIT.`],
   };
 }
 
@@ -127,9 +138,9 @@ function createRecords(rng: PCG32): ProceduralPuzzle {
     floor: 1, kind: 'records', title: 'THE CONTRADICTORY RECORDS', deviceLabel: 'ARCHIVE INDEX',
     recordEvents: events, recordOrder,
     clueTexts: [
-      `REGISTRY MARGIN: “${first}” occurred before “${middle}.”`,
-      `EVACUATION REPORT: “${middle}” occurred before “${last}.”`,
-      `A final note confirms these three entries belong to the same night; the official index is the altered copy.`,
+      `ORDER RULE 1: “${first}” is BEFORE “${middle}.”`,
+      `ORDER RULE 2: “${middle}” is BEFORE “${last}.”`,
+      'USE BOTH RULES TO BUILD ONE ORDER: FIRST → SECOND → THIRD. The official index is the altered copy.',
     ],
   };
 }
@@ -155,7 +166,7 @@ function createMemory(rng: PCG32, worldSeed: number): ProceduralPuzzle {
     clueTexts: [
       `The anonymous message names the photograph, not its sender. The code ${floor4.solutionCode!.join('')} is written on the same torn edge.`,
       `The erased resident was ${missingResident.name}, apartment ${missingResident.apartment}. The record repeats a signature in your handwriting.`,
-      'One final fragment is missing: the person who sent the message was already inside the photograph.',
+      'FINAL RULE: match each fragment to the place it names. The sender was already inside the photograph.',
     ],
   };
 }
@@ -164,18 +175,22 @@ function createMemory(rng: PCG32, worldSeed: number): ProceduralPuzzle {
 export function validateProceduralPuzzle(puzzle: ProceduralPuzzle): boolean {
   switch (puzzle.kind) {
     case 'combination':
-      return puzzle.solutionCode?.length === 3 && puzzle.solutionCode.every(digit => digit >= 0 && digit <= 9)
+      return puzzle.solutionCode?.length === 3 && puzzle.solutionCode.every(digit => digit >= 1 && digit <= 9)
         && puzzle.combinationExpressions?.length === 3
         && puzzle.combinationExpressions.every((expression, index) => {
           const result = expression.operator === '+' ? (expression.left + expression.right) % 10
             : expression.operator === '-' ? (expression.left - expression.right + 10) % 10
               : (expression.left * expression.right) % 10;
           return expression.left >= 1 && expression.left <= 9 && expression.right >= 1 && expression.right <= 9
+            && (expression.operator !== '-' || expression.left >= expression.right)
+            && result >= 1
             && result === puzzle.solutionCode![index]
-            && puzzle.clueTexts[index].includes(`${['FIRST', 'SECOND', 'THIRD'][index]} DIGIT`);
+            && puzzle.clueTexts[index].includes(`${['FIRST', 'SECOND', 'THIRD'][index]} DIGIT`)
+            && puzzle.clueTexts[index].includes(`${expression.left} ${expression.operator} ${expression.right}`);
         });
     case 'resident': {
       if (!puzzle.residents || puzzle.residents.length !== 4 || puzzle.clueTexts.length !== 2) return false;
+      if (new Set(puzzle.residents.map(resident => resident.apartment)).size !== 4) return false;
       const refs = puzzle.residentClueReferences;
       const target = puzzle.correctResident;
       if (target === undefined || !puzzle.residents[target] || !refs || refs.length !== 2
@@ -198,17 +213,22 @@ export function validateProceduralPuzzle(puzzle: ProceduralPuzzle): boolean {
         && puzzle.circuitLabels.filter((_, index) => (puzzle.circuitMask! & (1 << index)) !== 0)
           .every(label => puzzle.clueTexts[0].includes(label));
     case 'records':
-      return !!puzzle.recordEvents && puzzle.recordEvents.length === 3 && new Set(puzzle.recordEvents).size === 3
-        && !!puzzle.recordOrder && puzzle.recordOrder.length === 3
-        && puzzle.recordOrder.every(index => index >= 0 && index < puzzle.recordEvents!.length)
-        && new Set(puzzle.recordOrder).size === 3
-        && puzzle.clueTexts.length === 3 && puzzle.recordOrder[0] !== puzzle.recordOrder[1]
-        && puzzle.recordOrder[1] !== puzzle.recordOrder[2] && puzzle.recordOrder[0] !== puzzle.recordOrder[2];
+      if (!puzzle.recordEvents || puzzle.recordEvents.length !== 3 || new Set(puzzle.recordEvents).size !== 3
+        || !puzzle.recordOrder || puzzle.recordOrder.length !== 3 || new Set(puzzle.recordOrder).size !== 3
+        || puzzle.recordOrder.some(index => index < 0 || index >= 3)
+        || puzzle.clueTexts.length !== 3) return false;
+      const events = puzzle.recordEvents;
+      const [first, middle, last] = puzzle.recordOrder.map(index => events[index]);
+      return puzzle.clueTexts[0].includes(first) && puzzle.clueTexts[0].includes(middle)
+        && puzzle.clueTexts[1].includes(middle) && puzzle.clueTexts[1].includes(last)
+        && puzzle.clueTexts[2].includes('FIRST') && puzzle.clueTexts[2].includes('SECOND') && puzzle.clueTexts[2].includes('THIRD');
     case 'memory':
       return !!puzzle.memoryFragments && puzzle.memoryFragments.length === 3
         && !!puzzle.memoryChoices && puzzle.memoryChoices.length === 3
+        && new Set(puzzle.memoryChoices).size === 3
         && !!puzzle.memoryAnswers && puzzle.memoryAnswers.length === 3
         && puzzle.memoryAnswers.every((answer, index) => answer >= 0 && answer < 3 && puzzle.memoryChoices![answer] !== undefined)
+        && new Set(puzzle.memoryAnswers).size === 3
         && puzzle.clueTexts.length === 3;
   }
 }

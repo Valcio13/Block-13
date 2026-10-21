@@ -33,14 +33,14 @@ const terminalState = (): AuthoritativeState => ({
 
 describe('canonical TX1 rules identity', () => {
   it('hashes the exact current UTF-8 identifier to bytes32 and binds all identity paths to it', () => {
-    expect(GAME_VERSION).toBe('0.6.3');
+    expect(GAME_VERSION).toBe('0.6.7');
     expect(PREVIOUS_GAME_VERSION).toBe('0.4.2');
     expect(HISTORICAL_GAME_VERSION).toBe('0.4.1');
     expect(LEGACY_GAME_VERSION).toBe('0.4.0');
     expect(PROCEDURAL_PUZZLE_GAME_VERSION).toBe('0.6.0');
     expect(PROCEDURAL_PUZZLE_RULES_IDENTIFIER).toBe('floor13-procedural-puzzles-floor-progression-v1');
     expect(PROCEDURAL_PUZZLE_RULES_HASH).toBe(keccak256(toBytes(PROCEDURAL_PUZZLE_RULES_IDENTIFIER)));
-    expect(RULES_IDENTIFIER).toBe('floor13-procedural-puzzles-floor-progression-v4-spaced-searchables');
+    expect(RULES_IDENTIFIER).toBe('floor13-procedural-puzzles-floor-progression-v8-valid-floor4-combination-digits');
     expect(PREVIOUS_RULES_IDENTIFIER).toBe('classic-maintenance-lockbox-v1-static-walls-balance-v2-stalker-mimic-v1');
     expect(PREVIOUS_RULES_HASH).toBe(keccak256(toBytes(PREVIOUS_RULES_IDENTIFIER)));
     expect(ARCHIVE_GAME_VERSION).toBe('0.5.0');
