@@ -26,7 +26,7 @@ describe('procedural floor puzzles', () => {
     }
   });
 
-  it('makes the Floor 3 resident answer require cross-referencing both records', () => {
+  it('makes the Floor 3 resident answer require cross-referencing three records', () => {
     for (let seed = 0; seed < 512; seed++) {
       const puzzle = generateProceduralPuzzle(seed, 3);
       expect(validateProceduralPuzzle(puzzle)).toBe(true);
@@ -35,15 +35,20 @@ describe('procedural floor puzzles', () => {
       const bicycleReference = residents[bicycleReferenceIndex];
       const shiftReference = residents[shiftReferenceIndex];
       const matchingResidents = residents.filter(candidate => candidate.hasBicycle === bicycleReference.hasBicycle
-        && candidate.worksNights !== shiftReference.worksNights);
+        && candidate.worksNights !== shiftReference.worksNights
+        && candidate.maintenanceFloor === puzzle.residentThirdRuleFloor);
       expect(matchingResidents).toEqual([residents[puzzle.correctResident!]]);
+      expect(residents).toHaveLength(5);
+      expect(residents[puzzle.correctResident!]).toMatchObject({ name: 'Jonas Vale', apartment: '3C' });
       expect(puzzle.clueTexts[0]).toContain(bicycleReference.apartment);
       expect(puzzle.clueTexts[1]).toContain(shiftReference.apartment);
+      expect(puzzle.clueTexts[2]).toContain('THIRD-FLOOR');
       expect(puzzle.clueTexts.join(' ')).not.toMatch(/missing resident (kept|did not keep|worked|never worked)/i);
     }
   });
 
   it('keeps the Floor 4 code behind deterministic arithmetic clues and gives Floor 2 an activation order', () => {
+    const operators = new Set<string>();
     for (const seed of [0, 1, 17, 0x7fffffff]) {
       const combination = generateProceduralPuzzle(seed, 4);
       expect(combination.combinationExpressions).toHaveLength(3);
@@ -53,14 +58,20 @@ describe('procedural floor puzzles', () => {
         if (expression.operator === '-') expect(expression.left).toBeGreaterThanOrEqual(expression.right);
       });
       expect(combination.clueTexts.join(' ')).toContain('never lived here');
+      expect(combination.clueTexts[0]).toContain('ones digit from each marked calculation');
+      expect(combination.clueTexts[1]).toContain('SECOND POSITION');
+      expect(combination.clueTexts[2]).toContain('THIRD POSITION');
+      combination.combinationExpressions!.forEach(expression => operators.add(expression.operator));
       expect(combination.clueTexts.join(' ')).not.toMatch(/records?\s+\d+\s+.*\s*=\s*\d/i);
       const circuit = generateProceduralPuzzle(seed, 2);
       expect(circuit.circuitOrder).toHaveLength(2);
       expect(new Set(circuit.circuitOrder)).toEqual(new Set(circuit.circuitLabels!.map((_, index) => index).filter(index => circuit.circuitMask! & (1 << index))));
-      expect(circuit.clueTexts[0]).toContain('in sequence');
+      expect(circuit.clueTexts[0]).toContain('CLOSED CONNECTION');
+      expect(circuit.clueTexts[1]).toContain('stabilized');
       const records = generateProceduralPuzzle(seed, 1);
-      expect(records.recordEvents!.join(' ')).toMatch(/resident|apartment|index|inspection/i);
+      expect(records.clueTexts.join(' ')).toMatch(/maintenance|security|incident|occurrence/i);
     }
+    expect(operators).toEqual(new Set(['+', '-', '×', '÷']));
   });
 
   it('validates puzzle clues and reachable device/evidence/fallback placement over a deterministic seed sample', () => {

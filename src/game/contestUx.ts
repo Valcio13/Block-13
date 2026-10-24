@@ -9,8 +9,8 @@ export function playerBlockName(floor: number): string {
 }
 
 export const OPENING_STORY_LINES = [
-  'The building disappeared from every official record.',
-  'No demolition. No photographs. No proof it was ever here.',
+  'The building was removed from the official property records.',
+  'No demolition record. No public photographs. No explanation.',
   'Then a message arrived from an unknown number.',
   '“Fourth floor. You need to see this.”',
   'You came to find out why.',
@@ -129,6 +129,8 @@ export interface WatcherExposureState extends HudWarningState {
   facingX: number;
   facingY: number;
   watchers: Array<{ x: number; y: number; active: boolean }>;
+  /** Optional presentation LOS projection; authoritative simulation owns the rule. */
+  lineOfSight?: (watcher: WatcherExposureState['watchers'][number]) => boolean;
 }
 
 export function objectiveCopy(
@@ -180,7 +182,7 @@ export function watcherIndividuallyCausingCurse(
   const facingDot = dx * state.facingX + dy * state.facingY;
   const facing = facingDot > 0
     && 4 * facingDot * facingDot >= distanceSquared * (state.facingX * state.facingX + state.facingY * state.facingY);
-  return facing && distanceSquared < rangeSquared;
+  return facing && distanceSquared < rangeSquared && (state.lineOfSight?.(watcher) ?? true);
 }
 
 export type HemiAction = 'connect' | 'switch-network' | 'start' | 'busy' | 'enter';

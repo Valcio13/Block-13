@@ -108,10 +108,14 @@ describe('remaining authored Block 13 visual assets', () => {
     expect(ambusherWarningAlpha(1, 0, 0)).toBe(ambusherWarningAlpha(1, 0, 0));
   });
 
-  it('registers the opaque 320x180 exterior and scales the 1280x720 tableau by integers', () => {
+  it('registers the authored apartment exterior and scales it uniformly to the viewport', () => {
     const asset = NARRATIVE_ASSET_MANIFEST.victory_exterior_bg;
     expectPng(asset, 2);
-    expect(victoryExteriorScale(1280, 720)).toEqual({ x: 4, y: 4 });
+    expect(asset).toMatchObject({ width: 1672, height: 941 });
+    expect(asset.path).toContain('abandoned-apartment.png');
+    const scale = victoryExteriorScale(1280, 720);
+    expect(scale.x).toBe(scale.y);
+    expect(scale.x).toBeGreaterThan(0);
   });
 
   it('retains the existing win-only epilogue and result handoff flow', () => {

@@ -1,7 +1,7 @@
 # Floor 13 release candidate checklist
 
-Status: **not ready for public release**. No commit, tag, deployment, or
-submission has been made.
+Status: **not ready for public release**. The Hemi Mainnet address is recorded,
+but release blockers and manual verification remain.
 
 ## Blockers
 
@@ -20,9 +20,8 @@ submission has been made.
 - [ ] **MINOR — bundle warning:** the build warns about a large main chunk.
   Measure load performance at the contest host; defer code splitting unless
   the measured startup cost warrants it.
-- [ ] Decide whether tracked legacy `src.zip` and `src.rar` belong in the
-  release repository. No source reference to either archive was found; they
-  are not copied to the production build. They remain untouched.
+- [x] Removed tracked legacy `src.zip` and `src.rar`; no source reference to
+  either archive was found and neither was copied to the production build.
 
 ## Before release
 
@@ -42,13 +41,11 @@ submission has been made.
 - [ ] Review the large Vite main-chunk warning. It is not currently a build
   failure; only pursue code splitting if it can be done and revalidated
   without risky refactoring.
-- [ ] Review the final tracked and untracked file list; specifically decide
-  whether the tracked legacy `src.zip` and `src.rar` source snapshots belong
-  in the public release.
+- [ ] Review the final tracked and untracked file list before release.
 - [x] Version distinction documented: private package metadata stays `0.2.0`;
   protocol game version is `0.6.0` for deterministic procedural puzzle rules.
 - [ ] Create and review a release commit, then tag only after all blockers
-  clear. No commit or tag was created in this stabilization pass.
+  clear.
 
 ## Verified in this audit
 

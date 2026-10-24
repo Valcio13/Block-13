@@ -7,12 +7,12 @@ import { firstMimicTwitchDelay, mimicTwitch } from '../../core/cosmeticAnimation
 import { AMBUSHER_PRE_IMPACT_AMBIENCE_GAIN, audioCuesForEvents, audioCuesForStateChange, floorAmbienceKeys, floorMusicTrack, FLOOR_MUSIC_PREVIEW, playAmbusherImpact, type AudioCue, type FloorMusicTrack } from '../../core/presentationAudio';
 import type { Floor, Searchable } from '../../core/floor';
 import type { RunState } from '../../core/run';
-import { AuthoritativeSimulation, FIXED_SCALE, type AuthoritativeState } from '../../core/authoritativeSimulation';
+import { AuthoritativeSimulation, authoritativeLineOfSight, FIXED_SCALE, type AuthoritativeState } from '../../core/authoritativeSimulation';
 import { encodeFinalStateV1, finalStateV1FromSimulation, hashFinalStateV1 } from '../../core/finalStateV1';
 import { keccak256, toHex } from 'viem';
 import { getAuthoredClueForSearchId } from '../../core/clues';
 import { addNotebookDiscovery, addNotebookSearchEvents, discoveredObjectiveSteps, emptyNotebookJournal, type NotebookEntry, type NotebookJournal } from '../investigationNotebook';
-import { memoryFragmentDisplay, recordsMayBeCompared } from '../puzzlePresentation';
+import { recordsMayBeCompared } from '../puzzlePresentation';
 import { formatFixedPointPercent, formatWholePercent } from '../../core/uiFormatting';
 import { architecturalMarkAt, corruptionVisualStrength, floorAmbientVisibility, floorFlashlightContrast, floorVisualProfile, flashlightVisualFactor, surfaceColorGrade, tileDressingAt } from '../../core/visualAtmosphere';
 import {
@@ -99,6 +99,9 @@ import { PLAYER_FOOTSTEP_COOLDOWN_MS, PLAYER_FOOTSTEP_VARIANT_GAINS, shouldPlayF
 import { CONTAINER_SCARE_STATUS_TEXT, containerScareSearchIndex, containerScareShouldPlay, containerScareStyle } from '../containerScare';
 import { stalkerNearMissCueAvailable, stalkerNearMissState } from '../stalkerPresentation';
 import { accessiblePresentationIntensity, finalChaseAmbienceGain, genericScareCameraKick, stalkerHuntScale } from '../accessibilityPresentation';
+import { activeCameraZoom } from '../cameraConfig';
+import { clueModalHeight, temporaryMessageDuration, temporaryMessageLayout } from '../uiLayout';
+import { environmentalLightBrightness, environmentalLightProfile, type EnvironmentalLightProfile } from '../proceduralLighting';
 import {
   BLOCK3_REFINED_EXPERIMENT_ASSETS,
   block3RoomNoticeTile,
@@ -190,7 +193,7 @@ export class FloorScene extends Phaser.Scene {
   private flashlightRayAngles: number[] = [];
   private flashlightLightRays: OccludedRay[] = [];
   private flashlightBoundaryAngles: number[] = new Array(FLASHLIGHT_HALF_ANGLES.length * 2).fill(0);
-  private flickeringLampPositions: Array<{ x: number; y: number; phase: number; seed: number; signal: boolean }> = [];
+  private flickeringLampPositions: Array<{ x: number; y: number; signal: boolean; profile: EnvironmentalLightProfile }> = [];
   private flickeringLampFixtures: Phaser.GameObjects.Graphics[] = [];
   private lastLampJumpscareTick = Number.NEGATIVE_INFINITY;
   private damageVignette!: Phaser.GameObjects.Graphics;
@@ -497,9 +500,9 @@ export class FloorScene extends Phaser.Scene {
     this.createAmbusherSprites();
     this.createHauntingVisual();
 
-    // Camera follows player smoothly with increased zoom
+    // Camera framing is presentation-only; the fixed simulation remains in world pixels.
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
-    this.cameras.main.setZoom(1.4); // Closer camera - less maze visible
+    this.cameras.main.setZoom(activeCameraZoom());
 
     // Create dedicated UI camera that ignores world zoom
     this.uiCamera = this.cameras.add(0, 0, this.cameras.main.width, this.cameras.main.height);
@@ -531,6 +534,11 @@ export class FloorScene extends Phaser.Scene {
     this.notebookToggleKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.TAB);
     this.notebookToggleKey.on('down', () => {
       if (this.notebookOpen) this.closeNotebook();
+      else if (this.storyPopupOpen && this.closeStoryPopup) {
+        const closeModal = this.closeStoryPopup;
+        closeModal();
+        this.openNotebook();
+      }
       else if (!this.storyPopupOpen && !this.openingStoryOpen && !this.endingEpilogueOpen && !this.isPaused && !this.isTransitioning) this.openNotebook();
     });
     this.puzzleHintKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.H);
@@ -597,13 +605,14 @@ export class FloorScene extends Phaser.Scene {
       lineSpacing: 4,
     }).setScrollFactor(0).setDepth(100);
     const compactHud = this.scale.height < 420 || this.scale.width < 640;
+    const densePuzzle = this.floorData.puzzle.kind === 'memory' || this.floorData.puzzle.kind === 'records';
     const puzzlePanelW = Math.min(600, this.scale.width - 28);
-    const puzzlePanelH = Math.min(430, this.scale.height - 28);
+    const puzzlePanelH = Math.min(densePuzzle ? 560 : 430, this.scale.height - 28);
     this.puzzlePanel = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, puzzlePanelW, puzzlePanelH, 0x0c1012, 0.98)
       .setScrollFactor(0).setDepth(600).setStrokeStyle(2, 0xb07956, 1).setVisible(false);
     this.puzzlePanelText = this.add.text(this.scale.width / 2 + 22, this.scale.height / 2, '', {
-      fontFamily: 'monospace', fontSize: compactHud ? '9px' : '13px', color: '#eee8f2', align: 'left',
-      wordWrap: { width: puzzlePanelW - 90 }, lineSpacing: compactHud ? 2 : 5,
+      fontFamily: 'monospace', fontSize: compactHud ? '9px' : densePuzzle ? '12px' : '13px', color: '#eee8f2', align: 'left',
+      wordWrap: { width: puzzlePanelW - 90 }, lineSpacing: compactHud ? 2 : densePuzzle ? 4 : 5,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(601).setVisible(false);
     this.puzzlePanelArt = this.createPuzzlePanelArt(puzzlePanelW, puzzlePanelH);
     this.cameras.main.ignore([this.puzzlePanel, this.puzzlePanelText, this.puzzlePanelArt]);
@@ -871,7 +880,9 @@ export class FloorScene extends Phaser.Scene {
           const state = this.authoritativeSimulation.state;
           const eventId = Math.imul(this.runState.seed ^ state.tick, 0x45d9f3b) >>> 0;
           this.audioDirector?.setCategoryDucking('ambience', 0.08, 'final-memory-reveal');
-          const content = 'I heard them outside the door.\n\nThey\'re still waiting for someone to open it.\n\nI told them help was coming.\n\nI don\'t know what else to tell them.\n\nThe whistleblower died trying to reach the others.';
+          const deathRecord = 'The recovered incident note identifies Jonas Vale as the whistleblower. The final record states that he died attempting to help the other residents.';
+          this.recordNotebookEntry({ id: `${event.floor}:whistleblower-record`, floor: event.floor, title: 'THE WHISTLEBLOWER RECORD', content: deathRecord, important: true });
+          const content = 'I heard them outside the door.\n\nThey\'re still waiting for someone to open it.\n\nI told them help was coming.\n\nI don\'t know what else to tell them.';
           this.recordNotebookEntry({ id: `${event.floor}:last-message`, floor: event.floor, title: 'THE LAST MESSAGE', content, important: true });
           this.showClueModal('THE LAST MESSAGE', content, true, () => {
             this.audioDirector?.setCategoryDucking('ambience', 1, 'final-memory-reveal');
@@ -929,10 +940,19 @@ export class FloorScene extends Phaser.Scene {
     const px = state.x / FIXED_SCALE, py = state.y / FIXED_SCALE;
     const near = (x: number, y: number, range: number) => Math.hypot(x / FIXED_SCALE - px, y / FIXED_SCALE - py) <= range;
     return state.stalker.visible
-      || watcherIsCausingCurse(state)
+      || watcherIsCausingCurse(this.watcherExposureState(state))
       || state.crawlers.some(enemy => enemy.chasing && near(enemy.x, enemy.y, 180))
       || state.mimics.some(enemy => enemy.active && enemy.revealed && near(enemy.x, enemy.y, 220))
       || state.ambushers.some(enemy => enemy.state === 'warning' || enemy.state === 'jumpscare');
+  }
+
+  /** Presentation projection of the authoritative Watcher cone, including the same tile LOS rule. */
+  private watcherExposureState(state: AuthoritativeState) {
+    return {
+      ...state,
+      lineOfSight: (watcher: { x: number; y: number; active: boolean }) =>
+        authoritativeLineOfSight(this.floorData.tiles, state.x, state.y, watcher.x, watcher.y),
+    };
   }
 
   private canStartHaunting(state: AuthoritativeState): boolean {
@@ -1388,8 +1408,8 @@ export class FloorScene extends Phaser.Scene {
 
   /** Presentation adapter: every moving enemy/object comes from an immutable sim snapshot. */
   private renderAuthoritativeState(previous: AuthoritativeState, state: AuthoritativeState, events: ReturnType<AuthoritativeSimulation['stepWithEvents']>['events'], presentationDeltaMs: number) {
-    const watcherGazeNow = watcherIsCausingCurse(state);
-    const watcherGazeBefore = watcherIsCausingCurse(previous);
+    const watcherGazeNow = watcherIsCausingCurse(this.watcherExposureState(state));
+    const watcherGazeBefore = watcherIsCausingCurse(this.watcherExposureState(previous));
     const encounterStarted = (!previous.stalker.visible && state.stalker.visible)
       || (previous.stalker.state !== 'hunting' && state.stalker.state === 'hunting')
       || (!watcherGazeBefore && watcherGazeNow)
@@ -1571,7 +1591,7 @@ export class FloorScene extends Phaser.Scene {
       sprite?.setTint(exposure >= 0.7 ? 0xd9d4ef : 0xffffff);
       const gazeAlpha = watcherGazeEyeAlpha(
         enemy.active,
-        watcherIndividuallyCausingCurse(state, enemy),
+        watcherIndividuallyCausingCurse(this.watcherExposureState(state), enemy),
         exposure,
       );
       this.watcherEyeGlints[index]?.setPosition(enemy.x / FIXED_SCALE, enemy.y / FIXED_SCALE)
@@ -1670,14 +1690,14 @@ export class FloorScene extends Phaser.Scene {
       `EVIDENCE RECOVERED  ${evidence}/${this.floorData.objectives.searchableIndices.length}`, ''];
     if (puzzle.kind === 'combination') {
       const currentCode = run.enteredCode.map(digit => digit === 0 ? '_' : String(digit)).join(' ');
-      lines.push('READ ALL THREE NOTES. CALCULATE EACH EXPRESSION.', 'KEEP ONLY THE FINAL / ONES DIGIT FROM EACH.', 'ENTER POSITION 1 → POSITION 2 → POSITION 3.', `CURRENT CODE  [ ${currentCode} ]`, `SELECTED  ·  POSITION ${run.selectedIndex + 1}`, '',
-        ...puzzle.combinationExpressions!.map((expression, index) => `${index === run.selectedIndex ? '▶ ' : '  '}POSITION ${index + 1}  ${expression.left} ${expression.operator} ${expression.right}  → FINAL DIGIT [ ${run.enteredCode[index]} ]`),
+      lines.push('READ THE THREE RECOVERED NOTES, THEN ENTER THEIR FINAL DIGITS.', 'USE THE ONES DIGIT FROM EACH CALCULATION.', 'CALENDAR → PHOTOGRAPH → APARTMENT MARK.', `CURRENT CODE  [ ${currentCode} ]`, `SELECTED  ·  POSITION ${run.selectedIndex + 1}`, '',
+        ...['CALENDAR', 'PHOTOGRAPH', 'APARTMENT MARK'].map((label, index) => `${index === run.selectedIndex ? '▶ ' : '  '}POSITION ${index + 1}  ${label}  [ ${run.enteredCode[index] || '_'} ]`),
         '', '← / → POSITION   ↑ / ↓ CHANGE DIGIT   E SUBMIT CODE');
     } else if (puzzle.kind === 'resident') {
-      lines.push('FIND THE ONE RESIDENT MATCHING BOTH RULES.', 'SAME BICYCLE • OPPOSITE NIGHT SHIFT.', `SELECTED  ·  RESIDENT ${run.selectedIndex + 1}`, `EVIDENCE NOTES  ·  ${evidence}/2 RECOVERED`, '', ...puzzle.residents!.map((resident, index) => `${index === run.selectedIndex ? '▶ ' : '  '}${resident.name} — APT ${resident.apartment} — BIKE ${resident.hasBicycle ? 'YES' : 'NO'} — NIGHTS ${resident.worksNights ? 'YES' : 'NO'}`), '↑ / ↓ SELECT RESIDENT   E CHECK BOTH RULES');
+      lines.push('SELECT THE RESIDENT MATCHING ALL RECOVERED RECORDS.', `SELECTED  ·  RESIDENT ${run.selectedIndex + 1}`, `EVIDENCE NOTES  ·  ${evidence}/3 RECOVERED`, '', ...puzzle.residents!.map((resident, index) => `${index === run.selectedIndex ? '▶ ' : '  '}${resident.name} — APT ${resident.apartment} — BIKE ${resident.hasBicycle ? 'YES' : 'NO'} — NIGHTS ${resident.worksNights ? 'YES' : 'NO'} — REPORT ${resident.maintenanceFloor}F`), '↑ / ↓ SELECT RESIDENT   E CHECK MATCH');
     } else if (puzzle.kind === 'circuit') {
       const expectedNext = puzzle.circuitOrder![run.circuitSequence.length];
-      lines.push('TURN ON EXACTLY TWO FEEDS IN THE RECOVERED ORDER.', 'SELECT A FEED, TOGGLE IT ON, THEN TEST THE ROUTE.', `SEQUENCE  ·  ${run.circuitSequence.map(index => puzzle.circuitLabels![index]).join(' → ') || '—'}`, `CHECKPOINT  ·  ${expectedNext === undefined ? 'ROUTE COMPLETE' : `${run.circuitSequence.length}/2 FEEDS RECORDED`}`, `SELECTED  ·  FEED ${run.selectedIndex + 1}`, '', ...puzzle.circuitLabels!.map((label, index) => `${index === run.selectedIndex ? '▶ ' : '  '}FEED ${index + 1}  ─ ${run.switchMask & (1 << index) ? '[ON ]' : '[OFF]'} ${label}  ─▶ RELAY`), '← / → SELECT FEED   ↑ TOGGLE   E TEST ROUTE');
+      lines.push('TURN ON EXACTLY TWO FEEDS IN THE RECOVERED ORDER.', 'SELECT A FEED, TOGGLE IT ON, THEN TEST THE ROUTE.', `SEQUENCE  ·  ${run.circuitSequence.map(index => puzzle.circuitLabels![index]).join(' → ') || '—'}`, `CHECKPOINT  ·  ${expectedNext === undefined ? 'ROUTE COMPLETE' : `${run.circuitSequence.length}/2 FEEDS RECORDED`}`, `SELECTED  ·  FEED ${run.selectedIndex + 1}`, '', ...puzzle.circuitLabels!.map((label, index) => `${index === run.selectedIndex ? '▶ ' : '  '}FEED ${index + 1}  [${run.switchMask & (1 << index) ? 'ON ' : 'OFF'}] ${label}`), '← / → SELECT FEED   ↑ TOGGLE   E TEST ROUTE');
       if (discoveredSteps.has(0) && this.notebookHintStage === 1) lines.push('', 'HINT 1 / 2  ·  THE DIAGRAM IDENTIFIES TWO FEEDS. MATCH THOSE LABELS; LEAVE THE OTHER TWO OFF.');
       else if (discoveredSteps.has(0) && this.notebookHintStage === 2) lines.push('', 'RECOVERED DIAGRAM:', puzzle.clueTexts[0]);
       else if (discoveredSteps.has(0)) lines.push('', 'H  OPTIONAL HINT 1 / 2  ·  READ THE MAINTENANCE DIAGRAM');
@@ -1686,22 +1706,37 @@ export class FloorScene extends Phaser.Scene {
       lines.push('PLACE ALL THREE EVENTS IN TIME ORDER.', `CHAIN  ·  ${run.recordOrder.length}/3 EVENTS PLACED`, 'Use the recovered rules: FIRST → SECOND → THIRD.', `SELECTED  ·  EVENT ${run.selectedIndex + 1}`, '');
       if (recordsMayBeCompared(puzzle, discoveredSteps)) {
         lines.push(`ORDER  ·  ${run.recordOrder.map(index => puzzle.recordEvents![index]).join('  →  ') || '—'}`,
-          ...puzzle.recordEvents!.map((event, index) => `${index === run.selectedIndex ? '▶ ' : '  '}${run.recordOrder.includes(index) ? '✓ ' : '  '}${event}`), '↑ / ↓ SELECT EVENT   E PLACE NEXT EVENT');
+          ...puzzle.recordEvents!.map((event, index) => `${index === run.selectedIndex ? '▶ ' : '  '}${run.recordOrder.includes(index) ? '✓ ' : '  '}${event}`), '↑ / ↓ SELECT RECORD   E PLACE NEXT RECORD');
       } else lines.push('RECOVER ALL THREE DOCUMENTS TO OPEN THE INDEX.');
     } else {
-      lines.push('MATCH EACH RECOVERED MEMORY TO THE PLACE IT NAMES.', `LINKS CONFIRMED  ·  ${run.memoryConfirmedMask.toString(2).replace(/0/g, '').length}/3`, 'SELECT A FRAGMENT, CHOOSE ITS PLACE, THEN CONFIRM.', `SELECTED  ·  FRAGMENT ${run.selectedIndex + 1}`, '');
+      const selectedMemory = run.selectedIndex;
+      const selectedChoice = puzzle.memoryChoices![run.memoryAnswers[selectedMemory]];
+      const selectedConfirmed = Boolean(run.memoryConfirmedMask & (1 << selectedMemory));
+      const confirmedCount = puzzle.memoryFragments!.reduce((count, _fragment, index) => count + (run.memoryConfirmedMask & (1 << index) ? 1 : 0), 0);
+      lines.push(
+        'MATCH EACH MEMORY TO THE FLOOR IT REMEMBERS.',
+        'SELECT A MEMORY  →  CHOOSE WHERE IT BELONGS  →  CONFIRM',
+        '',
+        `MEMORY ${selectedMemory + 1} OF ${puzzle.memoryFragments!.length}`,
+        discoveredSteps.has(selectedMemory) ? puzzle.memoryFragments![selectedMemory] : `MEMORY ${String(selectedMemory + 1).padStart(2, '0')}  ·  NOT RECOVERED`,
+        '',
+        'MATCHING PLACE',
+        `▶ ${selectedChoice}`,
+        selectedConfirmed ? 'MATCH CONFIRMED  ·  UP / DOWN TO REVISE (UNCONFIRMS)' : 'MATCH NOT CONFIRMED  ·  PRESS E TO CONFIRM',
+        '',
+        `MATCHES CONFIRMED  ·  ${confirmedCount}/${puzzle.memoryFragments!.length}`,
+        'RECOVERED MEMORIES',
+      );
       puzzle.memoryFragments!.forEach((fragment, index) => {
-        const display = memoryFragmentDisplay(fragment, puzzle.memoryChoices![run.memoryAnswers[index]], index, discoveredSteps);
-        lines.push(discoveredSteps.has(index)
-          ? `${run.memoryConfirmedMask & (1 << index) ? '✓ ' : index === run.selectedIndex ? '▶ ' : '  '}${display}`
-          : `  ${display}`);
+        const marker = run.memoryConfirmedMask & (1 << index) ? '✓ ' : index === selectedMemory ? '▶ ' : '  ';
+        lines.push(`${marker}MEMORY ${String(index + 1).padStart(2, '0')}${discoveredSteps.has(index) ? '' : '  ·  NOT RECOVERED'}`);
       });
-      lines.push('← / → SELECT FRAGMENT   ↑ / ↓ CHANGE PLACE   E CONFIRM MATCH');
+      lines.push('', 'LEFT / RIGHT  ·  CHANGE MEMORY', 'UP / DOWN  ·  CHANGE MATCHING FLOOR', 'E  ·  CONFIRM MATCH', 'TAB  ·  OPEN NOTEBOOK', 'F / ESC  ·  CLOSE');
     }
     if (run.fallbackActive) lines.push('', `LOCKED  ·  FIND THE ${this.puzzleFallbackItemLabel(state.floor)} TO CONTINUE.`);
     else lines.push('', `ATTEMPTS REMAINING  ·  ${run.attemptsRemaining}`);
     if (evidence < this.floorData.objectives.searchableIndices.length) lines.push('', `SUBMIT LOCKED  ·  FIND ALL ${this.floorData.objectives.searchableIndices.length} EVIDENCE NOTES FIRST.`);
-    lines.push('', 'TAB NOTEBOOK     E SUBMIT / CONFIRM     F OR ESC CLOSE');
+    if (puzzle.kind !== 'memory') lines.push('', 'TAB NOTEBOOK     E SUBMIT / CONFIRM     F OR ESC CLOSE');
     this.puzzlePanelText.setText(lines.join('\n'));
   }
 
@@ -1711,7 +1746,7 @@ export class FloorScene extends Phaser.Scene {
       case 'resident': return 'CROSS-REFERENCE THE RESIDENT RECORDS';
       case 'circuit': return 'RESTORE POWER TO THE ARCHIVE RELAY';
       case 'records': return 'RECONSTRUCT THE TRUE EVENT ORDER';
-      case 'memory': return 'RECONNECT THE MEMORIES YOU HAVE FOUND';
+      case 'memory': return 'MATCH EACH MEMORY TO THE FLOOR IT REMEMBERS';
     }
   }
 
@@ -1985,25 +2020,15 @@ export class FloorScene extends Phaser.Scene {
     // tick; no gameplay RNG or authoritative state is consumed or changed.
     for (let lampIndex = 0; lampIndex < this.flickeringLampPositions.length; lampIndex++) {
       const lamp = this.flickeringLampPositions[lampIndex];
-      const phase = lamp.phase + state.tick * 0.17;
-      const secondary = Math.sin(lamp.phase * 1.7 + state.tick * 0.43);
-      // Stable hash samples create an irregular per-lamp sequence without
-      // advancing an authoritative RNG stream or coupling lamps together.
-      const flickerBucket = Math.floor(state.tick / 4);
-      const noise = ordinaryEnvironmentCoordinateHash(lamp.seed, flickerBucket, Math.floor(state.tick / 19)) / 0xffff_ffff;
-      const flutter = Math.sin(phase) * 0.12 + secondary * 0.06 + (noise - 0.5) * 0.24;
-      const pulse = noise < 0.035 ? -0.28 : noise > 0.965 ? 0.16 : 0;
-      const signalPulse = lamp.signal
-        ? Math.max(0, 1 - Math.min(1, (state.tick % 360) / 42)) * 0.3
-        : 0;
-      const intensity = Math.max(0.34, Math.min(1.18, 0.78 + flutter + pulse + signalPulse));
-      this.flickeringLampFixtures[lampIndex]?.setAlpha(0.56 + intensity * 0.4);
+      const intensity = environmentalLightBrightness(lamp.profile, state.tick);
+      this.flickeringLampFixtures[lampIndex]?.setAlpha(intensity <= 0 ? 0 : 0.42 + intensity * 0.52);
       const playerDistance = Math.hypot(lamp.x - originX, lamp.y - originY);
       // Rare, but reachable during a normal run: being near a lamp is enough;
       // the player's flashlight no longer suppresses this presentation scare.
+      const scareRoll = (Math.imul(lamp.profile.seed ^ state.tick, 0x45d9f3b) >>> 0) % 503;
       if (playerDistance <= 138 && state.tick - this.lastLampJumpscareTick >= 900
-        && state.tick % 10 === 0 && noise < 0.002 && this.canStartHaunting(state)) {
-        const eventId = Math.imul(lamp.seed ^ state.tick, 0x45d9f3b) >>> 0;
+        && state.tick % 10 === 0 && lamp.profile.type === 'failing' && intensity <= 0.1 && scareRoll === 0 && this.canStartHaunting(state)) {
+        const eventId = Math.imul(lamp.profile.seed ^ state.tick, 0x45d9f3b) >>> 0;
         const authoredScareShown = this.startLampJumpscare(eventId);
         if (!authoredScareShown) this.showHauntingVisual('silhouette', eventId, 560);
         if (this.lampJumpscareImage?.visible || this.hauntingVisual?.visible) {
@@ -2014,18 +2039,20 @@ export class FloorScene extends Phaser.Scene {
           this.lastLampJumpscareTick = state.tick;
         }
       }
-      const lampRays = collectOccludedLightRays(
-        this.floorData, lamp.x, lamp.y, lamp.signal ? 82 : 58, -Math.PI, Math.PI,
-        3, [], [], [],
-      );
-      this.drawOccludedLightShape(
-        lampRays, lamp.x, lamp.y, lamp.signal ? 82 : 58,
-        scaleColor(profile.ambient, 0.44 * intensity),
-      );
-      this.drawOccludedLightShape(
-        lampRays, lamp.x, lamp.y, 34,
-        scaleColor(profile.ambient, 0.66 * intensity),
-      );
+      if (intensity > 0) {
+        const lampRays = collectOccludedLightRays(
+          this.floorData, lamp.x, lamp.y, lamp.signal ? 82 : 58, -Math.PI, Math.PI,
+          3, [], [], [],
+        );
+        this.drawOccludedLightShape(
+          lampRays, lamp.x, lamp.y, lamp.signal ? 82 : 58,
+          scaleColor(profile.ambient, 0.44 * intensity),
+        );
+        this.drawOccludedLightShape(
+          lampRays, lamp.x, lamp.y, 34,
+          scaleColor(profile.ambient, 0.66 * intensity),
+        );
+      }
     }
 
     if (this.flashlightOn) {
@@ -2113,8 +2140,8 @@ export class FloorScene extends Phaser.Scene {
     for (const [index, candidate] of candidates.slice(0, 5).entries()) {
       const worldX = candidate.x * this.tileSize + 16;
       const worldY = candidate.y * this.tileSize + 16;
-      const phase = (candidate.score % 628) / 100;
-      this.flickeringLampPositions.push({ x: worldX, y: worldY, phase, seed: candidate.score, signal: index === 0 });
+      const profile = environmentalLightProfile(floor, index, candidate.score);
+      this.flickeringLampPositions.push({ x: worldX, y: worldY, profile, signal: index === 0 });
       const fixture = this.add.graphics().setDepth(2);
       fixture.fillStyle(floor === 0 ? 0x8c6678 : 0xc4a46d, 0.9);
       fixture.fillRect(worldX - 3, worldY - 3, 6, 4);
@@ -2159,9 +2186,10 @@ export class FloorScene extends Phaser.Scene {
     const next = this.temporaryMessageQueue.shift();
     if (!next) { this.temporaryMessageActive = false; return; }
     this.temporaryMessageActive = true;
+    const layout = temporaryMessageLayout(this.cameras.main.width, this.cameras.main.height);
     const msg = this.add.text(
-      this.cameras.main.width / 2,
-      this.cameras.main.height - 54,
+      layout.x,
+      layout.y,
       next.text,
       {
         fontFamily: 'monospace',
@@ -2170,7 +2198,7 @@ export class FloorScene extends Phaser.Scene {
         backgroundColor: '#080c12',
         padding: { x: 12, y: 8 },
         align: 'center',
-        wordWrap: { width: Math.min(520, Math.max(260, this.cameras.main.width - 72)), useAdvancedWrap: true },
+        wordWrap: { width: layout.width, useAdvancedWrap: true },
         stroke: '#020306',
         strokeThickness: 2,
       },
@@ -2185,7 +2213,7 @@ export class FloorScene extends Phaser.Scene {
       alpha: 1,
       duration: 150,
       onComplete: () => {
-        this.time.delayedCall(next.duration, () => {
+        this.time.delayedCall(temporaryMessageDuration(next.text, next.duration), () => {
           this.tweens.add({
             targets: msg,
             alpha: 0,
@@ -2218,7 +2246,7 @@ export class FloorScene extends Phaser.Scene {
 
     const { width, height } = this.cameras.main;
     const panelWidth = Math.min(600, width - 32);
-    const panelHeight = Math.min(420, height - 32);
+    const panelHeight = clueModalHeight(content, height, panelWidth);
     const centerX = width / 2;
     const centerY = height / 2;
     const depth = 400;
@@ -2235,7 +2263,7 @@ export class FloorScene extends Phaser.Scene {
       fontFamily: 'monospace', fontSize: '15px', color: '#e0ded7', lineSpacing: 8,
       wordWrap: { width: panelWidth - 56, useAdvancedWrap: true },
     }).setScrollFactor(0).setDepth(depth + 2);
-    const closeButton = this.add.text(centerX, centerY + panelHeight / 2 - 34, recorded ? 'RECORDED IN NOTEBOOK [TAB]  ·  CLOSE [SPACE / ESC]' : 'CLOSE NOTE  ·  [SPACE / ESC]', {
+    const closeButton = this.add.text(centerX, centerY + panelHeight / 2 - 34, recorded ? 'RECORDED IN NOTEBOOK  ·  OPEN [TAB]  ·  CLOSE [SPACE / ESC]' : 'CLOSE NOTE  ·  [SPACE / ESC]', {
       fontFamily: 'monospace', fontSize: '13px', color: '#70d4c6',
       backgroundColor: '#202a2a', padding: { x: 14, y: 8 },
     }).setOrigin(0.5).setScrollFactor(0).setDepth(depth + 2).setInteractive();
@@ -3954,7 +3982,7 @@ export class FloorScene extends Phaser.Scene {
       if (sourceWidth === asset.width && sourceHeight === asset.height) {
         this.markTextureNearest(asset.key);
         const scale = victoryExteriorScale(width, height);
-        return this.add.image(0, 0, asset.key).setOrigin(0, 0).setScale(scale.x, scale.y);
+        return this.add.image(width / 2, height / 2, asset.key).setOrigin(0.5, 0.5).setScale(scale.x, scale.y);
       }
     }
 
@@ -4254,10 +4282,11 @@ export class FloorScene extends Phaser.Scene {
       const accent = searchable.objectType === 'maintenance_lockbox'
         ? 0x8d6548
         : searchable.objectiveStep !== undefined ? 0xc69bc9 : floorVisualProfile(this.authoritativeSimulation.state.floor).accent;
-      const isBlock2Evidence = this.authoritativeSimulation.state.floor === 2 && searchable.objectiveStep !== undefined;
-      const halo = this.createInteractableHalo(sprite.x, sprite.y, isBlock2Evidence ? 0xf0c86d : accent, isBlock2Evidence ? 30 : 22);
-      if (isBlock2Evidence) halo.setStrokeStyle(3, 0xffdc88, 0.96).setFillStyle(0xe6b953, 0.16);
-      const evidenceLabel = isBlock2Evidence
+      const isObjectiveEvidence = searchable.objectiveStep !== undefined;
+      const evidenceAccent = 0xf0c86d;
+      const halo = this.createInteractableHalo(sprite.x, sprite.y, isObjectiveEvidence ? evidenceAccent : accent, isObjectiveEvidence ? 24 : 22);
+      if (isObjectiveEvidence) halo.setStrokeStyle(2, 0xffdc88, 0.86).setFillStyle(0xe6b953, 0.1);
+      const evidenceLabel = isObjectiveEvidence
         ? this.add.text(sprite.x, sprite.y - 18, 'PUZZLE EVIDENCE', {
           fontFamily: 'monospace', fontSize: '8px', color: '#ffe3a0',
           backgroundColor: 'rgba(18, 21, 23, 0.94)', padding: { x: 3, y: 2 },

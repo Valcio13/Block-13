@@ -6,3 +6,4 @@ solc_version = "0.8.24"
 
 [rpc_endpoints]
 hemi_testnet = "https://testnet.rpc.hemi.network/rpc"
+hemi_mainnet = "https://rpc.hemi.network/rpc"

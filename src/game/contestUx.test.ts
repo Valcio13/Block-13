@@ -13,7 +13,7 @@ describe('contest UX presentation helpers', () => {
 
   it('provides the new premise and only uses the fake-out for Floor 1 to Floor 13', () => {
     expect(OPENING_STORY_LINES).toHaveLength(5);
-    expect(OPENING_STORY_LINES[0]).toContain('building disappeared');
+    expect(OPENING_STORY_LINES[0]).toContain('official property records');
     expect(nextOpeningStoryIndex(0)).toBe(1);
     expect(nextOpeningStoryIndex(OPENING_STORY_LINES.length - 1)).toBe(-1);
     expect(nextOpeningStoryIndex(1, true)).toBe(-1);

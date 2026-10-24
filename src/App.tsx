@@ -458,7 +458,7 @@ function GameApp() {
         <section className="title-card result-card">
           <p className="eyebrow">RUN REPORT // HEMI ARCADE</p>
           <h1>{runState?.status === 'won' ? 'RUN COMPLETE!' : 'RUN OVER'}</h1>
-          {runState?.status === 'won' && <p className="premise">YOU MADE IT OUT. Your nightmare is over. The run remains.</p>}
+          {runState?.status === 'won' && <p className="premise">You escaped the building. The record remains.</p>}
           <p className="result-status">{isBlockchainRun
             ? runState?.status === 'won' ? 'Hemi run complete.' : 'This Hemi run ended before the escape.'
             : 'LOCAL RUN — NO ONCHAIN SUBMISSION REQUIRED'}</p>
@@ -494,8 +494,8 @@ function GameApp() {
               setTransactionPending(null);
             }}>I checked the explorer; clear unresolved transaction marker</button>
           </div>}
-          <button className="primary-action" onClick={() => { localStorage.removeItem(RUN_RECOVERY_STORAGE_KEY); sessionStorage.removeItem('activeRun'); window.location.reload(); }}>NEW HEMI RUN</button>
-          <p className="result-secondary-action">Use the same wallet to begin another Hemi run.</p>
+          <button className="primary-action" onClick={() => { localStorage.removeItem(RUN_RECOVERY_STORAGE_KEY); sessionStorage.removeItem('activeRun'); window.location.reload(); }}>{isBlockchainRun ? 'NEW HEMI RUN' : 'PLAY AGAIN LOCALLY'}</button>
+          <p className="result-secondary-action">{isBlockchainRun ? 'Return to the menu to begin another Hemi run.' : 'Start another local practice run without a wallet.'}</p>
         </section>
       </main>
     );
@@ -519,7 +519,7 @@ function GameApp() {
         <p className="eyebrow">HEMI ARCADE // SURVIVAL HORROR</p>
         <h1 id="game-title">FLOOR 13</h1>
         <p className="subtitle">DESCENT INTO DARKNESS</p>
-        <p className="premise">An unknown message led you to an apartment building erased from every record. You came to Floor 4 to find out why.</p>
+        <p className="premise">An unknown number sent you a single message: “Go to the fourth floor.”</p>
 
         <RunPreparationToasts stages={preparationStages} visible={status === 'starting' || Object.values(preparationStages).includes('failed')} />
         {status === 'starting' && startPhase === 'entropy' && <button type="button" className="cancel-run-preparation" onClick={cancelRunPreparation}>CANCEL PREPARATION</button>}

@@ -1,5 +1,6 @@
 import { useAccount, useConnect, useDisconnect, useWriteContract, useWaitForTransactionReceipt, useSwitchChain, usePublicClient } from 'wagmi';
-import { hemiTestnet, CONTRACT_ADDRESS, RUN_REGISTRY_ABI } from './config';
+import { hemiNetwork, CONTRACT_ADDRESS, RUN_REGISTRY_ABI, assertConfiguredContractAddress } from './config';
+import { parseRunStartedRunId } from './eventParsing';
 import { useState, useCallback } from 'react';
 import { type Hash } from 'viem';
 import { GAME_VERSION, RULES_HASH } from './runIdentity';
@@ -13,7 +14,7 @@ export function useWallet() {
   const { disconnect } = useDisconnect();
   const { switchChain, isPending: isSwitching, error: switchError } = useSwitchChain();
 
-  const isCorrectNetwork = chain?.id === hemiTestnet.id;
+  const isCorrectNetwork = chain?.id === hemiNetwork.chain.id;
 
   const connectWallet = useCallback(() => {
     const injected = connectors.find((c) => c.type === 'injected');
@@ -24,7 +25,7 @@ export function useWallet() {
 
   const switchToHemi = useCallback(() => {
     if (switchChain) {
-      switchChain({ chainId: hemiTestnet.id });
+      switchChain({ chainId: hemiNetwork.chain.id });
     }
   }, [switchChain]);
 
@@ -81,6 +82,7 @@ export function useStartRun() {
     if (!publicClient || !address) {
       throw new Error('Wallet not connected');
     }
+    assertConfiguredContractAddress();
 
     setIsLoading(true);
     setError(null);
@@ -135,20 +137,7 @@ export function useStartRun() {
       console.log('[useStartRun] Transaction confirmed');
 
       // Parse RunStarted event to get runId
-      const log = receipt.logs.find(
-        (log) =>
-          log.address.toLowerCase() === CONTRACT_ADDRESS.toLowerCase() &&
-          log.topics.length >= 2 // player (indexed) + runId (indexed)
-      );
-
-      if (!log || !log.topics[2]) {
-        throw new Error('Failed to parse RunStarted event');
-      }
-
-      // topics[2] is the indexed runId
-      const runIdBigInt = BigInt(log.topics[2]);
-      
-      const runId = runIdBigInt;
+      const runId = parseRunStartedRunId(receipt.logs, CONTRACT_ADDRESS, address);
       console.log('[useStartRun] Run started with ID:', runId);
 
       // Create manifest for local use
@@ -195,7 +184,8 @@ export function useCompleteRun() {
 
   const completeRun = useCallback(
     async (args: CompleteRunArgs, onSubmitted?: (hash: Hash) => void) => {
-      if (!publicClient) throw new Error('Hemi Testnet client is unavailable');
+      assertConfiguredContractAddress();
+      if (!publicClient) throw new Error(`Hemi ${hemiNetwork.name} client is unavailable`);
       setIsLoading(true);
       setError(null);
       setTxHash(null);

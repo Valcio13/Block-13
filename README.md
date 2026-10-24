@@ -53,12 +53,13 @@ World generation, economy, events, and gameplay subsystems use separated determi
 
 No private keys or signing secrets belong in this repository. Wallet actions use the connected wallet. TX1 entropy currently includes public Hemi Testnet, Ethereum Mainnet, and Bitcoin sources; see [TX1_RUN_MANIFEST_SPEC.md](TX1_RUN_MANIFEST_SPEC.md) for the current selection and seed details.
 
-### Hemi Testnet configuration
+### Hemi network configuration
 
-- Chain ID: `743111`
-- RPC: `https://testnet.rpc.hemi.network/rpc`
-- Explorer: `https://testnet.explorer.hemi.xyz`
-- Current RunRegistry deployment: `0xfd12F980daa569f4d60736da4227d1BDC15AF662` on Hemi Testnet (chain ID `743111`). `.env.example` contains this public contract address; override it in local `.env.local` if needed.
+- Select `VITE_HEMI_NETWORK=testnet` or `VITE_HEMI_NETWORK=mainnet`.
+- Testnet: chain `743111`, RPC `https://testnet.rpc.hemi.network/rpc`, explorer `https://testnet.explorer.hemi.xyz`.
+- Mainnet: chain `43111`, RPC `https://rpc.hemi.network/rpc`, explorer `https://explorer.hemi.xyz`.
+- Current RunRegistry deployments: testnet `0xfd12F980daa569f4d60736da4227d1BDC15AF662`; mainnet `0x88b7Ac78c7964a2CbcFC8EC8e7bc9F8d39A3B059`.
+- Use `VITE_HEMI_TESTNET_CONTRACT_ADDRESS` and `VITE_HEMI_MAINNET_CONTRACT_ADDRESS`; a mainnet build fails closed if its address is missing. See [MAINNET_DEPLOYMENT.md](MAINNET_DEPLOYMENT.md).
 
 Browser entropy transport is configured with `VITE_ETH_RPC_URL` (the safe
 example uses PublicNode). Ethereum tries that URL first, then the fixed
@@ -69,16 +70,10 @@ hashes for the selected height wherever providers respond. A disagreement
 fails closed. These are transport fallbacks: BTC remains WORLD entropy and the
 Ethereum block remains ECONOMY entropy.
 
-The deployed registry includes the current TX2 ABI. For a future fresh
-deployment, from PowerShell with Foundry installed and `PRIVATE_KEY` set in
-the environment, use:
-
-```powershell
-forge script script/Deploy.s.sol:DeployScript --rpc-url hemi_testnet --broadcast --private-key $env:PRIVATE_KEY
-```
-
-Do not commit a wallet key or `.env` file. The deployment command is provided
-for future deployments; the address above is the current Hemi Testnet registry.
+The deployed registry includes the current TX2 ABI. For future deployment
+preparation and chain-ID guarded commands, see [MAINNET_DEPLOYMENT.md](MAINNET_DEPLOYMENT.md).
+The contract remains commitment-only and does not independently verify honest
+gameplay.
 
 ## Development status
 
@@ -108,12 +103,12 @@ configured prefix must match the path where the built files are served.
 ### Environment and wallet
 
 Copy `.env.example` to `.env.local` for local configuration. Its `VITE_`
-values are public client configuration (Hemi/Ethereum RPC URLs and the public
-RunRegistry address), not secrets. Never put a wallet private key, seed
+values are public client configuration (selected Hemi network, Ethereum RPC,
+and public RunRegistry address), not secrets. Never put a wallet private key, seed
 phrase, or other credential in a `VITE_` variable or commit an environment
-file. Hemi runs require an injected wallet, Hemi Testnet (chain ID `743111`),
-and testnet gas funds for the user's explicit start and completion
-transactions. Local runs require no wallet and do not use Hemi.
+file. Hemi runs require an injected wallet, the selected Hemi network, and
+gas funds for the user's explicit start and completion transactions. Local runs
+require no wallet and do not use Hemi.
 
 ## Project structure
 
@@ -122,8 +117,8 @@ transactions. Local runs require no wallet and do not use Hemi.
 - `src/core/seedDerivation.ts`, `src/core/pcg32.ts`, `src/core/rng.ts` — manifest seeds and random streams
 - `src/core/finalStateV1.ts` — canonical FinalStateV1 projection, encoding, decoding, and hash
 - `src/game/` — Phaser presentation and keyboard adapter
-- `src/web3/` — wallet, Hemi Testnet setup, TX1 manifest/entropy integration
-- `contracts/RunRegistry.sol` — TX1 run registry and TX2 result commitment
+- `src/web3/` — wallet, selected Hemi network setup, TX1 manifest/entropy integration
+- `contracts/RunRegistry.sol` — TX1 RunRegistry contract and TX2 result commitment
 - `tests/` and `src/core/*.test.ts` — replay, determinism, and core tests
 - `docs/` — gameplay, art, audio, and design notes
 

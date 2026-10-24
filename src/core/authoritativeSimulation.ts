@@ -149,6 +149,7 @@ const cloneFloor = (floor: Floor): Floor => ({
     ...(floor.puzzle.circuitLabels ? { circuitLabels: [...floor.puzzle.circuitLabels] } : {}),
     ...(floor.puzzle.circuitOrder ? { circuitOrder: [...floor.puzzle.circuitOrder] } : {}),
     ...(floor.puzzle.recordEvents ? { recordEvents: [...floor.puzzle.recordEvents] } : {}),
+    ...(floor.puzzle.recordDocuments ? { recordDocuments: [...floor.puzzle.recordDocuments] } : {}),
     ...(floor.puzzle.recordOrder ? { recordOrder: [...floor.puzzle.recordOrder] } : {}),
     ...(floor.puzzle.memoryFragments ? { memoryFragments: [...floor.puzzle.memoryFragments] } : {}),
     ...(floor.puzzle.memoryChoices ? { memoryChoices: [...floor.puzzle.memoryChoices] } : {}),
@@ -158,6 +159,32 @@ const cloneFloor = (floor: Floor): Floor => ({
 const square = (n: number) => n * n;
 const TILE = 32 * FIXED_SCALE;
 const CENTER = 16 * FIXED_SCALE;
+
+/** Deterministic tile-ray visibility shared by authoritative Watcher logic and tests. */
+export function authoritativeLineOfSight(
+  tiles: readonly (readonly boolean[])[],
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+): boolean {
+  let x0 = Math.floor(fromX / TILE), y0 = Math.floor(fromY / TILE);
+  const x1 = Math.floor(toX / TILE), y1 = Math.floor(toY / TILE);
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  const stepX = x0 < x1 ? 1 : -1, stepY = y0 < y1 ? 1 : -1;
+  let error = dx - dy;
+  const walkable = (x: number, y: number) => Boolean(tiles[y]?.[x]);
+  while (x0 !== x1 || y0 !== y1) {
+    const oldX = x0, oldY = y0;
+    const twice = error * 2;
+    let movedX = false, movedY = false;
+    if (twice > -dy) { error -= dy; x0 += stepX; movedX = true; }
+    if (twice < dx) { error += dx; y0 += stepY; movedY = true; }
+    if (movedX && movedY && (!walkable(x0, oldY) || !walkable(oldX, y0))) return false;
+    if ((x0 !== x1 || y0 !== y1) && !walkable(x0, y0)) return false;
+  }
+  return walkable(x1, y1);
+}
 const STALKER_SPECS = {
   4: { dormant: 10000, roam: 40, hunt: 120, detect: 120, investigate: 120 },
   3: { dormant: 9900, roam: 50, hunt: 140, detect: 150, investigate: 180 },
@@ -618,7 +645,8 @@ export class AuthoritativeSimulation {
       const dx = e.x - s.x, dy = e.y - s.y, d2 = square(dx) + square(dy);
       const facingDot = dx * s.facingX + dy * s.facingY;
       const facing = facingDot > 0 && 4 * square(facingDot) >= d2 * (s.facingX * s.facingX + s.facingY * s.facingY);
-      const illuminated = s.flashlightOn && d2 < square(200 * FIXED_SCALE) && facing;
+      const lineOfSight = authoritativeLineOfSight(this.floorValue.tiles, s.x, s.y, e.x, e.y);
+      const illuminated = s.flashlightOn && d2 < square(200 * FIXED_SCALE) && facing && lineOfSight;
       if (illuminated) {
         e.illuminatedTicks++;
         if (e.illuminatedTicks > 240) { e.active = false; continue; }
@@ -627,7 +655,7 @@ export class AuthoritativeSimulation {
         if (e.decayRemainder >= 2) { e.illuminatedTicks = Math.max(0, e.illuminatedTicks - 1); e.decayRemainder = 0; }
       }
       const range = 150 * FIXED_SCALE;
-      if (facing && d2 < square(range)) {
+      if (facing && lineOfSight && d2 < square(range)) {
         const dist = integerSqrt(d2);
         // 1.5 curse/sec at point blank, linearly falling to zero at 150px.
         const denominator = range * SIMULATION_HZ;

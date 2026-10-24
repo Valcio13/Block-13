@@ -1,7 +1,6 @@
 /** Browser-side, bounded multi-chain entropy acquisition. */
 import { createPublicClient, http, type PublicClient } from 'viem';
 import { mainnet } from 'viem/chains';
-import { hemiTestnet } from './config';
 
 export interface EntropyBundle {
   btcBlockHash: `0x${string}`;

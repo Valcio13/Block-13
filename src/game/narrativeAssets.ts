@@ -34,14 +34,16 @@ export const NARRATIVE_ASSET_MANIFEST = {
   },
   victory_exterior_bg: {
     key: 'victory_exterior_bg',
-    path: assetPath('sprites/narrative/victory_exterior_bg.png'),
-    width: 320,
-    height: 180,
+    path: assetPath('sprites/narrative/abandoned-apartment.png'),
+    width: 1672,
+    height: 941,
   },
 } as const;
 
 export function victoryExteriorScale(viewWidth: number, viewHeight: number): { x: number; y: number } {
-  return { x: viewWidth / NARRATIVE_ASSET_MANIFEST.victory_exterior_bg.width, y: viewHeight / NARRATIVE_ASSET_MANIFEST.victory_exterior_bg.height };
+  const asset = NARRATIVE_ASSET_MANIFEST.victory_exterior_bg;
+  const scale = Math.max(viewWidth / asset.width, viewHeight / asset.height);
+  return { x: scale, y: scale };
 }
 
 export const OPENING_CINEMATIC = [
